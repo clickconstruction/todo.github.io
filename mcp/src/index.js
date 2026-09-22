@@ -29,7 +29,15 @@ export default {
     if (url.pathname !== '/mcp') return text('Not found', 404);
     if (request.method !== 'POST') return text('Method not allowed', 405, { Allow: 'POST' });
 
-    const auth = await authenticate(request, env, ctx);
+    if (!(env.SUPABASE_SECRET_KEY || '').trim()) {
+      return json(rpcError(null, -32002, 'Server not configured: SUPABASE_SECRET_KEY is missing or empty'), 503);
+    }
+    let auth;
+    try {
+      auth = await authenticate(request, env, ctx);
+    } catch (e) {
+      return json(rpcError(null, -32603, `Auth lookup failed: ${e.message}`), 502);
+    }
     if (!auth) {
       return json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized: send Authorization: Bearer <token>' } }, 401,
         { 'WWW-Authenticate': 'Bearer realm="todotooling"' });
