@@ -1,4 +1,6 @@
 # GitHub Pages: keep server code and migrations out of the published site.
+# Trailing slashes matter: Jekyll's exclude is a prefix match, so a bare
+# "supabase" would also drop supabase-client.js.
 exclude:
-  - mcp
-  - supabase
+  - mcp/
+  - supabase/
