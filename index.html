@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Todo Tooling</title>
+<meta name="description" content="Capture, clarify and do: a GTD inbox, projects and tags.">
+<meta name="theme-color" content="#0d0f13">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Todo">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
 <script src="vendor/supabase-js-2.108.0.min.js"></script>
 <script src="config.js"></script>
 <script>
@@ -14,7 +23,33 @@
 <script src="supabase-client.js"></script>
 </head>
 <body>
-<h1>Todo Tooling</h1>
-<p>Coming soon.</p>
+<div id="auth" class="auth" hidden>
+  <form id="auth-form" class="auth-card">
+    <img src="icons/icon-192.png" alt="" width="64" height="64">
+    <h1>Todo Tooling</h1>
+    <input id="auth-email" type="email" autocomplete="username" placeholder="Email" required>
+    <input id="auth-password" type="password" autocomplete="current-password" placeholder="Password" required minlength="8">
+    <button type="submit" class="btn primary">Sign in</button>
+    <button type="button" id="auth-signup" class="btn link">Create account</button>
+    <p id="auth-msg" class="auth-msg" role="status"></p>
+  </form>
+</div>
+
+<div id="app" class="app" hidden>
+  <nav class="tabs" aria-label="Views">
+    <a href="#inbox" data-view="inbox"><span class="tab-icon">📥</span><span>Inbox</span><b class="badge" id="badge-inbox"></b></a>
+    <a href="#today" data-view="today"><span class="tab-icon">☀️</span><span>Today</span><b class="badge due" id="badge-today"></b></a>
+    <a href="#projects" data-view="projects"><span class="tab-icon">🗂️</span><span>Projects</span></a>
+    <a href="#tags" data-view="tags"><span class="tab-icon">🏷️</span><span>Tags</span></a>
+    <button type="button" id="sign-out" class="signout">Sign out</button>
+  </nav>
+  <main id="view" class="view"></main>
+  <button type="button" id="fab" class="fab" aria-label="New inbox item">+</button>
+</div>
+
+<dialog id="sheet" class="sheet"></dialog>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script src="app.js"></script>
 </body>
 </html>
