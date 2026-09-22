@@ -1,0 +1,4 @@
+# GitHub Pages: keep server code and migrations out of the published site.
+exclude:
+  - mcp
+  - supabase

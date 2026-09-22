@@ -314,9 +314,65 @@
       ${taskList(tasks) || '<p class="empty">Nothing tagged here.</p>'}`;
   }
 
+  // ---------- settings: agent access tokens ----------
+  const MCP_URL = 'https://mcp.todotooling.com/mcp';
+  let apiTokens = null;
+  let tokensLoading = false;
+
+  async function loadTokens() {
+    if (tokensLoading) return;
+    tokensLoading = true;
+    try { apiTokens = await run(sb.from('api_tokens').select('id,name,token_hint,last_used_at,created_at').order('created_at')); } finally { tokensLoading = false; }
+    render();
+  }
+
+  function viewSettings() {
+    if (apiTokens === null) { loadTokens(); }
+    const rows = (apiTokens || []).map((t) => `<li class="row" style="cursor:default">
+        <div class="row-main"><div class="row-title">${esc(t.name)} <span class="chip">…${esc(t.token_hint)}</span></div>
+        <div class="row-meta"><span>Created ${esc(fmtDate(t.created_at))}</span><span>${t.last_used_at ? `Last used ${esc(fmtDate(t.last_used_at))}` : 'Never used'}</span></div></div>
+        <button class="btn small danger" data-revoke="${t.id}">Revoke</button></li>`).join('');
+    return `<div class="view-head"><h1>Settings</h1></div>
+      <p class="view-sub">Signed in as ${esc(user.email)}</p>
+      <h2 class="section-title">Agent access (MCP)</h2>
+      <p class="view-sub">Tokens let AI agents like Claude read and update your todos through <code>${MCP_URL}</code>. Each token has full access to your account; revoke any you no longer use.</p>
+      <button class="btn primary" data-act="new-token">Create token</button>
+      ${apiTokens === null ? '<p class="empty">Loading…</p>' : rows ? `<ul class="list" style="margin-top:12px">${rows}</ul>` : '<p class="empty">No tokens yet.</p>'}
+      <h2 class="section-title">Account</h2>
+      <button class="btn" data-act="sign-out">Sign out</button>`;
+  }
+
+  async function createToken() {
+    const name = prompt('Name this token (e.g. "Claude Code on MacBook")');
+    if (!name || !name.trim()) return;
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    const token = 'tt_' + btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+    const token_hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    await run(sb.from('api_tokens').insert({ name: name.trim(), token_hash, token_hint: token.slice(-4) }));
+    await loadTokens();
+    const cmd = `claude mcp add --transport http todotooling ${MCP_URL} --header "Authorization: Bearer ${token}"`;
+    const sheet = $('#sheet');
+    sheet.innerHTML = `<form method="dialog">
+      <h2>Token created</h2>
+      <p class="view-sub" style="margin:0">Copy it now. It won't be shown again.</p>
+      <label>Token<textarea readonly rows="2" onclick="this.select()">${esc(token)}</textarea></label>
+      <label>Claude Code command<textarea readonly rows="4" onclick="this.select()">${esc(cmd)}</textarea></label>
+      <div class="actions"><div class="right"><button type="button" class="btn" data-copy>Copy command</button><button class="btn primary">Done</button></div></div>
+    </form>`;
+    $('[data-copy]', sheet).onclick = async () => { await navigator.clipboard.writeText(cmd); toast('Copied'); };
+    sheet.showModal();
+  }
+
+  async function revokeToken(id) {
+    if (!confirm('Revoke this token? Agents using it will lose access immediately.')) return;
+    await run(sb.from('api_tokens').delete().eq('id', id));
+    await loadTokens();
+  }
+
   function render() {
     const [view, id] = (location.hash.slice(1) || 'inbox').split('/');
-    const views = { inbox: viewInbox, today: viewToday, projects: viewProjects, project: viewProject, tags: viewTags, tag: viewTag };
+    const views = { inbox: viewInbox, today: viewToday, projects: viewProjects, project: viewProject, tags: viewTags, tag: viewTag, settings: viewSettings };
     $('#view').innerHTML = (views[view] || viewInbox)(id);
     const tab = { project: 'projects', tag: 'tags' }[view] || view;
     document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('active', a.dataset.view === tab));
@@ -424,9 +480,11 @@
     }
     const act = e.target.closest('[data-act]');
     if (act) {
-      ({ 'new-project': createProject, 'new-folder': createFolder, 'new-tag': createTag })[act.dataset.act]();
+      ({ 'new-project': createProject, 'new-folder': createFolder, 'new-tag': createTag, 'new-token': createToken, 'sign-out': () => sb.auth.signOut() })[act.dataset.act]();
       return;
     }
+    const revoke = e.target.closest('[data-revoke]');
+    if (revoke) { revokeToken(revoke.dataset.revoke); return; }
     const row = e.target.closest('[data-task]');
     if (row) openEditor(byId(db.tasks, row.dataset.task));
   });
@@ -447,7 +505,6 @@
     if (sel) updateProject(byId(db.projects, sel.dataset.projectStatus), { status: sel.value });
   });
   $('#fab').onclick = openQuickEntry;
-  $('#sign-out').onclick = () => sb.auth.signOut();
   window.addEventListener('hashchange', render);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !$('#sheet').open && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
@@ -483,6 +540,7 @@
 
   async function showApp(session) {
     user = session ? session.user : null;
+    apiTokens = null;
     $('#auth').hidden = !!user;
     $('#app').hidden = !user;
     if (!user) return;

@@ -1,0 +1,15 @@
+name = "todotooling-mcp"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = false
+
+routes = [
+  { pattern = "mcp.todotooling.com", custom_domain = true }
+]
+
+[vars]
+SUPABASE_URL = "https://cgssdelgtxlrfgozchps.supabase.co"
+TIMEZONE = "America/Chicago"
+
+# Secret (never committed): SUPABASE_SECRET_KEY
+#   npx wrangler@3 secret put SUPABASE_SECRET_KEY

@@ -1,0 +1,9 @@
+{
+  "name": "todotooling-mcp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test.mjs",
+    "deploy": "npx -y wrangler@3 deploy"
+  }
+}
