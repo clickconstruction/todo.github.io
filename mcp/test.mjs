@@ -1,9 +1,9 @@
-import worker from './src/index.js';
+import worker, { isAuthenticated, emailToTask } from './src/index.js';
 import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH }] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 globalThis.fetch = async (url, init = {}) => {
@@ -60,4 +60,28 @@ const bad = await call('tools/call', { name: 'get_task', arguments: { id: 'nope'
 assert(bad.body.result.isError, 'invalid id -> tool error, not crash');
 const utcDue = db.tasks[0].due_at;
 assert(utcDue === '2026-09-25T22:00:00.000Z', `due 5pm Chicago stored as ${utcDue}`);
+
+// ---------- email capture ----------
+assert(isAuthenticated('mx.cloudflare.net; dkim=pass header.d=douglasmining.com header.s=google; spf=pass smtp.mailfrom=robert@douglasmining.com; dmarc=pass', 'douglasmining.com'), 'auth: dmarc pass');
+assert(isAuthenticated('dkim=pass header.d=douglasmining.com; dmarc=none', 'douglasmining.com'), 'auth: aligned dkim');
+assert(isAuthenticated('dkim=fail; spf=pass smtp.mailfrom=bounce@mail.douglasmining.com', 'douglasmining.com'), 'auth: aligned spf subdomain');
+assert(!isAuthenticated('dkim=pass header.d=evil.com; spf=pass smtp.mailfrom=x@evil.com; dmarc=fail', 'douglasmining.com'), 'auth: unaligned pass rejected');
+assert(!isAuthenticated('', 'douglasmining.com'), 'auth: missing results rejected');
+const t1 = emailToTask({ subject: 'Fwd: RE: Plans for Jodi', text: 'Please release all three.\r\n\r\n\r\n\r\nThanks', date: '2026-09-22T12:00:00Z', attachments: [{ filename: 'plans.pdf' }] }, 'robert@douglasmining.com');
+assert(t1.title === 'Plans for Jodi' && t1.notes.includes('Attachments (not saved): plans.pdf') && !t1.notes.includes('\n\n\n'), 'emailToTask cleans subject, notes, attachments');
+assert(emailToTask({ subject: '', html: '<p>Call GVEC</p><p>re: utilities</p>' }, 'a@b.c').title === 'Call GVEC', 'emailToTask falls back to first body line (html)');
+
+const raw = (from, subject, body) => [`From: Robert <${from}>`, 'To: inbox@todotooling.com', `Subject: ${subject}`, 'Date: Tue, 22 Sep 2026 17:00:00 -0500', 'Content-Type: text/plain; charset=utf-8', '', body].join('\r\n');
+const mail = (from, subject, body, auth) => { const m = { from, raw: raw(from, subject, body), headers: new Headers(auth ? { 'arc-authentication-results': auth } : {}), rejected: null, setReject(r) { this.rejected = r; } }; return m; };
+const before = db.tasks.length;
+const good = mail('robert@douglasmining.com', 'Fwd: Call 1st mortgage', 'Ask where to mail payment', 'i=1; mx.cloudflare.net; dkim=pass header.d=douglasmining.com; dmarc=pass');
+await worker.email(good, env);
+const made = db.tasks[db.tasks.length - 1];
+assert(!good.rejected && db.tasks.length === before + 1 && made.title === 'Call 1st mortgage' && made.source === 'email' && made.user_id === UID && made.in_inbox, 'email from approved sender becomes inbox task');
+const stranger = mail('someone@else.com', 'Buy crypto', 'spam', 'dmarc=pass');
+await worker.email(stranger, env);
+assert(stranger.rejected && db.tasks.length === before + 1, 'unknown sender rejected, no task');
+const spoof = mail('robert@douglasmining.com', 'Spoofed', 'x', 'dkim=pass header.d=evil.com; dmarc=fail');
+await worker.email(spoof, env);
+assert(spoof.rejected && db.tasks.length === before + 1, 'spoofed From rejected, no task');
 console.log('ALL PASSED');

@@ -316,13 +316,20 @@
 
   // ---------- settings: agent access tokens ----------
   const MCP_URL = 'https://mcp.todotooling.com/mcp';
+  const CAPTURE_EMAIL = 'inbox@todotooling.com';
   let apiTokens = null;
+  let emailSenders = [];
   let tokensLoading = false;
 
   async function loadTokens() {
     if (tokensLoading) return;
     tokensLoading = true;
-    try { apiTokens = await run(sb.from('api_tokens').select('id,name,token_hint,last_used_at,created_at').order('created_at')); } finally { tokensLoading = false; }
+    try {
+      [apiTokens, emailSenders] = await Promise.all([
+        run(sb.from('api_tokens').select('id,name,token_hint,last_used_at,created_at').order('created_at')),
+        run(sb.from('email_senders').select('id,email').order('created_at')),
+      ]);
+    } finally { tokensLoading = false; }
     render();
   }
 
@@ -338,6 +345,11 @@
       <p class="view-sub">Tokens let AI agents like Claude read and update your todos through <code>${MCP_URL}</code>. Each token has full access to your account; revoke any you no longer use.</p>
       <button class="btn primary" data-act="new-token">Create token</button>
       ${apiTokens === null ? '<p class="empty">Loading…</p>' : rows ? `<ul class="list" style="margin-top:12px">${rows}</ul>` : '<p class="empty">No tokens yet.</p>'}
+      <h2 class="section-title">Email capture</h2>
+      <p class="view-sub">Forward or send anything to <b>${CAPTURE_EMAIL}</b> and it lands in your Inbox (subject becomes the title, body the notes). Only mail from these addresses is accepted:</p>
+      <ul class="list">${emailSenders.map((e) => `<li class="row" style="cursor:default"><div class="row-main"><div class="row-title">${esc(e.email)}</div></div>
+        <button class="btn small danger" data-remove-sender="${e.id}">Remove</button></li>`).join('')}</ul>
+      <form class="capture" data-add-sender style="margin-top:12px"><input type="email" name="email" placeholder="Add another address you send from" autocomplete="off"><button class="btn">Add</button></form>
       <h2 class="section-title">Account</h2>
       <button class="btn" data-act="sign-out">Sign out</button>`;
   }
@@ -483,12 +495,28 @@
       ({ 'new-project': createProject, 'new-folder': createFolder, 'new-tag': createTag, 'new-token': createToken, 'sign-out': () => sb.auth.signOut() })[act.dataset.act]();
       return;
     }
+    const removeSender = e.target.closest('[data-remove-sender]');
+    if (removeSender) {
+      if (confirm('Stop accepting email capture from this address?')) {
+        run(sb.from('email_senders').delete().eq('id', removeSender.dataset.removeSender)).then(loadTokens);
+      }
+      return;
+    }
     const revoke = e.target.closest('[data-revoke]');
     if (revoke) { revokeToken(revoke.dataset.revoke); return; }
     const row = e.target.closest('[data-task]');
     if (row) openEditor(byId(db.tasks, row.dataset.task));
   });
   $('#view').addEventListener('submit', async (e) => {
+    const senderForm = e.target.closest('[data-add-sender]');
+    if (senderForm) {
+      e.preventDefault();
+      const email = senderForm.elements.email.value.trim().toLowerCase();
+      if (!email) return;
+      await run(sb.from('email_senders').insert({ email }));
+      await loadTokens();
+      return;
+    }
     const form = e.target.closest('[data-capture]');
     if (!form) return;
     e.preventDefault();

@@ -6,6 +6,8 @@
 // The Worker talks to Supabase with a server-side secret key, so every query
 // below is explicitly scoped to the token owner's user_id.
 
+import PostalMime from 'postal-mime';
+
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = `Todo Tooling is the user's GTD system. Capture anything new with capture (it lands in the Inbox).
@@ -53,7 +55,70 @@ export default {
     const out = await handle(body, api);
     return out ? json(out) : new Response(null, { status: 202, headers: CORS });
   },
+
+  // Email Routing sends inbox@todotooling.com here; each accepted email becomes an Inbox task.
+  async email(message, env) {
+    return handleEmail(message, env);
+  },
 };
+
+// ---------- email capture ----------
+const MAX_NOTES = 6000;
+
+// Accept only mail whose From: address is on a user's allowlist AND that passed
+// DMARC, or DKIM/SPF aligned with the From: domain, so a spoofed From: is rejected.
+export async function handleEmail(message, env) {
+  const parsed = await PostalMime.parse(message.raw);
+  const from = ((parsed.from && parsed.from.address) || message.from || '').toLowerCase().trim();
+  const domain = from.split('@')[1] || '';
+  const authResults = [message.headers.get('arc-authentication-results'), message.headers.get('authentication-results')]
+    .filter(Boolean).join(';').toLowerCase();
+  if (!isAuthenticated(authResults, domain)) {
+    console.log('email rejected: unauthenticated', { from, authResults: authResults || '(none)' });
+    message.setReject('Message failed sender authentication.');
+    return;
+  }
+  const senders = await rest(env, `email_senders?email=eq.${encodeURIComponent(from)}&select=user_id`);
+  if (!senders.length) {
+    console.log('email rejected: unknown sender', { from });
+    message.setReject('This address only accepts mail from approved senders.');
+    return;
+  }
+  const task = emailToTask(parsed, from);
+  await rest(env, 'tasks', { method: 'POST', body: { user_id: senders[0].user_id, source: 'email', ...task } });
+  console.log('email captured', { from, title: task.title });
+}
+
+export function isAuthenticated(results, domain) {
+  if (!results || !domain) return false;
+  if (/\bdmarc=pass\b/.test(results)) return true;
+  const aligned = (d) => d && (d === domain || domain.endsWith(`.${d}`) || d.endsWith(`.${domain}`));
+  for (const m of results.matchAll(/\bdkim=pass\b[^;]*?header\.d=([a-z0-9.-]+)/g)) if (aligned(m[1])) return true;
+  for (const m of results.matchAll(/\bspf=pass\b[^;]*?smtp\.mailfrom=(?:[^@\s;]*@)?([a-z0-9.-]+)/g)) if (aligned(m[1])) return true;
+  return false;
+}
+
+export function emailToTask(parsed, from) {
+  const body = (parsed.text || htmlToText(parsed.html || '')).replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const subject = (parsed.subject || '').replace(/^(\s*(fwd?|fw|re|aw)\s*:\s*)+/i, '').trim();
+  const firstLine = body.split('\n').find((l) => l.trim()) || '';
+  const title = (subject || firstLine || 'Emailed item').slice(0, 300);
+  const when = parsed.date ? new Date(parsed.date).toUTCString() : new Date().toUTCString();
+  const attachments = (parsed.attachments || []).filter((a) => a.disposition !== 'inline').map((a) => a.filename).filter(Boolean);
+  let notes = `Emailed by ${from} · ${when}`;
+  if (attachments.length) notes += `\nAttachments (not saved): ${attachments.join(', ')}`;
+  if (body) notes += `\n\n${body}`;
+  if (notes.length > MAX_NOTES) notes = `${notes.slice(0, MAX_NOTES)}\n…(truncated)`;
+  return { title, notes };
+}
+
+function htmlToText(html) {
+  return html
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|tr|h\d)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+}
 
 async function handle(msg, api) {
   if (!msg || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') return rpcError(msg && msg.id, -32600, 'Invalid request');
