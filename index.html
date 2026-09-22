@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Todo Tooling</title>
+<script src="vendor/supabase-js-2.108.0.min.js"></script>
+<script src="config.js"></script>
+<script>
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    document.write('<script src="config.local.js" onerror="this.remove()"><\/script>');
+  }
+</script>
+<script src="supabase-client.js"></script>
 </head>
 <body>
 <h1>Todo Tooling</h1>
