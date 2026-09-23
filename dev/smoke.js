@@ -25,7 +25,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes };
+  const suites = { core, planned, projectTypes, groups };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -200,4 +200,50 @@ async function projectTypes(check) {
   f.requestSubmit();
   await wait(200);
   check('editor saves type + auto-complete', proj('p1').kind === 'sequential' && proj('p1').complete_with_last === true, `${proj('p1').kind} ${proj('p1').complete_with_last}`);
+}
+
+// P3: action groups.
+async function groups(check) {
+  const { db } = await import('/js/state.js');
+  const task = (id) => db.tasks.find((t) => t.id === id);
+  try { localStorage.removeItem('todo.collapsed'); } catch { /* ignore */ }
+  await go('#project/p2');
+  check('group row has disclosure + count', $('[data-toggle-group="t6"]') !== null && has('[data-task="t6"]', '2 of 2 left'), text('[data-task="t6"]'));
+  check('children visible when expanded', $('[data-task="t7"]') !== null && $('[data-task="t8"]') !== null);
+  $('[data-toggle-group="t6"]').click();
+  await wait(100);
+  check('collapse hides children', $('[data-task="t7"]') === null && $('[data-toggle-group="t6"]').textContent === '▸');
+  check('collapse remembered', JSON.parse(localStorage.getItem('todo.collapsed') || '[]').includes('t6'));
+  $('[data-toggle-group="t6"]').click();
+  await wait(100);
+  check('expand shows children', $('[data-task="t7"]') !== null);
+
+  window.prompt = () => 'Smoke sub-action';
+  check('row + only on groups', $('[data-add-sub="t6"]') !== null && $('[data-add-sub="t4"]') === null);
+  $('[data-task="t4"]').click();
+  await wait(100);
+  $('[data-sub]').click();
+  await wait(250);
+  const sub = db.tasks.find((t) => t.title === 'Smoke sub-action');
+  check('editor + Sub-action makes a group', sub && sub.parent_id === 't4' && sub.project_id === 'p2' && $('[data-toggle-group="t4"]') !== null);
+
+  $('[data-task="t6"]').click();
+  await wait(100);
+  check('group editor: parent disabled', $('#editor').elements.parent_id.disabled && has('#editor', 'This is a group'));
+  $('#sheet').close();
+
+  $('[data-check="t7"]').click();
+  await wait(200);
+  check('group stays open with one child left', !task('t6').completed_at);
+  $('[data-check="t8"]').click();
+  await wait(250);
+  check('group completes with its last child', !!task('t6').completed_at);
+
+  let asked = '';
+  window.confirm = (m) => { asked = m; return true; };
+  $('[data-check="t4"]').click();
+  await wait(250);
+  check('completing a group asks first', asked.includes('1 open action'), asked);
+  check('group completion closes its open children', !!task('t4').completed_at && !!db.tasks.find((t) => t.title === 'Smoke sub-action').completed_at);
+  window.confirm = () => true;
 }

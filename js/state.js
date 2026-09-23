@@ -62,6 +62,16 @@ export async function run(promise) {
   return data;
 }
 
+// Collapsed action groups are a per-viewer preference.
+const COLLAPSED_KEY = 'todo.collapsed';
+let collapsed;
+try { collapsed = new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '[]')); } catch { collapsed = new Set(); }
+export const isCollapsed = (id) => collapsed.has(id);
+export function toggleCollapsed(id) {
+  collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed])); } catch { /* private mode */ }
+}
+
 // Every sheet (editors, quick entry, token) shares one <dialog>; each opener starts compact.
 export function openSheet(html) {
   const sheet = $('#sheet');

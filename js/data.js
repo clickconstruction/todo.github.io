@@ -85,6 +85,18 @@ async function undoComplete(task, reopenProject) {
   if (reopenProject) await updateProject(byId(db.projects, reopenProject.id), { status: 'active' });
 }
 
+// Add a sub-action under an action (making it a group). Children inherit the project.
+export async function addSubAction(parent, title) {
+  title = (title || '').trim();
+  if (!title) return null;
+  const sort = Math.max(-1, ...db.tasks.filter((t) => t.parent_id === parent.id).map((t) => t.sort || 0)) + 1;
+  const [row] = await run(sb.from('tasks').insert({ title, project_id: parent.project_id, parent_id: parent.id, in_inbox: false, sort }).select());
+  db.tasks.push(row);
+  await afterTaskWrite(row); // adding an open child reopens a completed group
+  app.render();
+  return row;
+}
+
 // Move an action up/down among its siblings (same project and parent), renumbering sort.
 export async function moveTask(task, dir) {
   const siblings = db.tasks.filter((t) => t.project_id === task.project_id && (t.parent_id || null) === (task.parent_id || null) && isOpen(t)).sort(taskSort);
@@ -100,10 +112,12 @@ export async function moveTask(task, dir) {
   app.render();
 }
 
-// Refresh what database triggers may have changed: the parent group and the project.
+// Refresh what database triggers may have changed: the parent group (completes with its
+// last child), the children (closed with their group) and the project (complete with last action).
 export async function afterTaskWrite(task) {
+  const ids = [task.parent_id, ...db.tasks.filter((c) => c.parent_id === task.id).map((c) => c.id)].filter(Boolean);
   await Promise.all([
-    task.parent_id ? refreshTasks([task.parent_id]) : null,
+    ids.length ? refreshTasks(ids) : null,
     task.project_id ? refreshProject(task.project_id) : null,
   ]);
 }

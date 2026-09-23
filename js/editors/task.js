@@ -2,7 +2,7 @@
 import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, isOpen, taskSort, tagsFor, tagLabel, sortedTags } from '../state.js';
 import { fmtDateTime, fromDateInput, HOURS } from '../dates.js';
 import { dateField, wireQuickButtons } from '../components.js';
-import { saveTask, ensureTag, capture } from '../data.js';
+import { saveTask, ensureTag, capture, addSubAction } from '../data.js';
 
 const notesAreLong = (text) => text.length > 280 || text.split('\n').length > 8;
 
@@ -35,6 +35,7 @@ export function openEditor(task, defaults = {}) {
       ${t.dropped_at ? `<p class="view-sub" style="margin:0">Dropped ${esc(fmtDateTime(t.dropped_at))}</p>` : ''}` : ''}
     <div class="actions">
       ${task && isOpen(task) ? '<button type="button" class="btn danger" data-drop>Drop</button>' : ''}
+      ${task && isOpen(task) && task.project_id && !task.parent_id ? '<button type="button" class="btn" data-sub>+ Sub-action</button>' : ''}
       <div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div>
     </div>
   </form>`);
@@ -60,8 +61,14 @@ export function openEditor(task, defaults = {}) {
   };
 
   // "Subtask of": top-level actions in the chosen project (not this item or its own subtasks).
+  const isGroupTask = task && db.tasks.some((c) => c.parent_id === task.id);
   const drawParents = () => {
     const pid = form.elements.project_id.value;
+    if (isGroupTask) { // one level deep: a group can't be a sub-action
+      form.elements.parent_id.innerHTML = '<option value="">This is a group (it has sub-actions)</option>';
+      form.elements.parent_id.disabled = true;
+      return;
+    }
     const options = pid ? db.tasks.filter((x) => x.project_id === pid && !x.parent_id && (isOpen(x) || x.id === t.parent_id) && (!task || (x.id !== task.id && x.parent_id !== task.id))) : [];
     const current = t.parent_id && options.some((x) => x.id === t.parent_id) ? t.parent_id : '';
     form.elements.parent_id.innerHTML = `<option value="">${pid ? 'None (top-level action)' : 'Choose a project first'}</option>` +
@@ -75,6 +82,13 @@ export function openEditor(task, defaults = {}) {
   }
   $('[data-cancel]', sheet).onclick = () => sheet.close();
   // Items are dropped, never deleted: Drop saves the form with status "dropped" (restore via Status → Open).
+  const sub = $('[data-sub]', sheet);
+  if (sub) sub.onclick = async () => {
+    const title = prompt(`New sub-action under “${task.title}”`);
+    if (!title) return;
+    sheet.close();
+    await addSubAction(byId(db.tasks, task.id) || task, title);
+  };
   const drop = $('[data-drop]', sheet);
   if (drop) drop.onclick = () => { form.elements.status.value = 'dropped'; form.requestSubmit(); };
 

@@ -1,7 +1,7 @@
 // Todo Tooling entry point: event wiring, auth, service worker.
-import { sb, db, app, $, byId } from './state.js';
+import { sb, db, app, $, byId, isOpen, toggleCollapsed } from './state.js';
 import { render } from './router.js';
-import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, moveTask } from './data.js';
+import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, moveTask, addSubAction } from './data.js';
 import { openEditor, openQuickEntry } from './editors/task.js';
 import { openProjectEditor, openFolderEditor } from './editors/project.js';
 import { onSearchInput } from './views/search.js';
@@ -24,7 +24,22 @@ const ACTIONS = {
 
 // Click handlers keyed by data-attribute; first match wins.
 const CLICKS = [
-  ['[data-check]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.check); if (t) setCompleted(t, !t.completed_at); }],
+  ['[data-check]', (el, e) => {
+    e.stopPropagation();
+    const t = byId(db.tasks, el.dataset.check);
+    if (!t) return;
+    // Completing a group completes its open actions too (database rule), so confirm first.
+    const openKids = db.tasks.filter((c) => c.parent_id === t.id && isOpen(c)).length;
+    if (!t.completed_at && openKids && !confirm(`Complete “${t.title}” and its ${openKids} open action${openKids === 1 ? '' : 's'}?`)) return;
+    setCompleted(t, !t.completed_at);
+  }],
+  ['[data-toggle-group]', (el, e) => { e.stopPropagation(); toggleCollapsed(el.dataset.toggleGroup); render(); }],
+  ['[data-add-sub]', (el, e) => {
+    e.stopPropagation();
+    const parent = byId(db.tasks, el.dataset.addSub);
+    const title = parent && prompt(`New sub-action under “${parent.title}”`);
+    if (title) addSubAction(parent, title);
+  }],
   ['[data-move]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.move); if (t) moveTask(t, Number(el.dataset.dir)); }],
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
   ['[data-edit-folder]', (el) => openFolderEditor(byId(db.folders, el.dataset.editFolder))],

@@ -1,9 +1,9 @@
 // List row renderers shared by the views.
-import { db, esc, byId, tagsFor, tagLabel, isOpen, PROJECT_STATUSES } from './state.js';
+import { db, esc, byId, tagsFor, tagLabel, isOpen, isCollapsed, PROJECT_STATUSES } from './state.js';
 import { fmtDate, isOverdue, isDeferred, isPlannedPast } from './dates.js';
 import { isSequenceBlocked, nextAction } from './availability.js';
 
-export function taskRow(t, { showProject = true, markNext = null, reorder = false } = {}) {
+export function taskRow(t, { showProject = true, markNext = null, reorder = false, hierarchy = false } = {}) {
   const done = !!t.completed_at;
   const project = t.project_id && byId(db.projects, t.project_id);
   const tags = tagsFor(t.id);
@@ -17,14 +17,21 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   if (t.dropped_at && !t.completed_at) meta.push('<span class="chip">Dropped</span>');
   if (t.notes) meta.push('<span>📝</span>');
   if (markNext && markNext.id === t.id) meta.unshift('<span class="chip next">Next</span>');
+  const kids = hierarchy && !t.parent_id ? db.tasks.filter((c) => c.parent_id === t.id) : [];
+  const openKids = kids.filter(isOpen).length;
+  if (kids.length) meta.unshift(`<span class="chip group-count">${openKids ? `${openKids} of ${kids.length} left` : `${kids.length} done`}</span>`);
   const checkCls = ['check', done && 'done', t.flagged && 'flagged', isOverdue(t) && 'overdue'].filter(Boolean).join(' ');
   const blocked = isOpen(t) && isSequenceBlocked(t);
   const cls = [done || t.dropped_at ? 'completed' : '', t.parent_id ? 'row-sub' : '', blocked ? 'blocked' : ''].filter(Boolean).join(' ');
   const handles = reorder && isOpen(t) ? `<span class="reorder"><button class="icon-btn" data-move="${t.id}" data-dir="-1" aria-label="Move up">▲</button><button class="icon-btn" data-move="${t.id}" data-dir="1" aria-label="Move down">▼</button></span>` : '';
-  return `<li class="row ${cls}" data-task="${t.id}">
-    <button class="${checkCls}" data-check="${t.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>
+  const toggle = kids.length
+    ? `<button class="disclosure" data-toggle-group="${t.id}" aria-expanded="${!isCollapsed(t.id)}" aria-label="${isCollapsed(t.id) ? 'Expand' : 'Collapse'} group">${isCollapsed(t.id) ? '▸' : '▾'}</button>`
+    : hierarchy && !t.parent_id ? '<span class="disclosure-spacer"></span>' : '';
+  const addSub = kids.length && isOpen(t) ? `<button class="icon-btn add-sub" data-add-sub="${t.id}" aria-label="Add sub-action to ${esc(t.title)}" title="Add sub-action">＋</button>` : '';
+  return `<li class="row ${cls} ${kids.length ? 'group' : ''}" data-task="${t.id}">
+    ${toggle}<button class="${checkCls}" data-check="${t.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>
     <div class="row-main"><div class="row-title">${esc(t.title)}</div>${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}</div>
-    ${handles}
+    ${handles}${reorder ? '' : addSub}
   </li>`;
 }
 

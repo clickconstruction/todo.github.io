@@ -1,5 +1,5 @@
 // Projects list (by folder) and the single-project view.
-import { db, app, esc, byId, visible, taskSort, bySort, PROJECT_STATUSES } from '../state.js';
+import { db, app, esc, byId, visible, taskSort, bySort, isCollapsed, PROJECT_STATUSES } from '../state.js';
 import { taskList, projectRow } from '../rows.js';
 import { PROJECT_KINDS, nextAction } from '../availability.js';
 
@@ -29,7 +29,7 @@ export function viewProject(id) {
   if (!p) return '<a class="back" href="#projects">‹ Projects</a><p class="empty">Project not found.</p>';
   const tasks = db.tasks.filter((t) => t.project_id === p.id && visible(t)).sort(taskSort);
   const top = tasks.filter((t) => !t.parent_id);
-  const ordered = top.flatMap((t) => [t, ...tasks.filter((s) => s.parent_id === t.id)]);
+  const ordered = top.flatMap((t) => [t, ...(isCollapsed(t.id) ? [] : tasks.filter((s) => s.parent_id === t.id))]);
   const folder = p.folder_id && byId(db.folders, p.folder_id);
   return `<a class="back" href="#projects">‹ Projects${folder ? ` / 📁 ${esc(folder.name)}` : ''}</a>
     <div class="view-head"><h1>${esc(p.name)}</h1><button class="btn small" data-edit-project="${p.id}">Edit</button></div>
@@ -39,6 +39,6 @@ export function viewProject(id) {
       ${p.complete_with_last ? '<span class="chip" title="Completes when its last action is done">Auto-complete</span>' : ''}
       ${ordered.filter((t) => !t.completed_at).length > 1 ? `<button class="btn small" data-act="toggle-reorder">${app.reorder === p.id ? 'Done reordering' : 'Reorder'}</button>` : ''}</p>
     <form class="capture" data-capture data-project="${p.id}"><input type="text" name="title" placeholder="Add an action to ${esc(p.name)}…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
-    ${taskList(ordered, { showProject: false, markNext: p.status === 'active' ? nextAction(p) : null, reorder: app.reorder === p.id }) || '<p class="empty">No actions. What is the very next physical step?</p>'}
+    ${taskList(ordered, { showProject: false, hierarchy: true, markNext: p.status === 'active' ? nextAction(p) : null, reorder: app.reorder === p.id }) || '<p class="empty">No actions. What is the very next physical step?</p>'}
     <p class="view-sub" style="margin-top:20px"><a href="#done/all/${p.id}">✓ Completed in this project →</a></p>`;
 }

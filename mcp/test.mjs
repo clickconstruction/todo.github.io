@@ -99,6 +99,8 @@ assert(!TOOL_NAMES.some((n) => /delete/.test(n)), 'no delete tools exposed');
 const sub = await tool('capture', { title: 'Get meter number' });
 const subbed = await tool('update_task', { id: sub.id, project: 'Click Plumbing Co', parent: cap.id, add_tags: ['Phone'] });
 assert(subbed.parent_id === cap.id && subbed.project === 'Click Plumbing Co' && !subbed.in_inbox && subbed.tags.join() === 'Phone', 'update_task: subtask + add_tags');
+const groupView = await tool('get_task', { id: cap.id });
+assert(groupView.sub_actions && groupView.sub_actions[0].id === sub.id, 'get_task lists sub-actions of a group');
 const pruned = await tool('update_task', { id: sub.id, remove_tags: ['phone'], project: null });
 assert(pruned.tags.length === 0 && !pruned.parent_id && pruned.in_inbox, 'update_task: removing project+tags returns item to Inbox (and detaches parent)');
 const dropped = await tool('update_task', { id: sub.id, status: 'dropped' });

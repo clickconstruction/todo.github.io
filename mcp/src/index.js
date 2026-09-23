@@ -485,10 +485,14 @@ const TOOLS = [
   },
   {
     name: 'get_task',
-    description: 'Get one task with its notes, project, tags and dates.',
+    description: 'Get one task with its notes, project, tags, dates and (for an action group) its sub-actions.',
     inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
     async run(api, { id }) {
-      return (await api.shape([await api.task(id)]))[0];
+      const task = await api.task(id);
+      const [shaped] = await api.shape([task]);
+      const kids = await api.q(`tasks?${api.u}&parent_id=eq.${task.id}&order=sort.asc&select=*`);
+      if (kids.length) shaped.sub_actions = await api.shape(kids);
+      return shaped;
     },
   },
   {
@@ -563,7 +567,7 @@ const TOOLS = [
   },
   {
     name: 'complete_task',
-    description: 'Mark a task complete (or pass completed:false to reopen it). Only do this when the user says it is done. Optionally record a completion note (outcome, who, what happened).',
+    description: 'Mark a task complete (or pass completed:false to reopen it). Only do this when the user says it is done. Optionally record a completion note. Rules: completing an action group also completes its open sub-actions; completing the last sub-action completes the group; a project set to complete-with-last-action completes when its last action does.',
     inputSchema: {
       type: 'object',
       properties: { id: { type: 'string' }, completed: { type: 'boolean', default: true }, note: { type: 'string', description: 'Completion note' } },
