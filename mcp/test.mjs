@@ -71,6 +71,17 @@ assert(!oneShot.in_inbox && oneShot.project === 'Click Plumbing' && oneShot.tags
 assert((await tool('list_tasks', { search: 'backflow hiro' })).count === 1, 'search: words across title + tag must all match');
 assert((await tool('list_tasks', { search: 'plumbing' })).items.some((x) => x.title === 'Schedule backflow test'), 'search: matches project name');
 assert((await tool('list_tasks', { search: 'backflow nope' })).count === 0, 'search: every word must match');
+await tool('create_project', { name: 'Seq', kind: 'sequential', complete_with_last: true });
+const s1 = await tool('capture', { title: 'Seq first', project: 'Seq' });
+const s2 = await tool('capture', { title: 'Seq second', project: 'Seq' });
+assert(db.tasks.find((x) => x.id === s2.id).sort > db.tasks.find((x) => x.id === s1.id).sort, 'capture into project appends at the end');
+const nextActs = await tool('list_tasks', { project: 'Seq', available_only: true });
+assert(nextActs.count === 1 && nextActs.items[0].id === s1.id, 'available_only: sequential shows only the head');
+const seqRow = (await tool('list_projects', {})).find((x) => x.name === 'Seq');
+assert(seqRow.kind === 'sequential' && seqRow.complete_with_last && seqRow.next_action.id === s1.id, 'list_projects: kind, auto-complete, next action');
+const kindChange = await tool('update_project', { project: 'Seq', kind: 'parallel', complete_with_last: false });
+assert(kindChange.kind === 'parallel' && kindChange.complete_with_last === false, 'update_project: kind + complete_with_last');
+assert((await tool('list_tasks', { project: 'Seq', available_only: true })).count === 2, 'parallel: all available');
 const moved = await tool('update_project', { project: 'Click Plumbing', folder: 'Businesses', status: 'on_hold' });
 assert(moved.folder === 'Businesses' && moved.status === 'on_hold' && db.folders.length === 2, 'update_project moves to new folder + status');
 const unfiled = await tool('update_project', { project: 'click plumbing', folder: null, name: 'Click Plumbing Co' });

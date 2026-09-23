@@ -319,6 +319,39 @@ class Api {
 
 const OPEN = 'completed_at=is.null&dropped_at=is.null';
 
+// Mirror of the app's js/availability.js. available = open, not deferred, project active,
+// not a group with open children, and not queued behind the head of a sequential project.
+function availabilityOf(tasks, projects, nowIso = new Date().toISOString()) {
+  const isOpenT = (t) => !t.completed_at && !t.dropped_at;
+  const byIdT = new Map(tasks.map((t) => [t.id, t]));
+  const projectById = new Map(projects.map((p) => [p.id, p]));
+  const sortT = (a, b) => (a.sort - b.sort) || (a.created_at < b.created_at ? -1 : 1);
+  const heads = new Map();
+  for (const p of projects) {
+    if (p.kind !== 'sequential') continue;
+    const top = tasks.filter((t) => t.project_id === p.id && !t.parent_id && isOpenT(t)).sort(sortT);
+    if (top[0]) heads.set(p.id, top[0].id);
+  }
+  const hasOpenKids = new Set(tasks.filter((t) => t.parent_id && isOpenT(t)).map((t) => t.parent_id));
+  const available = (t) => {
+    if (!isOpenT(t) || (t.defer_at && t.defer_at > nowIso)) return false;
+    const p = t.project_id && projectById.get(t.project_id);
+    if (p && p.status !== 'active') return false;
+    if (hasOpenKids.has(t.id)) return false;
+    if (p && heads.has(p.id)) {
+      const top = t.parent_id ? byIdT.get(t.parent_id) : t;
+      if (!top || top.id !== heads.get(p.id)) return false;
+    }
+    return true;
+  };
+  const nextFor = (projectId) => {
+    const open = tasks.filter((t) => t.project_id === projectId && isOpenT(t));
+    const ordered = open.filter((t) => !t.parent_id).sort(sortT).flatMap((t) => [t, ...open.filter((c) => c.parent_id === t.id).sort(sortT)]);
+    return ordered.find(available) || null;
+  };
+  return { available, nextFor };
+}
+
 // ---------- tools ----------
 const TOOLS = [
   {
@@ -341,7 +374,14 @@ const TOOLS = [
     },
     async run(api, { title, notes = '', ...rest }) {
       if (!title || !String(title).trim()) throw new Error('title is required');
-      const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, title: String(title).trim(), notes, source: 'mcp' } });
+      // Into a project: append at the end (order matters in sequential projects).
+      const body = { user_id: api.userId, title: String(title).trim(), notes, source: 'mcp' };
+      if (rest.project) {
+        body.project_id = await api.resolveProject(rest.project);
+        const sib = await api.q(`tasks?${api.u}&project_id=eq.${body.project_id}&parent_id=is.null&select=sort&order=sort.desc&limit=1`);
+        body.sort = sib.length ? (sib[0].sort || 0) + 1 : 0;
+      }
+      const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body });
       const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'planned', 'defer'].includes(k) && v !== undefined));
       if (!Object.keys(fields).length) return (await api.shape([row]))[0];
       return TOOLS.find((t) => t.name === 'update_task').run(api, { id: row.id, ...fields });
@@ -392,6 +432,7 @@ const TOOLS = [
         project: { type: 'string', description: 'Project name or id' },
         tag: { type: 'string', description: 'Tag label, e.g. "Laptop" or "Waiting : Hiro" (a parent tag includes its children)' },
         flagged: { type: 'boolean' },
+        available_only: { type: 'boolean', description: 'Only actions that can be done now (not deferred, not waiting in a sequential project, project active). This is the Next Actions list.' },
         due_before: { type: 'string', description: 'YYYY-MM-DD; items due on or before this date' },
         include_completed: { type: 'boolean', default: false },
         limit: { type: 'integer', default: 100 },
@@ -429,7 +470,16 @@ const TOOLS = [
         if (!links.length) return { count: 0, items: [] };
         f.push(`id=${inList([...new Set(links.map((l) => l.task_id))])}`);
       }
-      const rows = await api.q(`tasks?${f.join('&')}`);
+      let rows = await api.q(`tasks?${f.join('&')}`);
+      if (a.available_only) {
+        const [allOpen, projects] = await Promise.all([
+          api.q(`tasks?${api.u}&${OPEN}&select=id,project_id,parent_id,sort,created_at,defer_at,completed_at,dropped_at`),
+          api.q(`projects?${api.u}&select=id,kind,status`),
+        ]);
+        const { available } = availabilityOf(allOpen, projects);
+        const ok = new Set(allOpen.filter(available).map((t) => t.id));
+        rows = rows.filter((t) => ok.has(t.id));
+      }
       return { count: rows.length, items: await api.shape(rows) };
     },
   },
@@ -566,15 +616,22 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { include_inactive: { type: 'boolean', default: false, description: 'Include completed and dropped projects' } } },
     async run(api, { include_inactive = false }) {
       const [projects, folders, open] = await Promise.all([
-        api.q(`projects?${api.u}${include_inactive ? '' : '&status=in.(active,on_hold)'}&order=sort.asc&select=id,name,status,kind,folder_id,notes`),
+        api.q(`projects?${api.u}${include_inactive ? '' : '&status=in.(active,on_hold)'}&order=sort.asc&select=*`),
         api.q(`folders?${api.u}&select=id,name`),
-        api.q(`tasks?${api.u}&${OPEN}&project_id=not.is.null&select=project_id`),
+        api.q(`tasks?${api.u}&${OPEN}&select=id,title,project_id,parent_id,sort,created_at,defer_at,completed_at,dropped_at`),
       ]);
-      return projects.map((p) => ({
-        id: p.id, name: p.name, status: p.status, kind: p.kind, notes: p.notes || undefined,
-        folder: (folders.find((f) => f.id === p.folder_id) || {}).name || null,
-        open_actions: open.filter((t) => t.project_id === p.id).length,
-      }));
+      const { nextFor } = availabilityOf(open, projects);
+      return projects.map((p) => {
+        const next = p.status === 'active' ? nextFor(p.id) : null;
+        return {
+          id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, flagged: p.flagged,
+          notes: p.notes || undefined,
+          folder: (folders.find((f) => f.id === p.folder_id) || {}).name || null,
+          open_actions: open.filter((t) => t.project_id === p.id).length,
+          next_action: next ? { id: next.id, title: next.title } : null,
+          review_every_days: p.review_every_days, last_reviewed: localDate(p.last_reviewed_at, api.tz), next_review: localDate(p.next_review_at, api.tz),
+        };
+      });
     },
   },
   {
@@ -582,18 +639,22 @@ const TOOLS = [
     description: 'Create a project (an outcome that takes more than one action). Optionally put it in a folder, which is created if missing.',
     inputSchema: {
       type: 'object',
-      properties: { name: { type: 'string' }, folder: { type: 'string' }, notes: { type: 'string' } },
+      properties: {
+        name: { type: 'string' }, folder: { type: 'string' }, notes: { type: 'string' },
+        kind: { type: 'string', enum: ['parallel', 'sequential', 'single_actions'], description: 'parallel (default): all actions available; sequential: only the next one; single_actions: a list of unrelated actions' },
+        complete_with_last: { type: 'boolean', description: 'Complete the project automatically when its last action is done' },
+      },
       required: ['name'],
     },
-    async run(api, { name, folder, notes = '' }) {
+    async run(api, { name, folder, notes = '', kind = 'parallel', complete_with_last = false }) {
       const folder_id = folder ? await api.resolveFolder(folder) : null;
-      const [row] = await api.q('projects', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name: String(name).trim(), notes, folder_id } });
-      return { id: row.id, name: row.name, folder: folder || null, status: row.status };
+      const [row] = await api.q('projects', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name: String(name).trim(), notes, folder_id, kind, complete_with_last: !!complete_with_last } });
+      return { id: row.id, name: row.name, folder: folder || null, status: row.status, kind: row.kind, complete_with_last: row.complete_with_last };
     },
   },
   {
     name: 'update_project',
-    description: 'Rename a project, move it to a folder (created if missing; null for no folder), change its status, or edit its notes. Only fields you pass change.',
+    description: 'Rename a project, move it to a folder (created if missing; null for no folder), change its status, type (parallel/sequential/single_actions), complete-with-last-action, or notes. Only fields you pass change.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -602,6 +663,8 @@ const TOOLS = [
         folder: { type: ['string', 'null'] },
         status: { type: 'string', enum: ['active', 'on_hold', 'completed', 'dropped'] },
         notes: { type: 'string' },
+        kind: { type: 'string', enum: ['parallel', 'sequential', 'single_actions'] },
+        complete_with_last: { type: 'boolean' },
       },
       required: ['project'],
     },
@@ -612,10 +675,12 @@ const TOOLS = [
       if (a.folder !== undefined) patch.folder_id = await api.resolveFolder(a.folder);
       if (a.status !== undefined) patch.status = a.status;
       if (a.notes !== undefined) patch.notes = a.notes;
+      if (a.kind !== undefined) patch.kind = a.kind;
+      if (a.complete_with_last !== undefined) patch.complete_with_last = !!a.complete_with_last;
       if (Object.keys(patch).length) await api.q(`projects?${api.u}&id=eq.${id}`, { method: 'PATCH', body: patch });
-      const [p] = await api.q(`projects?${api.u}&id=eq.${id}&select=id,name,status,folder_id,notes`);
+      const [p] = await api.q(`projects?${api.u}&id=eq.${id}&select=*`);
       const folder = p.folder_id ? (await api.q(`folders?${api.u}&id=eq.${p.folder_id}&select=name`))[0] : null;
-      return { id: p.id, name: p.name, status: p.status, folder: folder ? folder.name : null, notes: p.notes || undefined };
+      return { id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, folder: folder ? folder.name : null, notes: p.notes || undefined };
     },
   },
   {

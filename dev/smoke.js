@@ -25,7 +25,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned };
+  const suites = { core, planned, projectTypes };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -131,4 +131,73 @@ async function planned(check) {
   await go('#today');
   check('Today lists planned-today items', has(undefined, 'Planned') && has(undefined, 'Order fittings for Jodi'), text());
   check('Today still lists overdue + due', has(undefined, 'Overdue') && has(undefined, 'Call GVEC') && has(undefined, 'Get plans released'), text());
+}
+
+// P2: project types, availability, reorder, complete with last action.
+async function projectTypes(check) {
+  const { isAvailable, nextAction } = await import('/js/availability.js');
+  const { db } = await import('/js/state.js');
+  const task = (id) => db.tasks.find((t) => t.id === id);
+  const proj = (id) => db.projects.find((p) => p.id === id);
+
+  check('sequential: only the head is available', isAvailable(task('t4')) && !isAvailable(task('t5')) && !isAvailable(task('t7')));
+  check('sequential: group (not head) and its children blocked', !isAvailable(task('t6')) && !isAvailable(task('t8')));
+  check('single actions: all available except deferred', isAvailable(task('t11')) && !isAvailable(task('t10')));
+  check('on-hold project: nothing available', !db.tasks.filter((t) => t.project_id === 'p5').some(isAvailable));
+
+  await go('#project/p2');
+  check('project view marks Next', $('[data-task="t4"] .chip.next') !== null);
+  check('blocked actions dimmed', $('[data-task="t5"]').classList.contains('blocked'));
+  check('shows project type chip', has(undefined, 'Sequential'));
+
+  await go('#projects');
+  check('project row shows next action', has(undefined, 'Next: Write recovery instructions'), text());
+
+  await go('#project/p2');
+  $('[data-check="t4"]').click();
+  await wait(200);
+  check('completing head advances next', nextAction(proj('p2')).id === 't5', nextAction(proj('p2')) && nextAction(proj('p2')).title);
+
+  // Reorder: move "Order fittings" (t2) above "Call GVEC" (t1) in p1.
+  await go('#project/p1');
+  $('[data-act="toggle-reorder"]').click();
+  await wait(100);
+  check('reorder handles appear', $$('[data-move]').length > 0);
+  $('[data-move="t2"][data-dir="-1"]').click();
+  await wait(200);
+  const order = $$('#view [data-task]').map((el) => el.dataset.task);
+  check('move up reorders', order.indexOf('t2') < order.indexOf('t1'), order.join(','));
+  $('[data-act="toggle-reorder"]').click();
+
+  // New project actions append at the end.
+  const input = $('[data-capture] input');
+  input.value = 'Smoke last action';
+  $('[data-capture]').requestSubmit();
+  await wait(200);
+  const orderAfter = $$('#view [data-task]').map((el) => el.dataset.task);
+  const added = db.tasks.find((t) => t.title === 'Smoke last action');
+  check('new action appends to the end', added && orderAfter[orderAfter.length - 1] === added.id, orderAfter.join(','));
+
+  // Complete with last action: p3 has one open action (t9).
+  await go('#project/p3');
+  $('[data-check="t9"]').click();
+  await wait(250);
+  check('project auto-completes with last action', proj('p3').status === 'completed', proj('p3').status);
+  check('toast says the project is done too', has('#toast', 'is done too'), text('#toast'));
+  $$('#toast button').find((b) => b.textContent === 'Undo').click();
+  await wait(300);
+  check('undo reopens action and project', !task('t9').completed_at && proj('p3').status === 'active', `${task('t9').completed_at} ${proj('p3').status}`);
+
+  // Editor: change type + auto-complete.
+  await go('#project/p1');
+  $('[data-edit-project="p1"]').click();
+  await wait(100);
+  const f = $('#project-form');
+  f.querySelector('input[name=kind][value=sequential]').checked = true;
+  f.querySelector('input[name=kind][value=sequential]').dispatchEvent(new Event('change', { bubbles: true }));
+  check('kind hint updates', has('.kind-hint', 'only the next action'), text('.kind-hint'));
+  f.elements.complete_with_last.checked = true;
+  f.requestSubmit();
+  await wait(200);
+  check('editor saves type + auto-complete', proj('p1').kind === 'sequential' && proj('p1').complete_with_last === true, `${proj('p1').kind} ${proj('p1').complete_with_last}`);
 }

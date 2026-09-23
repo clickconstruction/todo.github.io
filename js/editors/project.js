@@ -2,9 +2,10 @@
 // folders archived (only once they hold no active or on-hold projects; the database enforces this too).
 import { sb, db, app, $, esc, run, syncRow, toast, openSheet, bySort, PROJECT_STATUSES } from '../state.js';
 import { insertFolder, updateProject } from '../data.js';
+import { PROJECT_KINDS } from '../availability.js';
 
 export function openProjectEditor(project, defaults = {}) {
-  const p = project || { name: '', folder_id: null, status: 'active', notes: '', ...defaults };
+  const p = project || { name: '', folder_id: null, status: 'active', kind: 'parallel', complete_with_last: false, notes: '', ...defaults };
   const folderOptions = db.folders.filter((f) => !f.archived_at || f.id === p.folder_id).sort(bySort)
     .map((f) => `<option value="${f.id}" ${f.id === p.folder_id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
   const sheet = openSheet(`<form method="dialog" id="project-form">
@@ -13,6 +14,12 @@ export function openProjectEditor(project, defaults = {}) {
     <label>Folder
       <select name="folder_id"><option value="">No folder</option>${folderOptions}<option value="__new">+ New folder…</option></select></label>
     <input type="text" name="new_folder" placeholder="New folder name" autocomplete="off" hidden>
+    <div class="field"><span class="field-label" id="kind-label">Type</span>
+      <div class="segmented" role="radiogroup" aria-labelledby="kind-label">
+        ${PROJECT_KINDS.map(([v, l, hint]) => `<label title="${esc(hint)}"><input type="radio" name="kind" value="${v}" ${p.kind === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}
+      </div></div>
+    <p class="view-sub kind-hint" style="margin:0">${esc(PROJECT_KINDS.find(([v]) => v === p.kind)[2])}</p>
+    <label class="flag-toggle"><input type="checkbox" name="complete_with_last" ${p.complete_with_last ? 'checked' : ''}> Complete project when its last action is done</label>
     ${project ? `<label>Status<select name="status">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
     <label>Notes<textarea name="notes" placeholder="Purpose, what done looks like…">${esc(p.notes)}</textarea></label>
     ${project ? '<p class="view-sub" style="margin:0">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>' : ''}
@@ -27,6 +34,9 @@ export function openProjectEditor(project, defaults = {}) {
     newFolder.required = !newFolder.hidden;
     if (!newFolder.hidden) newFolder.focus();
   };
+  form.addEventListener('change', (e) => {
+    if (e.target.name === 'kind') $('.kind-hint', sheet).textContent = PROJECT_KINDS.find(([v]) => v === e.target.value)[2];
+  });
   $('[data-cancel]', sheet).onclick = () => sheet.close();
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -37,7 +47,7 @@ export function openProjectEditor(project, defaults = {}) {
       if (!folder) return;
       folder_id = folder.id;
     }
-    const fields = { name: f.get('name').trim(), folder_id, notes: f.get('notes') };
+    const fields = { name: f.get('name').trim(), folder_id, notes: f.get('notes'), kind: f.get('kind') || 'parallel', complete_with_last: f.get('complete_with_last') === 'on' };
     if (project) fields.status = f.get('status');
     if (!fields.name) return;
     sheet.close();

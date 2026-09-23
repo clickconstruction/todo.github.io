@@ -13,6 +13,7 @@ export const app = {
   doneCache: null, // { key, rows } for the Done view
   searchExtra: [], // completed/dropped search matches fetched from the server
   showInactive: false, // Projects view: show completed/dropped projects and archived folders
+  reorder: null, // project id currently in reorder mode
 };
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

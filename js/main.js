@@ -1,7 +1,7 @@
 // Todo Tooling entry point: event wiring, auth, service worker.
 import { sb, db, app, $, byId } from './state.js';
 import { render } from './router.js';
-import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject } from './data.js';
+import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, moveTask } from './data.js';
 import { openEditor, openQuickEntry } from './editors/task.js';
 import { openProjectEditor, openFolderEditor } from './editors/project.js';
 import { onSearchInput } from './views/search.js';
@@ -16,6 +16,7 @@ const ACTIONS = {
   'new-project': () => openProjectEditor(null),
   'new-folder': () => openFolderEditor(null),
   'toggle-inactive': () => { app.showInactive = !app.showInactive; render(); },
+  'toggle-reorder': () => { const id = location.hash.split('/')[1]; app.reorder = app.reorder === id ? null : id; render(); },
   'new-tag': createTag,
   'new-token': createToken,
   'sign-out': () => sb.auth.signOut(),
@@ -24,6 +25,7 @@ const ACTIONS = {
 // Click handlers keyed by data-attribute; first match wins.
 const CLICKS = [
   ['[data-check]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.check); if (t) setCompleted(t, !t.completed_at); }],
+  ['[data-move]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.move); if (t) moveTask(t, Number(el.dataset.dir)); }],
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
   ['[data-edit-folder]', (el) => openFolderEditor(byId(db.folders, el.dataset.editFolder))],
   ['[data-add-project]', (el) => openProjectEditor(null, { folder_id: el.dataset.addProject })],

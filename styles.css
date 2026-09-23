@@ -253,3 +253,24 @@ input[type=search]:focus { border-color: var(--accent); }
 .qbtn:hover { border-color: var(--accent); }
 .meta-planned { color: var(--accent); }
 .meta-planned.past { color: var(--flag); }
+
+/* Project types, availability, reorder */
+.segmented { display: flex; border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; margin: 0; background: var(--surface-2); }
+.field { display: grid; gap: 6px; }
+.field-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.sheet .segmented label { flex: 1; display: block; color: var(--text); }
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented span { display: block; text-align: center; padding: 8px 6px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.segmented input:checked + span { background: var(--accent); color: #fff; }
+.segmented input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row.blocked .row-title { color: var(--muted); }
+.row.blocked .check { opacity: .5; }
+.chip.next { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.project-props { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.reorder { display: flex; gap: 2px; margin-left: 4px; }
+.group-main { display: flex; flex-direction: column; min-width: 0; }
+.group-sub { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kind-icon { color: var(--muted); font-size: 13px; }
+
+.view-head { flex-wrap: wrap; }
+.view-head > span { display: flex; gap: 6px; flex-wrap: wrap; }

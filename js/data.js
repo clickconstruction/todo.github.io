@@ -1,5 +1,5 @@
 // Reads and writes. Every write goes to Supabase first, then updates `db`.
-import { sb, db, app, run, syncRow, toast, byId } from './state.js';
+import { sb, db, app, run, syncRow, toast, byId, isOpen, taskSort } from './state.js';
 import { openCompletionNote } from './editors/completion.js';
 
 const OUTBOX_KEY = 'todo.outbox';
@@ -55,6 +55,10 @@ export async function capture(title, extra = {}) {
     toast('Saved offline; will sync when back online');
     return;
   }
+  // New project actions go to the end (order matters in sequential projects).
+  if (extra.project_id && extra.sort === undefined) {
+    extra.sort = Math.max(-1, ...db.tasks.filter((t) => t.project_id === extra.project_id && !t.parent_id).map((t) => t.sort || 0)) + 1;
+  }
   const [row] = await run(sb.from('tasks').insert({ title, ...extra }).select());
   db.tasks.push(row);
   app.render();
@@ -62,12 +66,38 @@ export async function capture(title, extra = {}) {
 
 export async function setCompleted(task, done) {
   const completed_at = done ? new Date().toISOString() : null;
+  const project = task.project_id && byId(db.projects, task.project_id);
+  const projectWasOpen = project && ['active', 'on_hold'].includes(project.status);
   const [row] = await run(sb.from('tasks').update({ completed_at }).eq('id', task.id).select());
   task = syncRow('tasks', task, row);
   await afterTaskWrite(task);
   app.doneCache = null;
   app.render();
-  if (done) toast('Completed', [{ label: 'Add note', run: () => openCompletionNote(task) }, { label: 'Undo', run: () => setCompleted(task, false) }]);
+  if (!done) return;
+  // The database may have completed the project too ("complete with last action").
+  const projectDone = projectWasOpen && byId(db.projects, task.project_id).status === 'completed';
+  toast(projectDone ? `Completed · “${project.name}” is done too` : 'Completed',
+    [{ label: 'Add note', run: () => openCompletionNote(task) }, { label: 'Undo', run: () => undoComplete(task, projectDone && project) }]);
+}
+
+async function undoComplete(task, reopenProject) {
+  await setCompleted(task, false);
+  if (reopenProject) await updateProject(byId(db.projects, reopenProject.id), { status: 'active' });
+}
+
+// Move an action up/down among its siblings (same project and parent), renumbering sort.
+export async function moveTask(task, dir) {
+  const siblings = db.tasks.filter((t) => t.project_id === task.project_id && (t.parent_id || null) === (task.parent_id || null) && isOpen(t)).sort(taskSort);
+  const i = siblings.findIndex((t) => t.id === task.id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= siblings.length) return;
+  [siblings[i], siblings[j]] = [siblings[j], siblings[i]];
+  const changed = siblings.map((t, sort) => ({ t, sort })).filter(({ t, sort }) => t.sort !== sort);
+  await Promise.all(changed.map(async ({ t, sort }) => {
+    const [row] = await run(sb.from('tasks').update({ sort }).eq('id', t.id).select());
+    syncRow('tasks', t, row);
+  }));
+  app.render();
 }
 
 // Refresh what database triggers may have changed: the parent group and the project.
