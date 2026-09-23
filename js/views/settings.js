@@ -15,7 +15,7 @@ async function loadSettings() {
   loading = true;
   try {
     [apiTokens, emailSenders] = await Promise.all([
-      run(sb.from('api_tokens').select('id,name,token_hint,last_used_at,created_at').order('created_at')),
+      run(sb.from('api_tokens').select('id,name,token_hint,last_used_at,created_at,scope').order('created_at')),
       run(sb.from('email_senders').select('id,email').order('created_at')),
     ]);
   } finally { loading = false; }
@@ -25,13 +25,13 @@ async function loadSettings() {
 export function viewSettings() {
   if (apiTokens === null) loadSettings();
   const rows = (apiTokens || []).map((t) => `<li class="row" style="cursor:default">
-      <div class="row-main"><div class="row-title">${esc(t.name)} <span class="chip">…${esc(t.token_hint)}</span></div>
+      <div class="row-main"><div class="row-title">${esc(t.name)} <span class="chip">…${esc(t.token_hint)}</span>${t.scope === 'geo' ? ' <span class="chip">📍 Location alerts only</span>' : ''}</div>
       <div class="row-meta"><span>Created ${esc(fmtDate(t.created_at))}</span><span>${t.last_used_at ? `Last used ${esc(fmtDate(t.last_used_at))}` : 'Never used'}</span></div></div>
       <button class="btn small danger" data-revoke="${t.id}">Revoke</button></li>`).join('');
   return `<div class="view-head"><h1>Settings</h1></div>
     <p class="view-sub">Signed in as ${esc(app.user.email)}</p>
     <h2 class="section-title">Agent access (MCP)</h2>
-    <p class="view-sub">Tokens let AI agents like Claude read and update your todos through <code>${MCP_URL}</code>. Each token has full access to your account; revoke any you no longer use.</p>
+    <p class="view-sub">Tokens let AI agents like Claude read and update your todos through <code>${MCP_URL}</code>. Agent tokens have full access to your account; location keys (from Nearby → Alerts) can only trigger alerts. Revoke any you no longer use.</p>
     <button class="btn primary" data-act="new-token">Create token</button>
     ${apiTokens === null ? '<p class="empty">Loading…</p>' : rows ? `<ul class="list" style="margin-top:12px">${rows}</ul>` : '<p class="empty">No tokens yet.</p>'}
     <h2 class="section-title">Email capture</h2>

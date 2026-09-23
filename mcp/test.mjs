@@ -3,10 +3,12 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
+const pushed = []; // requests to push services
 globalThis.fetch = async (url, init = {}) => {
+  if (String(url).startsWith('https://push.example')) { pushed.push({ url: String(url), init }); return new Response(null, { status: String(url).includes('gone') ? 410 : 201 }); }
   const u = new URL(url); const table = u.pathname.split('/').pop();
   const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','or'].includes(k));
   const ors = [...u.searchParams].filter(([k]) => k === 'or').map(([, v]) => v.slice(1, -1).match(/[a-z_]+\.(?:ilike\.\*[^*]*\*|in\.\([^)]*\)|not\.is\.null|is\.null|(?:lt|lte|gte|gt|eq)\.[^,)]+)/g) || []);
@@ -175,4 +177,72 @@ assert(stranger.rejected && db.tasks.length === before + 1, 'unknown sender reje
 const spoof = mail('robert@douglasmining.com', 'Spoofed', 'x', 'dkim=pass header.d=evil.com; dmarc=fail');
 await worker.email(spoof, env);
 assert(spoof.rejected && db.tasks.length === before + 1, 'spoofed From rejected, no task');
+
+// ---------- Web Push crypto ----------
+const { encryptPayload, vapidHeader, unb64url, b64url } = await import('./src/push.js');
+const subtle = crypto.subtle;
+const ua = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+const uaPub = new Uint8Array(await subtle.exportKey('raw', ua.publicKey));
+const authSecret = crypto.getRandomValues(new Uint8Array(16));
+const keys = { p256dh: b64url(uaPub), auth: b64url(authSecret) };
+const hk = async (salt, ikm, info, len) => new Uint8Array(await subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info }, await subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']), len * 8));
+async function decrypt(body) { // what the browser does (RFC 8291)
+  const salt = body.slice(0, 16); const idlen = body[20]; const asPub = body.slice(21, 21 + idlen); const cipher = body.slice(21 + idlen);
+  const asKey = await subtle.importKey('raw', asPub, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const ecdh = new Uint8Array(await subtle.deriveBits({ name: 'ECDH', public: asKey }, ua.privateKey, 256));
+  const te = new TextEncoder(); const cat = (...a) => { const o = new Uint8Array(a.reduce((n, x) => n + x.length, 0)); let i = 0; a.forEach((x) => { o.set(x, i); i += x.length; }); return o; };
+  const ikm = await hk(authSecret, ecdh, cat(te.encode('WebPush: info\0'), uaPub, asPub), 32);
+  const cek = await hk(salt, ikm, te.encode('Content-Encoding: aes128gcm\0'), 16);
+  const nonce = await hk(salt, ikm, te.encode('Content-Encoding: nonce\0'), 12);
+  const plain = new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: nonce }, await subtle.importKey('raw', cek, 'AES-GCM', false, ['decrypt']), cipher));
+  assert(plain[plain.length - 1] === 2, 'push: final-record delimiter');
+  return new TextDecoder().decode(plain.slice(0, -1));
+}
+const msg = JSON.stringify({ title: '📍 You’re at Home Depot', body: 'Buy fuel filter' });
+const sealed = await encryptPayload(msg, keys);
+assert(new DataView(sealed.buffer).getUint32(16) === 4096 && sealed[20] === 65, 'push: aes128gcm header (rs 4096, 65-byte key id)');
+assert(await decrypt(sealed) === msg, 'push: payload decrypts to the original (RFC 8291 round trip)');
+const vapid = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+env.VAPID_PRIVATE_JWK = JSON.stringify(await subtle.exportKey('jwk', vapid.privateKey));
+env.VAPID_PUBLIC_KEY = b64url(await subtle.exportKey('raw', vapid.publicKey));
+const vh = await vapidHeader('https://push.example.com/abc', env);
+const [, jwt, k] = vh.match(/^vapid t=([^,]+), k=(.+)$/);
+const [h, c, sig] = jwt.split('.');
+assert(JSON.parse(new TextDecoder().decode(unb64url(c))).aud === 'https://push.example.com' && k === env.VAPID_PUBLIC_KEY, 'vapid: audience is the push origin, key attached');
+assert(await subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, vapid.publicKey, unb64url(sig), new TextEncoder().encode(`${h}.${c}`)), 'vapid: ES256 signature verifies');
+
+// ---------- /geo (iPhone Shortcuts automation) ----------
+const GEO = 'tt_' + 'g'.repeat(32);
+db.api_tokens.push({ id: 'tg', user_id: UID, token_hash: createHash('sha256').update(GEO).digest('hex'), scope: 'geo' });
+const PL = '22222222-2222-2222-2222-222222222222';
+const PL2 = '33333333-3333-3333-3333-333333333333';
+db.places.push({ id: PL, user_id: UID, name: 'Home Depot', lat: 29.76, lng: -95.37, radius_m: 402, archived_at: null },
+  { id: PL2, user_id: UID, name: 'Old unit', lat: 29.9, lng: -95.5, radius_m: 402, archived_at: '2026-01-01T00:00:00Z' });
+const tag = { id: 'gt1', user_id: UID, name: 'Hardware', parent_id: null, place_id: PL, location_trigger: 'nearby', location_radius_m: null };
+db.tags.push(tag);
+const mk = (o) => { const t = { id: id(), user_id: UID, parent_id: null, project_id: null, completed_at: null, dropped_at: null, defer_at: null, place_id: null, location_trigger: null, location_radius_m: null, ...o }; db.tasks.push(t); return t; };
+mk({ title: 'Buy fuel filter', place_id: PL, location_trigger: 'arrive' });
+const tagged = mk({ title: 'Screws' });
+db.task_tags.push({ task_id: tagged.id, tag_id: 'gt1', user_id: UID });
+mk({ title: 'Return drill (on leaving)', place_id: PL, location_trigger: 'leave' });
+mk({ title: 'Deferred caulk', place_id: PL, location_trigger: 'arrive', defer_at: '2099-01-01T00:00:00Z' });
+mk({ title: 'No alert here', place_id: PL });
+db.push_subscriptions.push({ id: 'ps1', user_id: UID, endpoint: 'https://push.example.com/dev1', ...keys }, { id: 'ps2', user_id: UID, endpoint: 'https://push.example.com/gone', ...keys });
+const geo = async (qs, init = {}) => { const r = await worker.fetch(new Request(`https://mcp.todotooling.com/geo?${qs}`, init), env, ctx); return { status: r.status, body: await r.json() }; };
+let g = await geo(`t=${GEO}&place=${PL}&event=arrive`);
+assert(g.status === 200 && g.body.actions.sort().join('|') === 'Buy fuel filter|Screws', `geo arrive: own "arrive" + tag-inherited "nearby"; not leave, deferred or alert-less (${g.body.actions})`);
+assert(g.body.devices === 2 && g.body.sent === 1 && pushed.length === 2, 'geo: pushed to every device');
+assert(!db.push_subscriptions.some((s) => s.id === 'ps2'), 'geo: expired (410) subscription removed');
+const last = pushed[0];
+assert(last.init.headers['Content-Encoding'] === 'aes128gcm' && /^vapid t=/.test(last.init.headers.Authorization), 'geo: push request is encrypted and VAPID-signed');
+assert(JSON.parse(await decrypt(new Uint8Array(last.init.body))).title === '📍 You’re at Home Depot', 'geo: device can read the notification');
+g = await geo(`t=${GEO}&place=${PL}&event=leave`);
+assert(g.body.actions.join() === 'Return drill (on leaving)', 'geo leave: only leave alerts');
+g = await geo('', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: GEO, event: 'test' }) });
+assert(g.status === 200 && g.body.sent === 1, 'geo test (POST body) sends a test notification');
+assert((await geo(`t=${GEO}&place=${PL2}&event=arrive`)).status === 404, 'geo: archived place -> 404');
+assert((await geo(`t=${GEO}&place=${PL}&event=teleport`)).status === 400, 'geo: bad event -> 400');
+assert((await geo(`t=tt_${'x'.repeat(30)}&place=${PL}&event=arrive`)).status === 401, 'geo: unknown key -> 401');
+assert((await call('initialize', { protocolVersion: '2025-06-18' }, GEO)).status === 401, 'location key cannot use MCP');
+assert((await geo(`t=${TOKEN}&place=${PL}&event=arrive`)).status === 200, 'full token also works at /geo');
 console.log('ALL PASSED');

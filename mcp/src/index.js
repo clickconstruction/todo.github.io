@@ -7,6 +7,7 @@
 // below is explicitly scoped to the token owner's user_id.
 
 import PostalMime from 'postal-mime';
+import { handleGeo } from './geo.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -29,6 +30,10 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (url.pathname === '/' && request.method === 'GET') {
       return text('Todo Tooling MCP server. Endpoint: POST /mcp with Authorization: Bearer <token from todotooling.com Settings>.');
+    }
+    if (url.pathname === '/geo') {
+      if (!(env.SUPABASE_SECRET_KEY || '').trim()) return json({ error: 'Server not configured' }, 503);
+      return handleGeo(request, env, ctx, { rest: (path, opts) => rest(env, path, opts), sha256Hex, json });
     }
     if (url.pathname !== '/mcp') return text('Not found', 404);
     if (request.method !== 'POST') return text('Method not allowed', 405, { Allow: 'POST' });
@@ -170,8 +175,8 @@ async function authenticate(request, env, ctx) {
   const m = (request.headers.get('Authorization') || '').match(/^Bearer\s+(tt_[A-Za-z0-9_-]{20,})$/);
   if (!m) return null;
   const hash = await sha256Hex(m[1]);
-  const rows = await rest(env, `api_tokens?token_hash=eq.${hash}&select=id,user_id`);
-  if (!rows.length) return null;
+  const rows = await rest(env, `api_tokens?token_hash=eq.${hash}&select=id,user_id,scope`);
+  if (!rows.length || rows[0].scope !== 'full') return null; // location keys only work at /geo
   ctx.waitUntil(rest(env, `api_tokens?id=eq.${rows[0].id}`, { method: 'PATCH', body: { last_used_at: new Date().toISOString() } }).catch(() => {}));
   return { userId: rows[0].user_id };
 }

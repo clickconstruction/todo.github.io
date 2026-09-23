@@ -19,8 +19,9 @@ async function reload() {
   const { app } = await import('/js/state.js');
   app.review = null; app.reviewStats = null; app.here = null; app.locationState = null;
   window.__noMaps = true; // never call Google from tests
+  (await import('/js/alerts.js')).resetAlertState();
   window.__geo = { state: 'prompt', position: { lat: 29.7610, lng: -95.3705, accuracy: 20 } }; // ~400 ft from mock Home Depot
-  try { localStorage.removeItem('todo.here'); localStorage.removeItem('todo.nearby.within'); } catch { /* ignore */ }
+  try { ['todo.here', 'todo.nearby.within', 'todo.geo.alerts', 'todo.geo.key'].forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ }
   const { setFilter } = await import('/js/filter.js');
   setFilter({ show: 'remaining', fits: 0 });
   const [{ loadAll }, { render }] = await Promise.all([import('/js/data.js'), import('/js/router.js')]);
@@ -35,7 +36,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby };
+  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -613,4 +614,53 @@ async function nearby(check) {
   app.here = null; app.locationState = 'denied';
   await go('#nearby');
   check('denied shows how to fix and Try again', has(undefined, 'location is off', 'try again'));
+}
+
+// Location alerts engine (while the app is open) and the background-alerts setup screen.
+async function alerts(check) {
+  const { db } = await import('/js/state.js');
+  const { evaluate } = await import('/js/alerts.js');
+  const got = [];
+  window.__notify = (n) => got.push(n);
+  const home = { lat: 29.7600, lng: -95.3700 }; // mock Home Depot, radius 402 m
+  const at = (metersNorth, accuracy = 20) => ({ lat: home.lat + metersNorth / 111320, lng: home.lng, accuracy });
+  const set = (id, fields) => Object.assign(db.tasks.find((t) => t.id === id), fields);
+  set('t11', { place_id: 'pl1', location_trigger: 'arrive' });
+  set('t2', { place_id: 'pl1', location_trigger: 'leave' });
+  set('t10', { place_id: 'pl1', location_trigger: 'arrive' }); // deferred: must never alert
+
+  let out = evaluate(at(2000));
+  check('first fix outside: nothing fires', out.length === 0);
+  out = evaluate(at(100));
+  check('arriving fires once, grouped per place, skips deferred', out.length === 1 && out[0].event === 'arrive' && out[0].tasks.map((t) => t.id).join() === 't11', JSON.stringify(out.map((o) => [o.event, o.tasks.map((t) => t.id)])));
+  check('notification names the place and action', got[0] && got[0].title.includes('Home Depot') && got[0].body.includes('Buy fuel filter') && got[0].url === '#nearby/pl1');
+  check('staying inside does not repeat', evaluate(at(50)).length === 0);
+  check('edge jitter (inside the margin) does not count as leaving', evaluate(at(420)).length === 0);
+  out = evaluate(at(1500));
+  check('leaving fires for leave alerts only', out.length === 1 && out[0].event === 'leave' && out[0].tasks[0].id === 't2');
+  check('a wildly inaccurate fix is ignored', evaluate(at(50, 5000)).length === 0);
+
+  set('t11', { location_trigger: 'nearby' });
+  out = evaluate(at(60), Date.now());
+  check('nearby fires while inside', out.some((o) => o.event === 'nearby'));
+  check('nearby waits 4 hours before repeating', !evaluate(at(60), Date.now() + 3600e3).some((o) => o.event === 'nearby'));
+  check('nearby repeats after 4 hours', evaluate(at(60), Date.now() + 5 * 3600e3).some((o) => o.event === 'nearby'));
+  set('t11', { completed_at: new Date().toISOString() });
+  check('completed actions never alert', !evaluate(at(60), Date.now() + 10 * 3600e3).some((o) => o.tasks.some((t) => t.id === 't11')));
+  window.__notify = undefined;
+
+  // Setup screen.
+  await go('#alerts');
+  check('alerts screen explains both modes', has(undefined, 'while the app is open', 'in the background (iphone)', 'shortcuts'));
+  check('no key yet: URLs hidden, test disabled', !$('[data-copy-geo]') && $('[data-act="test-alert"]').disabled);
+  $('[data-act="create-geo-key"]').click();
+  await wait(250);
+  const key = T().api_tokens.find((t) => t.scope === 'geo');
+  check('location key stored hashed with geo scope', key && key.token_hash.length === 64 && !JSON.stringify(key).includes(localStorage.getItem('todo.geo.key')));
+  const urls = $$('[data-copy-geo]').map((b) => b.dataset.copyGeo);
+  check('per-place Arrive/Leave URLs use the key', urls.length >= 2 && urls.every((u) => u.startsWith('https://mcp.todotooling.com/geo?t=tt_') && /&place=pl\d&event=(arrive|leave)$/.test(u)), urls[0]);
+  check('Home Depot marked as needing Leave (t2)', has('.alert-place', 'home depot', 'leave'));
+  await go('#settings');
+  await wait(200);
+  check('settings labels location keys', has(undefined, 'location alerts only'));
 }

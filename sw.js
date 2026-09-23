@@ -1,7 +1,7 @@
 // App-shell service worker: precache the shell, serve it cache-first, and
 // leave Supabase API traffic to the network. Bump VERSION on every deploy
 // that changes a shell file so clients pick up the new copy.
-const VERSION = 'v23';
+const VERSION = 'v24';
 const SHELL = [
   './',
   'index.html',
@@ -17,9 +17,11 @@ const SHELL = [
   'js/inspector.js',
   'js/router.js',
   'js/geo.js',
+  'js/alerts.js',
   'js/places.js',
   'js/maps.js',
   'js/views/nearby.js',
+  'js/views/alerts.js',
   'js/editors/place.js',
   'js/views/basic.js',
   'js/views/forecast.js',
@@ -63,4 +65,23 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || fetch(e.request))
   );
+});
+
+// Location alerts: from the app (showNotification) or pushed by the server (iPhone Shortcuts automation).
+self.addEventListener('push', (e) => {
+  let msg = {};
+  try { msg = e.data ? e.data.json() : {}; } catch { msg = { title: 'Todo Tooling', body: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(msg.title || 'Todo Tooling', {
+    body: msg.body || '', tag: msg.tag, data: { url: msg.url || '#nearby' }, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png',
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || '#nearby', self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+    const win = wins.find((w) => w.url.startsWith(self.registration.scope));
+    if (win) return win.focus().then(() => win.navigate(url));
+    return self.clients.openWindow(url);
+  }));
 });

@@ -10,6 +10,8 @@ routes = [
 [vars]
 SUPABASE_URL = "https://cgssdelgtxlrfgozchps.supabase.co"
 TIMEZONE = "America/Chicago"
+# Web Push (VAPID) public key; the private JWK is the secret VAPID_PRIVATE_JWK.
+VAPID_PUBLIC_KEY = "BFWjkoky_gLUckVvLVM9kosRLJ-WNE6aI4w4pRtya0FjZexa72ymNRyITiv3hYr3bMlcXrprfyzJud8JEZQNoGk"
 
-# Secret (never committed): SUPABASE_SECRET_KEY
+# Secrets (never committed): SUPABASE_SECRET_KEY, VAPID_PRIVATE_JWK
 #   npx wrangler@3 secret put SUPABASE_SECRET_KEY

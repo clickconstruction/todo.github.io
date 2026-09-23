@@ -424,3 +424,13 @@ h1.review { color: #3b82f6; }
 .map-pin.active .map-pin-head { transform: scale(1.2); box-shadow: 0 0 0 4px rgba(63,191,127,.35), 0 2px 6px rgba(0,0,0,.35); }
 .map-pin-label { margin-top: 3px; padding: 2px 6px; border-radius: 6px; background: rgba(0,0,0,.65); color: #fff; font: 600 12px/1.2 -apple-system, sans-serif; white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 .map-you { width: 18px; height: 18px; border-radius: 50%; background: #4f8cff; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(79,140,255,.25), 0 1px 4px rgba(0,0,0,.4); }
+
+/* Alerts setup */
+.steps { list-style: none; padding: 0; margin: 8px 0 24px; display: grid; gap: 12px; }
+.step { display: grid; grid-template-columns: 32px 1fr; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.step p { margin: 4px 0 8px; color: var(--muted); }
+.step-n { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); font-weight: 700; }
+.step.done .step-n { background: var(--here); color: #fff; }
+.alert-places { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 10px; }
+.alert-place { border-top: 1px solid var(--line); padding-top: 10px; }
+.alert-urls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }

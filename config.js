@@ -12,3 +12,6 @@ window.SUPABASE_ANON_KEY = 'sb_publishable_5bN5RarF89iKs2BeAHJNXQ_I9GWvrrL';
 // and Routes. The MCP server uses a separate key stored as a Worker secret.
 window.GOOGLE_MAPS_KEY = 'AIzaSyCwl3XS50OjBYS0mbD_A_MF93BFUgUBGUo';
 window.GOOGLE_MAP_ID = '194508c66d711de5dd00d220';
+
+// Web Push (VAPID) public key, for background location alerts. The private key lives only on the server.
+window.VAPID_PUBLIC_KEY = 'BFWjkoky_gLUckVvLVM9kosRLJ-WNE6aI4w4pRtya0FjZexa72ymNRyITiv3hYr3bMlcXrprfyzJud8JEZQNoGk';

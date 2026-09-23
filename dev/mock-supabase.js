@@ -62,7 +62,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      api_tokens: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      api_tokens: [], push_subscriptions: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 

@@ -15,6 +15,8 @@ import { setFilter } from './filter.js';
 import { openSheet } from './state.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
+import { enableAlerts } from './alerts.js';
+import { subscribePush, createGeoKey, testAlert, copyGeoUrl, resetAlerts } from './views/alerts.js';
 import { openPlaceEditor, openTagEditor } from './editors/place.js';
 import { setWithin } from './views/nearby.js';
 import { hereNowCount } from './places.js';
@@ -37,6 +39,10 @@ const ACTIONS = {
   'new-tag': createTag,
   'new-place': () => openPlaceEditor(null),
   'request-location': () => requestLocation().then(render, render),
+  'enable-alerts': () => enableAlerts().then(render),
+  'subscribe-push': subscribePush,
+  'create-geo-key': createGeoKey,
+  'test-alert': testAlert,
   'toggle-archived-places': () => { app.showArchivedPlaces = !app.showArchivedPlaces; render(); },
   'new-token': createToken,
   'sign-out': () => sb.auth.signOut(),
@@ -101,6 +107,7 @@ const CLICKS = [
   ['[data-move]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.move); if (t) moveTask(t, Number(el.dataset.dir)); }],
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
+  ['[data-copy-geo]', (el) => copyGeoUrl(el)],
   ['[data-edit-tag]', (el) => openTagEditor(byId(db.tags, el.dataset.editTag))],
   ['[data-edit-folder]', (el) => openFolderEditor(byId(db.folders, el.dataset.editFolder))],
   ['[data-add-project]', (el) => openProjectEditor(null, { folder_id: el.dataset.addProject })],
@@ -210,6 +217,7 @@ $('#auth-signup').onclick = async () => {
 async function showApp(session) {
   app.user = session ? session.user : null;
   resetSettings();
+  resetAlerts();
   $('#auth').hidden = !!app.user;
   $('#app').hidden = !app.user;
   if (!app.user) return;

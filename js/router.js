@@ -9,17 +9,18 @@ import { viewSearch } from './views/search.js';
 import { viewDone } from './views/done.js';
 import { viewSettings } from './views/settings.js';
 import { viewNearby, viewPlaces, mountNearbyMap } from './views/nearby.js';
+import { viewAlerts } from './views/alerts.js';
 import { hereNowCount } from './places.js';
 
 const VIEWS = {
   search: viewSearch, inbox: viewInbox, forecast: viewForecast, projects: viewProjects, project: viewProject,
   tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone, flagged: viewFlagged, review: viewReview,
-  nearby: viewNearby, places: viewPlaces,
+  nearby: viewNearby, places: viewPlaces, alerts: viewAlerts,
 };
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
 const AFTER = { nearby: mountNearbyMap };
 // Detail views highlight their parent tab.
-const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby' };
+const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby' };
 
 export function render() {
   if (location.hash === '#today') { history.replaceState(null, '', '#forecast'); } // old links
@@ -36,7 +37,7 @@ export function render() {
   $('#badge-review').textContent = reviewDueCount() || '';
   $('#badge-nearby').textContent = hereNowCount() || '';
   // Views that live under "More" on phones light up the More tab.
-  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places'].includes(view));
+  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts'].includes(view));
   renderInspector();
   if ('setAppBadge' in navigator) (inboxCount + dueCount ? navigator.setAppBadge(inboxCount + dueCount) : navigator.clearAppBadge()).catch(() => {});
 }
