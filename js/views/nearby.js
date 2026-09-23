@@ -7,6 +7,7 @@ import { filterBar, applyFilter, filterNote } from '../filter.js';
 import { fmtDistance, fmtRadius, deniedHelp } from '../geo.js';
 import { activePlaces, activePlace, placeFor, placeDistance, isInside, actionsAt } from '../places.js';
 import { loadMaps, makeMap, pinEl, youEl, circle, fitTo } from '../maps.js';
+import { errandCandidates } from './errands.js';
 
 const WITHIN_KEY = 'todo.nearby.within';
 const WITHIN = [[0, 'Any distance'], [1609, 'Within 1 mi'], [8047, 'Within 5 mi'], [40234, 'Within 25 mi']];
@@ -65,6 +66,7 @@ export function viewNearby(focusId) {
     ${focus && focus.address ? `<p class="view-sub">${esc(focus.address)} · radius ${fmtRadius(focus.radius_m)}</p>` : ''}
     ${locationCard()}
     ${hasMap ? '<div class="nearby-map" id="nearby-map-slot"></div>' : ''}
+    ${!focus && app.here && errandCandidates().length > 1 ? '<button class="btn errand-btn" data-act="errand-run">🚗 Plan an errand run</button>' : ''}
     ${filterBar(focus || !app.here ? '' : `<label><span aria-hidden="true">📏</span><select data-within aria-label="Distance">${WITHIN.map(([m, l]) => `<option value="${m}" ${within === m ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`)}
     ${filterNote(all)}
     ${sections || (places.length

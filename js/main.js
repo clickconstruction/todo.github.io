@@ -19,6 +19,7 @@ import { enableAlerts } from './alerts.js';
 import { subscribePush, createGeoKey, testAlert, copyGeoUrl, resetAlerts } from './views/alerts.js';
 import { openPlaceEditor, openTagEditor } from './editors/place.js';
 import { setWithin } from './views/nearby.js';
+import { openErrandPlanner } from './views/errands.js';
 import { hereNowCount } from './places.js';
 
 const view = $('#view');
@@ -41,6 +42,7 @@ const ACTIONS = {
   'request-location': () => requestLocation().then(render, render),
   'enable-alerts': () => enableAlerts().then(render),
   'subscribe-push': subscribePush,
+  'errand-run': openErrandPlanner,
   'create-geo-key': createGeoKey,
   'test-alert': testAlert,
   'toggle-archived-places': () => { app.showArchivedPlaces = !app.showArchivedPlaces; render(); },

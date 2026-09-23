@@ -36,7 +36,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts };
+  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -663,4 +663,28 @@ async function alerts(check) {
   await go('#settings');
   await wait(200);
   check('settings labels location keys', has(undefined, 'location alerts only'));
+}
+
+// Errand run planner (offline fallback order in tests; Google Routes is used live).
+async function errands(check) {
+  const { db } = await import('/js/state.js');
+  // Write through the mock database too, so a background reload can't undo the setup.
+  const set = (id, fields) => { Object.assign(T().tasks.find((t) => t.id === id), fields); Object.assign(db.tasks.find((t) => t.id === id), fields); };
+  set('t11', { place_id: 'pl1' }); // Home Depot, 400 ft away
+  set('t1', { place_id: 'pl2' }); // Office, 2.7 mi
+  set('t10', { place_id: 'pl2' }); // deferred: doesn't count
+  const { requestLocation } = await import('/js/geo.js');
+  await requestLocation();
+  await go('#nearby');
+  check('errand button shows with 2+ places', !!$('[data-act="errand-run"]'));
+  $('[data-act="errand-run"]').click();
+  await wait(100);
+  const f = $('#sheet form');
+  check('planner lists places with available action counts', has('#sheet', 'home depot', '1 action', 'office', '1 action'));
+  f.requestSubmit();
+  await wait(200);
+  check('route ordered nearest-next without Google', $$('.errand-order li').map((li) => li.innerText.split(' ')[0]).join() === 'Home,Office', $$('.errand-order li').map((li) => li.innerText).join('|'));
+  const link = $('[data-maps-link]');
+  check('opens Google Maps directions with waypoints and a round trip', link && link.href.startsWith('https://www.google.com/maps/dir/?api=1') && link.href.includes('waypoints=') && link.target === '_blank');
+  $('#sheet').close();
 }

@@ -434,3 +434,11 @@ h1.review { color: #3b82f6; }
 .alert-places { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 10px; }
 .alert-place { border-top: 1px solid var(--line); padding-top: 10px; }
 .alert-urls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+
+/* Errand run */
+.errand-btn { width: 100%; margin: 0 0 12px; }
+.errand-list, .errand-order { margin: 0; padding-left: 0; display: grid; gap: 8px; }
+.errand-list { list-style: none; }
+.errand-order { padding-left: 22px; }
+.errand-result { display: grid; gap: 10px; }
+.errand-result a.btn { text-align: center; text-decoration: none; }
