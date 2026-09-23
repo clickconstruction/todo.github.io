@@ -365,6 +365,7 @@
     await loadTokens();
     const cmd = `claude mcp add --transport http todotooling ${MCP_URL} --header "Authorization: Bearer ${token}"`;
     const sheet = $('#sheet');
+    sheet.classList.remove('full');
     sheet.innerHTML = `<form method="dialog">
       <h2>Token created</h2>
       <p class="view-sub" style="margin:0">Copy it now. It won't be shown again.</p>
@@ -402,6 +403,7 @@
     const projects = db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold' || p.id === t.project_id)
       .sort((a, b) => a.name.localeCompare(b.name));
     const sheet = $('#sheet');
+    sheet.classList.remove('full');
     sheet.innerHTML = `<form method="dialog" id="editor">
       <h2>${task ? 'Edit item' : 'New item'}</h2>
       <input type="text" name="title" value="${esc(t.title)}" placeholder="What is it?" required autocomplete="off">
@@ -416,7 +418,7 @@
         <label>Due<input type="date" name="due_at" value="${toDateInput(t.due_at)}"></label>
       </div>
       <label class="flag-toggle"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}> Flagged</label>
-      <label>Notes<textarea name="notes" placeholder="Links, details…">${esc(t.notes)}</textarea></label>
+      <label class="notes-field">Notes<textarea name="notes" placeholder="Links, details…">${esc(t.notes)}</textarea></label>
       <div class="actions">
         ${task ? '<button type="button" class="btn danger" data-del>Delete</button>' : ''}
         <div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div>
@@ -458,12 +460,20 @@
       sheet.close();
       await saveTask(task, fields, [...selected]);
     };
+    // Long notes (e.g. a forwarded email) earn the whole screen; re-check as the user types.
+    const notes = $('[name=notes]', sheet);
+    const fitNotes = () => sheet.classList.toggle('full', notesAreLong(notes.value));
+    notes.addEventListener('input', fitNotes);
+    fitNotes();
     sheet.showModal();
     if (!task) $('[name=title]', sheet).focus();
   }
 
+  const notesAreLong = (text) => text.length > 280 || text.split('\n').length > 8;
+
   function openQuickEntry() {
     const sheet = $('#sheet');
+    sheet.classList.remove('full');
     sheet.innerHTML = `<form method="dialog" id="quick">
       <h2>Capture to Inbox</h2>
       <input type="text" name="title" placeholder="What's on your mind?" required autocomplete="off" enterkeyhint="done">
