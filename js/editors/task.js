@@ -1,14 +1,14 @@
 // Task editor sheet and quick entry.
-import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, isOpen, taskSort, tagsFor, tagLabel, sortedTags } from '../state.js';
+import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, isOpen, taskSort, tagsFor } from '../state.js';
 import { fmtDateTime, fromDateInput, HOURS } from '../dates.js';
-import { dateField, wireQuickButtons } from '../components.js';
-import { saveTask, ensureTag, capture, addSubAction } from '../data.js';
+import { dateField, estimateField, wireQuickButtons } from '../components.js';
+import { saveTask, capture, addSubAction } from '../data.js';
+import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 
 const notesAreLong = (text) => text.length > 280 || text.split('\n').length > 8;
 
 export function openEditor(task, defaults = {}) {
   const t = task || { title: '', notes: '', project_id: null, flagged: false, defer_at: null, due_at: null, ...defaults };
-  const selected = new Set(task ? tagsFor(task.id).map((x) => x.id) : []);
   const projects = db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold' || p.id === t.project_id)
     .sort((a, b) => a.name.localeCompare(b.name));
   const sheet = openSheet(`<form method="dialog" id="editor">
@@ -18,11 +18,11 @@ export function openEditor(task, defaults = {}) {
       <select name="project_id"><option value="">${task && task.in_inbox ? 'None (stays in Inbox)' : 'None'}</option>
         ${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
       </select></label>
-    <label>Tags <div class="tag-picker" id="tag-picker"></div>
-      <input type="text" id="new-tag" placeholder="New tag (Enter). e.g. Laptop, Waiting : Hiro" autocomplete="off"></label>
+    ${tagPickerHtml()}
     ${dateField('defer_at', 'Defer until', t.defer_at)}
     ${dateField('planned_at', 'Planned', t.planned_at)}
     ${dateField('due_at', 'Due', t.due_at)}
+    ${estimateField(t.estimate_minutes)}
     <label>Subtask of<select name="parent_id"></select></label>
     <label class="flag-toggle"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}> Flagged</label>
     <label class="notes-field">Notes<textarea name="notes" placeholder="Links, details…">${esc(t.notes)}</textarea></label>
@@ -42,23 +42,7 @@ export function openEditor(task, defaults = {}) {
   const form = $('#editor', sheet);
   wireQuickButtons(form);
 
-  const drawTags = () => {
-    $('#tag-picker', sheet).innerHTML = sortedTags().map((tag) =>
-      `<button type="button" class="tag-toggle ${selected.has(tag.id) ? 'on' : ''}" data-tag="${tag.id}">${esc(tagLabel(tag))}</button>`).join('');
-  };
-  drawTags();
-  $('#tag-picker', sheet).onclick = (e) => {
-    const b = e.target.closest('[data-tag]');
-    if (!b) return;
-    selected.has(b.dataset.tag) ? selected.delete(b.dataset.tag) : selected.add(b.dataset.tag);
-    drawTags();
-  };
-  $('#new-tag', sheet).onkeydown = async (e) => {
-    if (e.key !== 'Enter') return;
-    e.preventDefault();
-    const tag = await ensureTag(e.target.value);
-    if (tag) { selected.add(tag.id); e.target.value = ''; drawTags(); }
-  };
+  const selectedTags = wireTagPicker(form, task ? tagsFor(task.id).map((x) => x.id) : []);
 
   // "Subtask of": top-level actions in the chosen project (not this item or its own subtasks).
   const isGroupTask = task && db.tasks.some((c) => c.parent_id === task.id);
@@ -104,6 +88,7 @@ export function openEditor(task, defaults = {}) {
       defer_at: fromDateInput(f.get('defer_at'), HOURS.defer_at),
       planned_at: fromDateInput(f.get('planned_at'), HOURS.planned_at),
       due_at: fromDateInput(f.get('due_at'), HOURS.due_at),
+      estimate_minutes: f.get('estimate_minutes') === '' ? null : Math.max(0, Math.round(Number(f.get('estimate_minutes')))),
     };
     if (f.has('status')) {
       const status = f.get('status');
@@ -115,7 +100,7 @@ export function openEditor(task, defaults = {}) {
     app.doneCache = null;
     sheet.close();
     const wasDropped = !!(task && task.dropped_at); // saveTask updates task in place, so read it first
-    await saveTask(task, fields, [...selected]);
+    await saveTask(task, fields, selectedTags());
     if (task && fields.dropped_at && !wasDropped) {
       const saved = byId(db.tasks, task.id) || task;
       toast('Dropped', { label: 'Undo', run: async () => {

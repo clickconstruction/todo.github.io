@@ -282,3 +282,17 @@ input[type=search]:focus { border-color: var(--accent); }
 .row.group > .row-main .row-title { font-weight: 600; }
 .chip.group-count { background: none; border: 1px solid var(--line); }
 .row-sub { padding-left: 66px; }
+
+/* Row signals: notes icon + tap-to-flag, estimates, project tags */
+.row-signals { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
+.sig-note { font-size: 14px; opacity: .8; padding: 0 4px; }
+.flag-btn { width: 32px; height: 32px; border-radius: 8px; border: none; background: none; color: var(--muted); opacity: .45; font-size: 18px; cursor: pointer; line-height: 1; }
+.flag-btn.on { opacity: 1; }
+.flag-btn:hover { color: var(--muted); background: var(--surface-2); }
+.flag-btn.on { color: var(--flag); }
+.meta-estimate { color: var(--muted); }
+.group-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+.group-tags .chip { font-size: 11px; padding: 1px 7px; }
+.hint { font-weight: 400; color: var(--muted); opacity: .8; font-size: 12px; }
+a.chip { text-decoration: none; }
+a.chip:hover { color: var(--text); }

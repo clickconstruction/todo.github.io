@@ -32,6 +32,13 @@ export const bySort = (a, b) => a.sort - b.sort || a.name.localeCompare(b.name);
 export const PROJECT_STATUSES = [['active', 'Active'], ['on_hold', 'On hold'], ['completed', 'Completed'], ['dropped', 'Dropped']];
 
 export const tagsFor = (taskId) => db.taskTags.filter((x) => x.task_id === taskId).map((x) => byId(db.tags, x.tag_id)).filter(Boolean);
+export const projectTagsFor = (projectId) => db.projectTags.filter((x) => x.project_id === projectId).map((x) => byId(db.tags, x.tag_id)).filter(Boolean);
+// A task's own tags plus its project's tags (actions inherit project tags for tag views and filters).
+export function effectiveTagIds(t) {
+  const ids = new Set(db.taskTags.filter((x) => x.task_id === t.id).map((x) => x.tag_id));
+  if (t.project_id) db.projectTags.forEach((x) => { if (x.project_id === t.project_id) ids.add(x.tag_id); });
+  return ids;
+}
 export const tagLabel = (tag) => {
   const parent = tag.parent_id && byId(db.tags, tag.parent_id);
   return parent ? `${parent.name} : ${tag.name}` : tag.name;

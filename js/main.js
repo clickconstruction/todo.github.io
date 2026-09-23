@@ -1,7 +1,7 @@
 // Todo Tooling entry point: event wiring, auth, service worker.
 import { sb, db, app, $, byId, isOpen, toggleCollapsed } from './state.js';
 import { render } from './router.js';
-import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, moveTask, addSubAction } from './data.js';
+import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, addSubAction } from './data.js';
 import { openEditor, openQuickEntry } from './editors/task.js';
 import { openProjectEditor, openFolderEditor } from './editors/project.js';
 import { onSearchInput } from './views/search.js';
@@ -33,6 +33,8 @@ const CLICKS = [
     if (!t.completed_at && openKids && !confirm(`Complete “${t.title}” and its ${openKids} open action${openKids === 1 ? '' : 's'}?`)) return;
     setCompleted(t, !t.completed_at);
   }],
+  ['[data-flag]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.flag); if (t) updateTask(t, { flagged: !t.flagged }); }],
+  ['[data-flag-project]', (el, e) => { e.stopPropagation(); const p = byId(db.projects, el.dataset.flagProject); if (p) updateProject(p, { flagged: !p.flagged }); }],
   ['[data-toggle-group]', (el, e) => { e.stopPropagation(); toggleCollapsed(el.dataset.toggleGroup); render(); }],
   ['[data-add-sub]', (el, e) => {
     e.stopPropagation();

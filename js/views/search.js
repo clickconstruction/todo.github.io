@@ -1,11 +1,12 @@
 // Search: live local results for open items, plus completed/dropped matches from the server.
-import { sb, db, app, $, esc, byId, isOpen, taskSort, tagsFor, tagLabel } from '../state.js';
+import { sb, db, app, $, esc, byId, isOpen, taskSort, tagLabel, effectiveTagIds } from '../state.js';
 import { taskList } from '../rows.js';
 
 let searchSeq = 0;
 const searchTerms = (q) => q.toLowerCase().split(/\s+/).filter(Boolean);
 const matchesAll = (hay, terms) => { const h = hay.toLowerCase(); return terms.every((w) => h.includes(w)); };
-const taskHaystack = (t) => [t.title, t.notes, t.completion_note, (byId(db.projects, t.project_id) || {}).name, ...tagsFor(t.id).map(tagLabel)].join(' ');
+const taskHaystack = (t) => [t.title, t.notes, t.completion_note, (byId(db.projects, t.project_id) || {}).name,
+  ...[...effectiveTagIds(t)].map((id) => byId(db.tags, id)).filter(Boolean).map(tagLabel)].join(' ');
 
 function searchResultsHtml(q) {
   const terms = searchTerms(q);

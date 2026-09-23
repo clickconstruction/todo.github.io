@@ -1,7 +1,8 @@
 // Project and folder editor sheets. Nothing is deleted: projects are completed/dropped,
 // folders archived (only once they hold no active or on-hold projects; the database enforces this too).
 import { sb, db, app, $, esc, run, syncRow, toast, openSheet, bySort, PROJECT_STATUSES } from '../state.js';
-import { insertFolder, updateProject } from '../data.js';
+import { insertFolder, updateProject, setLinks } from '../data.js';
+import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { PROJECT_KINDS } from '../availability.js';
 
 export function openProjectEditor(project, defaults = {}) {
@@ -20,6 +21,8 @@ export function openProjectEditor(project, defaults = {}) {
       </div></div>
     <p class="view-sub kind-hint" style="margin:0">${esc(PROJECT_KINDS.find(([v]) => v === p.kind)[2])}</p>
     <label class="flag-toggle"><input type="checkbox" name="complete_with_last" ${p.complete_with_last ? 'checked' : ''}> Complete project when its last action is done</label>
+    <label class="flag-toggle"><input type="checkbox" name="flagged" ${p.flagged ? 'checked' : ''}> Flagged <span class="hint">its actions show in Flagged</span></label>
+    ${tagPickerHtml('actions inherit these')}
     ${project ? `<label>Status<select name="status">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
     <label>Notes<textarea name="notes" placeholder="Purpose, what done looks like…">${esc(p.notes)}</textarea></label>
     ${project ? '<p class="view-sub" style="margin:0">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>' : ''}
@@ -34,6 +37,7 @@ export function openProjectEditor(project, defaults = {}) {
     newFolder.required = !newFolder.hidden;
     if (!newFolder.hidden) newFolder.focus();
   };
+  const selectedTags = wireTagPicker(form, project ? db.projectTags.filter((x) => x.project_id === project.id).map((x) => x.tag_id) : []);
   form.addEventListener('change', (e) => {
     if (e.target.name === 'kind') $('.kind-hint', sheet).textContent = PROJECT_KINDS.find(([v]) => v === e.target.value)[2];
   });
@@ -47,13 +51,17 @@ export function openProjectEditor(project, defaults = {}) {
       if (!folder) return;
       folder_id = folder.id;
     }
-    const fields = { name: f.get('name').trim(), folder_id, notes: f.get('notes'), kind: f.get('kind') || 'parallel', complete_with_last: f.get('complete_with_last') === 'on' };
+    const fields = { name: f.get('name').trim(), folder_id, notes: f.get('notes'), kind: f.get('kind') || 'parallel', complete_with_last: f.get('complete_with_last') === 'on', flagged: f.get('flagged') === 'on' };
     if (project) fields.status = f.get('status');
     if (!fields.name) return;
     sheet.close();
-    if (project) return updateProject(project, fields);
+    if (project) {
+      await setLinks('project_tags', 'projectTags', 'project_id', project.id, selectedTags());
+      return updateProject(project, fields);
+    }
     const [row] = await run(sb.from('projects').insert({ ...fields, sort: db.projects.length }).select());
     db.projects.push(row);
+    await setLinks('project_tags', 'projectTags', 'project_id', row.id, selectedTags());
     location.hash = `#project/${row.id}`;
   };
   sheet.showModal();

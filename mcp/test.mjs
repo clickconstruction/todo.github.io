@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 globalThis.fetch = async (url, init = {}) => {
@@ -26,6 +26,7 @@ globalThis.fetch = async (url, init = {}) => {
     if (op === 'not') return r[k] != null;
     if (op === 'lt') return r[k] && r[k] < val;
     if (op === 'gte') return r[k] && r[k] >= val;
+    if (op === 'lte') return r[k] != null && (typeof r[k] === 'number' ? r[k] <= Number(val) : r[k] <= val);
     return true;
   });
   const m = init.method || 'GET'; const rows = db[table];
@@ -79,6 +80,13 @@ const nextActs = await tool('list_tasks', { project: 'Seq', available_only: true
 assert(nextActs.count === 1 && nextActs.items[0].id === s1.id, 'available_only: sequential shows only the head');
 const seqRow = (await tool('list_projects', {})).find((x) => x.name === 'Seq');
 assert(seqRow.kind === 'sequential' && seqRow.complete_with_last && seqRow.next_action.id === s1.id, 'list_projects: kind, auto-complete, next action');
+const est = await tool('update_task', { id: s1.id, estimate_minutes: 10 });
+assert(est.estimate_minutes === 10, 'update_task: estimate');
+assert((await tool('list_tasks', { project: 'Seq', max_minutes: 15 })).items.every((x) => x.estimate_minutes <= 15), 'list_tasks: max_minutes');
+const pTagged = await tool('update_project', { project: 'Seq', flagged: true, tags: ['Errands'] });
+assert(pTagged.flagged && pTagged.tags.join() === 'Errands', 'update_project: flag + tags');
+const viaTag = await tool('list_tasks', { tag: 'Errands' });
+assert(viaTag.count === 2 && viaTag.items[0].project_tags.includes('Errands'), 'tag filter includes actions inherited from project tags');
 const kindChange = await tool('update_project', { project: 'Seq', kind: 'parallel', complete_with_last: false });
 assert(kindChange.kind === 'parallel' && kindChange.complete_with_last === false, 'update_project: kind + complete_with_last');
 assert((await tool('list_tasks', { project: 'Seq', available_only: true })).count === 2, 'parallel: all available');

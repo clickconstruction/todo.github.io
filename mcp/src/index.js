@@ -242,9 +242,11 @@ class Api {
 
   async shape(tasks) {
     if (!tasks.length) return [];
-    const [{ projects, tags, tagLabel }, links] = await Promise.all([
+    const projectIds = [...new Set(tasks.map((t) => t.project_id).filter(Boolean))];
+    const [{ projects, tags, tagLabel }, links, pLinks] = await Promise.all([
       this.lookups(),
       this.q(`task_tags?${this.u}&task_id=${inList(tasks.map((t) => t.id))}&select=task_id,tag_id`),
+      projectIds.length ? this.q(`project_tags?${this.u}&project_id=${inList(projectIds)}&select=project_id,tag_id`) : [],
     ]);
     return tasks.map((t) => ({
       id: t.id,
@@ -253,6 +255,8 @@ class Api {
       project: (projects.find((p) => p.id === t.project_id) || {}).name || null,
       project_id: t.project_id,
       tags: links.filter((l) => l.task_id === t.id).map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel),
+      project_tags: pLinks.filter((l) => l.project_id === t.project_id).map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel),
+      estimate_minutes: t.estimate_minutes ?? undefined,
       in_inbox: t.in_inbox,
       status: t.completed_at ? 'completed' : t.dropped_at ? 'dropped' : 'open',
       flagged: t.flagged,
@@ -369,6 +373,7 @@ const TOOLS = [
         planned: { type: 'string', description: 'YYYY-MM-DD when the user intends to do it' },
         due: { type: 'string', description: 'YYYY-MM-DD hard deadline only' },
         defer: { type: 'string', description: 'YYYY-MM-DD (hidden until then)' },
+        estimate_minutes: { type: 'integer', description: 'How long it takes, in minutes' },
       },
       required: ['title'],
     },
@@ -382,7 +387,7 @@ const TOOLS = [
         body.sort = sib.length ? (sib[0].sort || 0) + 1 : 0;
       }
       const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body });
-      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'planned', 'defer'].includes(k) && v !== undefined));
+      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes'].includes(k) && v !== undefined));
       if (!Object.keys(fields).length) return (await api.shape([row]))[0];
       return TOOLS.find((t) => t.name === 'update_task').run(api, { id: row.id, ...fields });
     },
@@ -432,6 +437,7 @@ const TOOLS = [
         project: { type: 'string', description: 'Project name or id' },
         tag: { type: 'string', description: 'Tag label, e.g. "Laptop" or "Waiting : Hiro" (a parent tag includes its children)' },
         flagged: { type: 'boolean' },
+        max_minutes: { type: 'integer', description: 'Only actions with an estimate of at most this many minutes ("I have 15 minutes")' },
         available_only: { type: 'boolean', description: 'Only actions that can be done now (not deferred, not waiting in a sequential project, project active). This is the Next Actions list.' },
         due_before: { type: 'string', description: 'YYYY-MM-DD; items due on or before this date' },
         include_completed: { type: 'boolean', default: false },
@@ -442,6 +448,7 @@ const TOOLS = [
       const f = [api.u, 'select=*', `limit=${Math.min(+a.limit || 100, 500)}`, 'order=created_at.asc'];
       if (!a.include_completed) f.push(OPEN);
       if (a.flagged !== undefined) f.push(`flagged=is.${!!a.flagged}`);
+      if (a.max_minutes !== undefined) f.push(`estimate_minutes=lte.${Math.max(0, Math.round(Number(a.max_minutes)))}`);
       if (a.due_before) f.push(`due_at=lt.${zonedToIso(a.due_before, 24, api.tz)}`);
       if (a.project) f.push(`project_id=eq.${await api.resolveProject(a.project)}`);
       if (a.search) {
@@ -466,9 +473,16 @@ const TOOLS = [
         const tag = tags.find((t) => tagLabel(t).toLowerCase() === a.tag.toLowerCase()) || tags.find((t) => t.name.toLowerCase() === a.tag.toLowerCase());
         if (!tag) return { count: 0, items: [], note: `No tag "${a.tag}"` };
         const tagIds = [tag.id, ...tags.filter((t) => t.parent_id === tag.id).map((t) => t.id)];
-        const links = await api.q(`task_tags?${api.u}&tag_id=${inList(tagIds)}&select=task_id`);
-        if (!links.length) return { count: 0, items: [] };
-        f.push(`id=${inList([...new Set(links.map((l) => l.task_id))])}`);
+        // A project's tags apply to its actions.
+        const [links, pLinks] = await Promise.all([
+          api.q(`task_tags?${api.u}&tag_id=${inList(tagIds)}&select=task_id`),
+          api.q(`project_tags?${api.u}&tag_id=${inList(tagIds)}&select=project_id`),
+        ]);
+        const direct = links.map((l) => l.task_id);
+        const viaProject = pLinks.length ? (await api.q(`tasks?${api.u}&project_id=${inList([...new Set(pLinks.map((l) => l.project_id))])}&select=id`)).map((t) => t.id) : [];
+        const ids = [...new Set([...direct, ...viaProject])];
+        if (!ids.length) return { count: 0, items: [] };
+        f.push(`id=${inList(ids)}`);
       }
       let rows = await api.q(`tasks?${f.join('&')}`);
       if (a.available_only) {
@@ -515,6 +529,7 @@ const TOOLS = [
         defer: { type: ['string', 'null'], description: 'YYYY-MM-DD (hidden until then) or null' },
         status: { type: 'string', enum: ['open', 'completed', 'dropped'], description: 'Only change when the user says so' },
         completion_note: { type: 'string' },
+        estimate_minutes: { type: ['integer', 'null'], description: 'How long it takes, in minutes; null to clear' },
       },
       required: ['id'],
     },
@@ -529,6 +544,7 @@ const TOOLS = [
       if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, 0, api.tz);
       if (a.project !== undefined) patch.project_id = await api.resolveProject(a.project);
       if (a.completion_note !== undefined) patch.completion_note = String(a.completion_note).trim();
+      if (a.estimate_minutes !== undefined) patch.estimate_minutes = a.estimate_minutes === null ? null : Math.max(0, Math.round(Number(a.estimate_minutes)));
       if (a.status !== undefined) {
         patch.completed_at = a.status === 'completed' ? (task.completed_at || new Date().toISOString()) : null;
         patch.dropped_at = a.status === 'dropped' ? (task.dropped_at || new Date().toISOString()) : null;
@@ -669,6 +685,8 @@ const TOOLS = [
         notes: { type: 'string' },
         kind: { type: 'string', enum: ['parallel', 'sequential', 'single_actions'] },
         complete_with_last: { type: 'boolean' },
+        flagged: { type: 'boolean', description: 'Flagged projects put all their actions in the Flagged list' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Replaces the project tags; its actions inherit them' },
       },
       required: ['project'],
     },
@@ -681,10 +699,19 @@ const TOOLS = [
       if (a.notes !== undefined) patch.notes = a.notes;
       if (a.kind !== undefined) patch.kind = a.kind;
       if (a.complete_with_last !== undefined) patch.complete_with_last = !!a.complete_with_last;
+      if (a.flagged !== undefined) patch.flagged = !!a.flagged;
+      if (Array.isArray(a.tags)) {
+        const tagIds = [];
+        for (const l of a.tags) tagIds.push(await api.ensureTag(l));
+        await api.q(`project_tags?${api.u}&project_id=eq.${id}`, { method: 'DELETE' });
+        if (tagIds.length) await api.q('project_tags', { method: 'POST', body: [...new Set(tagIds)].map((tag_id) => ({ project_id: id, tag_id, user_id: api.userId })) });
+      }
       if (Object.keys(patch).length) await api.q(`projects?${api.u}&id=eq.${id}`, { method: 'PATCH', body: patch });
       const [p] = await api.q(`projects?${api.u}&id=eq.${id}&select=*`);
       const folder = p.folder_id ? (await api.q(`folders?${api.u}&id=eq.${p.folder_id}&select=name`))[0] : null;
-      return { id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, folder: folder ? folder.name : null, notes: p.notes || undefined };
+      const { tags: allTags, tagLabel } = await api.lookups();
+      const pt = (await api.q(`project_tags?${api.u}&project_id=eq.${id}&select=tag_id`)).map((l) => allTags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel);
+      return { id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, flagged: p.flagged, tags: pt, folder: folder ? folder.name : null, notes: p.notes || undefined };
     },
   },
   {

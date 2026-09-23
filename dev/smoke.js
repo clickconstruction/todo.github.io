@@ -25,7 +25,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups };
+  const suites = { core, planned, projectTypes, groups, signals };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -246,4 +246,54 @@ async function groups(check) {
   check('completing a group asks first', asked.includes('1 open action'), asked);
   check('group completion closes its open children', !!task('t4').completed_at && !!db.tasks.find((t) => t.title === 'Smoke sub-action').completed_at);
   window.confirm = () => true;
+}
+
+// P4: estimates, row signals, project flags and tags.
+async function signals(check) {
+  const { db } = await import('/js/state.js');
+  const task = (id) => db.tasks.find((t) => t.id === id);
+  const proj = (id) => db.projects.find((p) => p.id === id);
+
+  await go('#project/p1');
+  check('notes icon on rows with notes', $('[data-task="t1"] .sig-note') !== null && $('[data-task="t2"] .sig-note') === null);
+  check('estimate chip', has('[data-task="t1"]', '15m'), text('[data-task="t1"]'));
+  $('[data-flag="t2"]').click();
+  await wait(200);
+  check('tap-to-flag sets flag', task('t2').flagged === true && $('[data-flag="t2"]').classList.contains('on'));
+  $('[data-flag="t2"]').click();
+  await wait(200);
+  check('tap again unflags', task('t2').flagged === false);
+  check('flag click does not open editor', !$('#sheet').open);
+
+  $('[data-task="t2"]').click();
+  await wait(100);
+  const f = $('#editor');
+  $('[data-qe="15"]', f).click(); $('[data-qe="15"]', f).click();
+  check('estimate quick buttons add up', f.elements.estimate_minutes.value === '30', f.elements.estimate_minutes.value);
+  f.requestSubmit();
+  await wait(200);
+  check('estimate saved', task('t2').estimate_minutes === 30, task('t2').estimate_minutes);
+  check('estimate shown on row', has('[data-task="t2"]', '30m'));
+
+  $('[data-flag-project="p1"]').click();
+  await wait(200);
+  check('project flag toggle', proj('p1').flagged === true);
+
+  await go('#project/p3');
+  $('[data-edit-project="p3"]').click();
+  await wait(100);
+  const pf = $('#project-form');
+  $('[data-tag="g2"]', pf).click(); // Phone
+  pf.requestSubmit();
+  await wait(250);
+  check('project tags saved', db.projectTags.some((x) => x.project_id === 'p3' && x.tag_id === 'g2'));
+  check('project header shows its tags', has(undefined, 'Phone'));
+
+  await go('#tag/g2');
+  check('tag view includes actions inherited from tagged project', has(undefined, 'Measure driveway', 'Call GVEC', 'tagged project'), text());
+  await go('#tags');
+  const laptopRow = $$('#view a.group-row').find((a) => a.textContent.includes('Laptop'));
+  check('tag counts include inherited actions', laptopRow && Number(laptopRow.querySelector('.count').textContent) >= 4, laptopRow && laptopRow.textContent);
+  await go('#projects');
+  check('project row shows flag + tags', has(undefined, 'Laptop') && $$('#view a.group-row .meta-flag').length >= 1);
 }

@@ -1,5 +1,5 @@
 // Inbox, Today, Tags and Tag views.
-import { db, esc, byId, isOpen, visible, taskSort, sortedTags, tagLabel } from '../state.js';
+import { db, esc, byId, isOpen, visible, taskSort, sortedTags, tagLabel, effectiveTagIds } from '../state.js';
 import { isOverdue, isDueToday, isDeferred, isPlannedByToday } from '../dates.js';
 import { taskList } from '../rows.js';
 
@@ -30,7 +30,7 @@ export function viewToday() {
 
 export function viewTags() {
   const rows = sortedTags().map((tag) => {
-    const n = db.taskTags.filter((x) => x.tag_id === tag.id && (() => { const t = byId(db.tasks, x.task_id); return t && isOpen(t); })()).length;
+    const n = db.tasks.filter((t) => isOpen(t) && effectiveTagIds(t).has(tag.id)).length;
     return `<a class="group-row ${tag.parent_id ? 'tag-child' : ''}" href="#tag/${tag.id}"><span>🏷️ ${esc(tag.name)}</span><span class="count">${n || ''}</span></a>`;
   }).join('');
   return `<div class="view-head"><h1 class="tags">Tags</h1><button class="btn small primary" data-act="new-tag">+ Tag</button></div>
@@ -42,10 +42,10 @@ export function viewTag(id) {
   const tag = byId(db.tags, id);
   if (!tag) return '<a class="back" href="#tags">‹ Tags</a><p class="empty">Tag not found.</p>';
   const ids = new Set([tag.id, ...db.tags.filter((t) => t.parent_id === tag.id).map((t) => t.id)]);
-  const taskIds = new Set(db.taskTags.filter((x) => ids.has(x.tag_id)).map((x) => x.task_id));
-  const tasks = db.tasks.filter((t) => taskIds.has(t.id) && visible(t)).sort(taskSort);
+  const tasks = db.tasks.filter((t) => visible(t) && [...effectiveTagIds(t)].some((id) => ids.has(id))).sort(taskSort);
+  const projects = db.projects.filter((p) => ['active', 'on_hold'].includes(p.status) && db.projectTags.some((x) => x.project_id === p.id && ids.has(x.tag_id)));
   return `<a class="back" href="#tags">‹ Tags</a>
     <div class="view-head"><h1 class="tags">${esc(tagLabel(tag))}</h1></div>
-    <p class="view-sub">${tasks.filter(isOpen).length} open</p>
+    <p class="view-sub">${tasks.filter(isOpen).length} open${projects.length ? ` · includes actions from ${projects.map((p) => `<a href="#project/${p.id}">${esc(p.name)}</a>`).join(', ')} (tagged project)` : ''}</p>
     ${taskList(tasks) || '<p class="empty">Nothing tagged here.</p>'}`;
 }
