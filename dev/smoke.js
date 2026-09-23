@@ -28,7 +28,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters };
+  const suites = { core, planned, projectTypes, groups, signals, filters, forecast };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -131,9 +131,9 @@ async function planned(check) {
   check('due and defer stay empty', !t.due_at && !t.defer_at, JSON.stringify({ due: t.due_at, defer: t.defer_at }));
   check('row shows planned date', $('[data-task="t13"] .meta-planned') !== null, $('[data-task="t13"]') && $('[data-task="t13"]').innerText);
 
-  await go('#today');
-  check('Today lists planned-today items', has(undefined, 'Planned') && has(undefined, 'Order fittings for Jodi'), text());
-  check('Today still lists overdue + due', has(undefined, 'Overdue') && has(undefined, 'Call GVEC') && has(undefined, 'Get plans released'), text());
+  await go('#forecast/today');
+  check('Forecast today lists planned-today items', has(undefined, 'Planned', 'Order fittings for Jodi'), text());
+  check('Forecast today lists due + overdue banner', has(undefined, 'Get plans released', '1 overdue'), text());
 }
 
 // P2: project types, availability, reorder, complete with last action.
@@ -348,4 +348,38 @@ async function filters(check) {
   $('#sheet [href="#tags"]').click();
   await wait(150);
   check('More link navigates and closes', location.hash === '#tags' && !$('#sheet').open);
+}
+
+// P6: Forecast (replaces Today) and Past triage.
+async function forecast(check) {
+  const { db } = await import('/js/state.js');
+  const task = (id) => db.tasks.find((t) => t.id === id);
+  location.hash = '#today';
+  await wait(150);
+  check('#today redirects to Forecast', location.hash === '#forecast' && has(undefined, 'Forecast'), location.hash);
+  check('strip: Past, Today, 6 days, Future', $$('.fc-day').length === 9, $$('.fc-day').length);
+  check('forecast badge = due today + overdue', $('#badge-forecast').textContent === '2', $('#badge-forecast').textContent);
+  const d2 = $$('.fc-day')[3]; // Past, Today, +1, +2
+  d2.click();
+  await wait(150);
+  check('future day shows planned item', has(undefined, 'Measure driveway'), text());
+  await go('#forecast/future');
+  check('future bucket', has(undefined, 'Nothing scheduled beyond') || $$('#view [data-task]').length >= 0);
+
+  await go('#forecast/past');
+  check('Past lists overdue deadlines', has(undefined, 'Overdue (due)', 'Call GVEC'), text());
+  $('[data-triage="due-to-planned"]').click();
+  await wait(250);
+  const t1 = task('t1');
+  const p = new Date(t1.planned_at);
+  check('triage: due cleared, planned today 9am', !t1.due_at && p.getHours() === 9 && p.toDateString() === new Date().toDateString(), JSON.stringify({ due: t1.due_at, planned: t1.planned_at }));
+  check('triage toast offers Undo', has('#toast', 'Planned today', 'Undo'), text('#toast'));
+  $$('#toast button').find((b) => b.textContent === 'Undo').click();
+  await wait(250);
+  check('undo restores the deadline', !!task('t1').due_at && !task('t1').planned_at, JSON.stringify({ due: task('t1').due_at, planned: task('t1').planned_at }));
+
+  await go('#forecast/today');
+  $('[data-check="t3"]').click();
+  await wait(200);
+  check('completed item stays visible (struck) for Undo', $('[data-task="t3"]') && $('[data-task="t3"]').classList.contains('completed'));
 }

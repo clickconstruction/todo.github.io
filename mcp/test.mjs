@@ -9,13 +9,18 @@ let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, 
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url); const table = u.pathname.split('/').pop();
   const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','or'].includes(k));
-  const ors = [...u.searchParams].filter(([k]) => k === 'or').map(([, v]) => v.slice(1, -1).match(/[a-z_]+\.(?:ilike\.\*[^*]*\*|in\.\([^)]*\)|not\.is\.null|is\.null)/g) || []);
+  const ors = [...u.searchParams].filter(([k]) => k === 'or').map(([, v]) => v.slice(1, -1).match(/[a-z_]+\.(?:ilike\.\*[^*]*\*|in\.\([^)]*\)|not\.is\.null|is\.null|(?:lt|lte|gte|gt|eq)\.[^,)]+)/g) || []);
   const orMatch = (r) => ors.every((conds) => conds.some((c) => {
     const [k, op, ...rest] = c.split('.'); const v = rest.join('.');
     if (op === 'ilike') return (r[k] || '').toLowerCase().includes(decodeURIComponent(v).replace(/\*/g, '').toLowerCase());
     if (op === 'in') return v.slice(1, -1).split(',').map((x) => x.replace(/"/g, '')).includes(String(r[k]));
     if (op === 'not') return r[k] != null;
     if (op === 'is') return r[k] == null;
+    if (op === 'lt') return r[k] != null && r[k] < v;
+    if (op === 'lte') return r[k] != null && r[k] <= v;
+    if (op === 'gt') return r[k] != null && r[k] > v;
+    if (op === 'gte') return r[k] != null && r[k] >= v;
+    if (op === 'eq') return String(r[k]) === v;
     return false;
   }));
   const match = (r) => filters.every(([k, v]) => {
@@ -52,7 +57,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 16 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 16 tools, no internals leaked');
+assert(list.body.result.tools.length === 17 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 17 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -87,6 +92,8 @@ const pTagged = await tool('update_project', { project: 'Seq', flagged: true, ta
 assert(pTagged.flagged && pTagged.tags.join() === 'Errands', 'update_project: flag + tags');
 const viaTag = await tool('list_tasks', { tag: 'Errands' });
 assert(viaTag.count === 2 && viaTag.items[0].project_tags.includes('Errands'), 'tag filter includes actions inherited from project tags');
+const fc = await tool('forecast', { days: 30 });
+assert(fc.days['2026-09-28'] && fc.days['2026-09-28'].planned.some((x) => x.title === 'Schedule backflow test') && fc.days['2026-10-01'].due.some((x) => x.title === 'Schedule backflow test'), 'forecast: planned and due land on their days');
 const fl = await tool('list_flagged', {});
 assert(fl.count >= 2 && fl.by_project.Seq && fl.by_project.Seq.length === 2, 'list_flagged includes actions of flagged projects');
 const kindChange = await tool('update_project', { project: 'Seq', kind: 'parallel', complete_with_last: false });

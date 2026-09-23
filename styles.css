@@ -312,3 +312,19 @@ a.chip:hover { color: var(--text); }
 .more-links { display: grid; gap: 4px; }
 .more-links a { display: flex; gap: 12px; align-items: center; padding: 14px 12px; border-radius: 10px; color: var(--text); text-decoration: none; font-size: 17px; background: var(--surface-2); }
 .more-links a span { font-size: 20px; width: 28px; text-align: center; }
+
+/* Forecast */
+.fc-strip { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; margin: 6px 0 10px; }
+.fc-day { display: grid; justify-items: center; gap: 1px; padding: 8px 2px 6px; border-radius: 10px; text-decoration: none; color: var(--muted); background: var(--surface-2); border: 1px solid transparent; }
+.fc-day.on { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+.fc-label { font-size: 12px; font-weight: 700; }
+.fc-sub { font-size: 12px; min-height: 1em; }
+.fc-n { font-size: 15px; color: var(--text); min-height: 1.2em; }
+.fc-day.late .fc-n, .fc-day.due .fc-n { color: var(--due); }
+.fc-banner { display: block; margin: 0 0 8px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--due) 12%, transparent); color: var(--text); text-decoration: none; font-size: 14px; }
+.section-title .btn.small { margin-left: 8px; text-transform: none; letter-spacing: 0; font-size: 12px; padding: 4px 10px; }
+@media (max-width: 480px) {
+  /* Keep 44px tap targets: the strip scrolls sideways inside itself instead of shrinking. */
+  .fc-strip { grid-template-columns: repeat(9, 46px); overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .fc-day { scroll-snap-align: start; }
+}

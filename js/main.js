@@ -1,7 +1,9 @@
 // Todo Tooling entry point: event wiring, auth, service worker.
 import { sb, db, app, $, byId, isOpen, toggleCollapsed } from './state.js';
 import { render } from './router.js';
-import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, addSubAction } from './data.js';
+import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, addSubAction, bulkUpdate } from './data.js';
+import { forecastData } from './views/forecast.js';
+import { HOURS } from './dates.js';
 import { openEditor, openQuickEntry } from './editors/task.js';
 import { openProjectEditor, openFolderEditor } from './editors/project.js';
 import { onSearchInput } from './views/search.js';
@@ -37,6 +39,16 @@ const CLICKS = [
   }],
   ['[data-flag]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.flag); if (t) updateTask(t, { flagged: !t.flagged }); }],
   ['[data-flag-project]', (el, e) => { e.stopPropagation(); const p = byId(db.projects, el.dataset.flagProject); if (p) updateProject(p, { flagged: !p.flagged }); }],
+  ['[data-triage]', (el) => {
+    const { overdue, plannedPast, today } = forecastData();
+    const at9 = new Date(today); at9.setHours(HOURS.planned_at);
+    if (el.dataset.triage === 'due-to-planned') {
+      if (!confirm(`Turn ${overdue.length} overdue deadline${overdue.length === 1 ? '' : 's'} into plans for today? (Due dates are cleared; use this for dates that were never real deadlines.)`)) return;
+      bulkUpdate(overdue, () => ({ due_at: null, planned_at: at9.toISOString() }), `${overdue.length} moved to Planned today`);
+    } else {
+      bulkUpdate(plannedPast, () => ({ planned_at: at9.toISOString() }), `${plannedPast.length} planned for today`);
+    }
+  }],
   ['[data-toggle-group]', (el, e) => { e.stopPropagation(); toggleCollapsed(el.dataset.toggleGroup); render(); }],
   ['[data-add-sub]', (el, e) => {
     e.stopPropagation();

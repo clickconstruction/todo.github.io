@@ -97,6 +97,24 @@ export async function addSubAction(parent, title) {
   return row;
 }
 
+// Apply the same change to many tasks at once, with one Undo that restores each task's old values.
+export async function bulkUpdate(tasks, fieldsFor, label) {
+  if (!tasks.length) return;
+  const before = tasks.map((t) => ({ t, old: Object.fromEntries(Object.keys(fieldsFor(t)).map((k) => [k, t[k]])) }));
+  await Promise.all(tasks.map(async (t) => {
+    const [row] = await run(sb.from('tasks').update(fieldsFor(t)).eq('id', t.id).select());
+    syncRow('tasks', t, row);
+  }));
+  app.render();
+  toast(label, { label: 'Undo', run: async () => {
+    await Promise.all(before.map(async ({ t, old }) => {
+      const [row] = await run(sb.from('tasks').update(old).eq('id', t.id).select());
+      syncRow('tasks', t, row);
+    }));
+    app.render();
+  } });
+}
+
 // Move an action up/down among its siblings (same project and parent), renumbering sort.
 export async function moveTask(task, dir) {
   const siblings = db.tasks.filter((t) => t.project_id === task.project_id && (t.parent_id || null) === (task.parent_id || null) && isOpen(t)).sort(taskSort);

@@ -1,6 +1,5 @@
 // Inbox, Today, Tags and Tag views.
 import { db, esc, byId, isOpen, visible, taskSort, sortedTags, tagLabel, effectiveTagIds } from '../state.js';
-import { isOverdue, isDueToday, isDeferred, isPlannedByToday } from '../dates.js';
 import { taskList } from '../rows.js';
 import { filterBar, applyFilter, closedFor, withClosed, filterNote } from '../filter.js';
 import { isAvailable } from '../availability.js';
@@ -12,22 +11,6 @@ export function viewInbox() {
     <p class="view-sub">${open} item${open === 1 ? '' : 's'} to clarify</p>
     <form class="capture" data-capture><input type="text" name="title" placeholder="Capture anything…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
     ${taskList(items) || '<p class="empty">Inbox zero. Nice.</p>'}`;
-}
-
-export function viewToday() {
-  const open = db.tasks.filter((t) => visible(t) && !isDeferred(t));
-  const overdue = open.filter((t) => isOpen(t) && isOverdue(t)).sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
-  const today = open.filter((t) => t.due_at && !isOverdue(t) && isDueToday(t)).sort(taskSort);
-  const planned = open.filter((t) => isOpen(t) && isPlannedByToday(t) && !isDueToday(t)).sort((a, b) => new Date(a.planned_at) - new Date(b.planned_at));
-  const flagged = open.filter((t) => t.flagged && !(t.due_at && isDueToday(t)) && !planned.includes(t)).sort(taskSort);
-  const d = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-  let html = `<div class="view-head"><h1 class="today">Today</h1></div><p class="view-sub">${esc(d)}</p>`;
-  if (overdue.length) html += `<h2 class="section-title">Overdue · ${overdue.length}</h2>${taskList(overdue)}`;
-  if (today.length) html += `<h2 class="section-title">Due today</h2>${taskList(today)}`;
-  if (planned.length) html += `<h2 class="section-title">Planned · ${planned.length}</h2>${taskList(planned)}`;
-  if (flagged.length) html += `<h2 class="section-title">Flagged</h2>${taskList(flagged)}`;
-  if (!overdue.length && !today.length && !planned.length && !flagged.length) html += '<p class="empty">Nothing due or flagged. Pick from a project or tag.</p>';
-  return html;
 }
 
 export function viewTags() {

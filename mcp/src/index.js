@@ -498,6 +498,33 @@ const TOOLS = [
     },
   },
   {
+    name: 'forecast',
+    description: 'Day-by-day view of what is due, planned, or becoming available (deferred until that day), plus past-due and past-planned items. Use for "what is coming up this week" and daily planning.',
+    inputSchema: { type: 'object', properties: { days: { type: 'integer', default: 7, description: 'How many days from today (1-60)' } } },
+    async run(api, { days = 7 }) {
+      days = Math.min(Math.max(1, Math.round(Number(days) || 7)), 60);
+      const today = localDate(new Date().toISOString(), api.tz);
+      const start = zonedToIso(today, 0, api.tz);
+      const endDay = localDate(new Date(Date.parse(start) + (days - 1) * 86400000 + 12 * 3600000).toISOString(), api.tz);
+      const end = zonedToIso(endDay, 24, api.tz);
+      const rows = await api.q(`tasks?${api.u}&${OPEN}&or=(due_at.lt.${end},planned_at.lt.${end},defer_at.lt.${end})&select=*`);
+      const items = await api.shape(rows);
+      const out = { today, past: { overdue: [], planned_earlier: [] }, days: {} };
+      for (let i = 0; i < days; i++) {
+        const d = localDate(new Date(Date.parse(start) + i * 86400000 + 12 * 3600000).toISOString(), api.tz);
+        out.days[d] = { due: [], planned: [], becomes_available: [] };
+      }
+      items.forEach((t) => {
+        if (t.due && t.due < today) out.past.overdue.push(t);
+        else if (t.planned && t.planned < today && !(t.due && t.due < today)) out.past.planned_earlier.push(t);
+        if (out.days[t.due]) out.days[t.due].due.push(t);
+        if (out.days[t.planned] && t.planned !== t.due) out.days[t.planned].planned.push(t);
+        if (out.days[t.defer] && t.defer !== t.due && t.defer !== t.planned) out.days[t.defer].becomes_available.push(t);
+      });
+      return out;
+    },
+  },
+  {
     name: 'list_flagged',
     description: 'The Flagged list: flagged actions plus every open action in a flagged project, grouped by project. Pass available_only to hide deferred/queued items.',
     inputSchema: { type: 'object', properties: { available_only: { type: 'boolean', default: false } } },
