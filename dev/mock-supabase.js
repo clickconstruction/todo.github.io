@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      perspectives: [], imports: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      perspectives: [], imports: [], project_templates: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -233,11 +233,12 @@
     folders: () => ({ archived_at: null }),
     tags: () => ({ parent_id: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null }),
     places: () => ({ address: '', google_place_id: null, radius_m: 402, notes: '', archived_at: null }),
+    project_templates: () => ({ icon: '📋', folder_id: null, schedule: null, next_run_at: null, last_run_at: null, sort: 0, archived_at: null }),
     perspectives: () => ({ icon: '🔭', rules: { v: 1, match: 'all', rules: [] }, options: { show: 'available', group_by: 'project', sort_by: 'project', layout: 'tree' }, badge: false, sort: 0, archived_at: null }),
     notifications: () => ({ task_id: null, project_id: null, offset_minutes: 0, at: null, sent_at: null }),
     attachments: () => ({ task_id: null, project_id: null, size: 0, mime: 'application/octet-stream', archived_at: null }),
   };
-  const NO_DELETE = { imports: 'imports are kept.', perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
+  const NO_DELETE = { project_templates: 'templates are archived, not deleted.', imports: 'imports are kept.', perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
 
   // ----- PostgREST-ish filter parsing for .or() strings -----
   function splitTop(s) {
@@ -450,6 +451,35 @@
             .forEach((f) => { f.archived_at = now(); f.external_ref = null; folders++; });
           rec.undone_at = now();
           return { data: { tasks_dropped: tasksDropped, projects_dropped: projectsDropped, folders_archived: folders }, error: null };
+        }
+        // Mirrors create_from_template() (migration 20261001000001), in the device's zone.
+        if (name === 'create_from_template') {
+          const t = tables.project_templates.find((x) => x.id === args.template && !x.archived_at);
+          if (!t) return { data: null, error: { message: 'Template not found.' } };
+          const key = args.anchor || new Date().toISOString().slice(0, 10);
+          const vars = { ...Object.fromEntries((t.body.blanks || []).map((b) => [b.name, b.default || ''])), ...Object.fromEntries(Object.entries(args.vars || {}).filter(([, v]) => v !== '')) };
+          const d = new Date(`${key}T12:00:00Z`);
+          const built = { Date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }), Month: d.toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' }), Year: String(d.getUTCFullYear()) };
+          const b = JSON.parse(JSON.stringify(t.body).replace(/«([^«»]{1,40})»/g, (m, n) => (vars[n] !== undefined ? JSON.stringify(String(vars[n])).slice(1, -1) : built[n] !== undefined ? built[n] : m)));
+          const at = (o, hour) => { if (typeof o !== 'number') return null; const x = new Date(`${key}T00:00:00`); x.setDate(x.getDate() + o); x.setHours(hour, 0, 0, 0); return x.toISOString(); };
+          const pid = id();
+          const np = { ...DEFAULTS.projects(), id: pid, user_id: uid, name: (args.name || b.name || t.name), notes: b.notes || '', folder_id: args.folder || t.folder_id || null, kind: b.kind || 'parallel',
+            complete_with_last: !!b.complete_with_last, flagged: !!b.flagged, review_every: b.review_every || 1, review_unit: b.review_unit || 'week',
+            defer_at: at(b.project_defer, 0), planned_at: at(b.project_planned, 9), due_at: at(b.project_due, 17), template_id: t.id, sort: tables.projects.length, created_at: now(), updated_at: now() };
+          reviewSchedule(np);
+          tables.projects.push(np);
+          (b.tag_ids || []).forEach((g) => { if (tables.tags.some((x) => x.id === g)) tables.project_tags.push({ project_id: pid, tag_id: g, user_id: uid }); });
+          const add = (list, parent, depth) => (list || []).forEach((a, i) => {
+            if (!String(a.title || '').trim()) return;
+            const nt = { ...DEFAULTS.tasks(), id: id(), user_id: uid, title: a.title, notes: a.notes || '', project_id: pid, parent_id: parent, in_inbox: false, flagged: !!a.flagged,
+              estimate_minutes: a.estimate_minutes || null, steps_in_order: !!a.steps_in_order, defer_at: at(a.defer, 0), planned_at: at(a.planned, 9), due_at: at(a.due, 17), sort: i, source: 'template', created_at: now(), updated_at: now() };
+            tables.tasks.push(nt);
+            (a.tag_ids || []).forEach((g) => { if (tables.tags.some((x) => x.id === g)) tables.task_tags.push({ task_id: nt.id, tag_id: g, user_id: uid }); });
+            if (depth < 4) add(a.steps, nt.id, depth + 1);
+          });
+          add(b.actions, null, 1);
+          t.last_run_at = now();
+          return { data: pid, error: null };
         }
         return { data: null, error: { message: `function ${name} does not exist` } };
       },

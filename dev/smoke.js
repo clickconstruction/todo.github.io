@@ -37,7 +37,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -638,6 +638,87 @@ async function onHoldTags(check) {
   $('#sheet').close();
   await setTagStatus(db.tags.find((g) => g.id === 'g3'), 'active');
   setFilter({ show: 'remaining' });
+}
+
+// Project templates: starters, the editor, creating a project (blanks, dates, preview), save as template, archive.
+async function templates(check) {
+  const { db } = await import('/js/state.js');
+  const until = async (fn, ms = 2000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  await go('#projects');
+  check('templates section invites saving one', has('.templates-title', 'templates') && has(undefined, 'tap 📋 on the project'));
+  $('[data-act="new-project"]').click();
+  await wait(80);
+  check('with no templates, + Project goes straight to a blank project', !!$('#project-form'));
+  $('#sheet').close();
+  $('[data-act="new-template"]').click();
+  await wait(80);
+  check('starter templates offered', $$('#sheet [data-starter]').length === 4 && has('#sheet', 'new job setup', 'trip prep', 'weekly review'));
+  $('#sheet [data-starter="job"]').click();
+  await until(() => location.hash.startsWith('#template/'));
+  const tid = location.hash.split('/')[1];
+  const tpl = () => T().project_templates.find((t) => t.id === tid);
+  check('opens the template editor', has(undefined, 'template', 'create a project', 'blanks', '«client» default') && $$('.tpl-row').length === 10);
+  // Edit: rename the first action, Enter adds one below, give it a date and make it a step.
+  const first = $('.tpl-title[data-row="0"]');
+  first.value = 'Site visit with «Client» and «Crew»'; first.dispatchEvent(new Event('input', { bubbles: true }));
+  first.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await wait(50);
+  const added = $('.tpl-title[data-row="1"]');
+  check('Enter adds the next action', !!added && added.value === '');
+  added.value = 'Measure the kitchen'; added.dispatchEvent(new Event('input', { bubbles: true }));
+  $('[data-row-more="1"]').click();
+  await wait(50);
+  const due = $('[data-row="1"][data-row-k="due"]');
+  due.value = '1'; due.dispatchEvent(new Event('input', { bubbles: true }));
+  $('[data-row-indent="1"]').click();
+  await wait(700);
+  const body = tpl().body;
+  check('edits save into the template (nested, with a relative date)', body.actions[0].title === 'Site visit with «Client» and «Crew»' && body.actions[0].steps && body.actions[0].steps[0].title === 'Measure the kitchen' && body.actions[0].steps[0].due === 1, JSON.stringify(body.actions[0]).slice(0, 160));
+  check('new blanks are picked up', body.blanks.some((b) => b.name === 'Crew') && has(undefined, '«crew» default'));
+  // Create a project from it.
+  $('[data-tpl-use]').click();
+  await wait(200);
+  check('create sheet asks for the blanks and a start date', !!$('#sheet [data-var="Client"]') && !!$('#sheet [data-var="Crew"]') && !!$('#sheet [name=anchor]'));
+  const c = $('#sheet [data-var="Client"]'); c.value = 'Smith'; c.dispatchEvent(new Event('input', { bubbles: true }));
+  const a = $('#sheet [name=anchor]'); a.value = '2026-10-05'; a.dispatchEvent(new Event('input', { bubbles: true }));
+  check('live preview fills blanks and shows real dates', has('#sheet [data-preview]', 'smith job', 'site visit with smith and «crew»', 'measure the kitchen', 'oct 6') && has('#sheet [data-preview]', 'fill in «crew»'), text('#sheet [data-preview]').slice(0, 200));
+  $('#sheet form').requestSubmit();
+  await until(() => location.hash.startsWith('#project/'));
+  const pid = location.hash.split('/')[1];
+  const proj = db.projects.find((p) => p.id === pid);
+  const kids = db.tasks.filter((t) => t.project_id === pid);
+  check('project created with its actions, steps and dates', proj && proj.name === 'Smith job' && proj.kind === 'sequential' && proj.template_id === tid
+    && kids.some((t) => t.title === 'Measure the kitchen' && t.parent_id && t.due_at && new Date(t.due_at).getDate() === 6) && kids.length === 11, `${proj && proj.name} ${kids.length}`);
+  check('it says which template it came from', has('.from-template', 'from the template', 'new job setup'));
+  // + Project now offers templates.
+  await go('#projects');
+  check('templates listed under Projects', has(undefined, '📋 templates', 'new job setup', '11 actions'));
+  $('[data-act="new-project"]').click();
+  await wait(80);
+  check('+ Project offers blank or a template', !!$('#sheet [data-blank]') && !!$(`#sheet [data-use-template="${tid}"]`));
+  $('#sheet').close();
+  // Save an existing project (with steps) as a template.
+  await go('#project/p2');
+  $('[data-save-template="p2"]').click();
+  await wait(80);
+  check('save as template sheet', has('#sheet', 'save as template', 'dates count from', 'words to fill in each time', '5 actions'), text('#sheet').slice(0, 200));
+  const find = $('#sheet [data-blank-i="0"][data-k="find"]'); find.value = 'Life'; find.dispatchEvent(new Event('input', { bubbles: true }));
+  const nm = $('#sheet [data-blank-i="0"][data-k="name"]'); nm.value = 'Thing'; nm.dispatchEvent(new Event('input', { bubbles: true }));
+  check('shows the name with its blank', has('#sheet [data-summary]', 'end of «thing» planning'));
+  const tname = $('#sheet [name=name]'); tname.value = 'Planning kit'; tname.dispatchEvent(new Event('input', { bubbles: true }));
+  $('#sheet form').requestSubmit();
+  await wait(250);
+  const saved = T().project_templates.find((t) => t.name === 'Planning kit');
+  check('saved with nesting and project settings', saved && saved.body.name === 'End of «Thing» Planning' && saved.body.kind === 'sequential' && saved.body.actions.length === 3
+    && saved.body.actions[2].steps.length === 2 && saved.body.blanks[0].name === 'Thing', saved && JSON.stringify(saved.body).slice(0, 200));
+  // Schedule and archive.
+  await go(`#template/${saved.id}`);
+  const sched = $('[data-tpl-sched-on]'); sched.checked = true; sched.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(250);
+  check('schedule it', T().project_templates.find((t) => t.id === saved.id).schedule.unit === 'month' && !!$('[data-tpl-sched="every"]'));
+  $(`[data-tpl-archive="${saved.id}"]`).click();
+  await until(() => location.hash === '#projects');
+  check('archive: gone from the list, can be shown and restored', !has(undefined, 'planning kit') && has(undefined, '1 archived template') && !!T().project_templates.find((t) => t.id === saved.id).archived_at);
 }
 
 // P4: estimates, row signals, project flags and tags.

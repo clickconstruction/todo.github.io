@@ -12,6 +12,7 @@ import { sendDueReminders } from './reminders.js';
 import { deliver, sendQueuedTests } from './deliver.js';
 import * as P from '../../js/perspective-engine.js';
 import * as OF from '../../js/omnifocus-import.js';
+import * as TPL from '../../js/templates.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -24,6 +25,7 @@ Attachments: add_attachment attaches text, base64 or a URL's file to an action o
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 For a weekly review: call list_review, go through each project with the user (use its hints), make the changes they want, then mark_reviewed.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
+Templates: for repeated projects (a new job, a trip), list_templates then create_from_template with the blanks' values; save_as_template turns a project into one.
 Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); undo_import takes an import back.
 Perspectives are the user's saved views (e.g. Calls, Today): list_perspectives, then run_perspective to see what's in one; to answer "what should I do now" questions, prefer the user's own perspectives. create_perspective/update_perspective build them (preview rules with run_perspective first).
 Big tasks: break_down splits a task into steps (in_order for one at a time); steps can have steps, up to 4 levels. get_task shows the steps tree and progress. Move a task under another with update_task parent. If a task grows into a real project, offer convert_to_project.
@@ -87,6 +89,7 @@ export default {
     ctx.waitUntil(Promise.all([
       sendDueReminders(env, r).then((x) => { if (x.due) console.log('reminders', x); }),
       sendQueuedTests(env, r).then((n) => { if (n) console.log('queued tests', n); }),
+      r('rpc/run_template_schedules', { method: 'POST', body: {} }).then((n) => { if (n) console.log('scheduled templates', n); }).catch((e) => console.log('templates cron', e.message)),
     ]));
   },
 
@@ -612,6 +615,22 @@ async function findPerspective(api, ref) {
 function perspectiveOut(p, data) {
   return { id: p.id, name: p.name, icon: p.icon, summary: P.describe(p, data), rules: p.rules, options: { ...P.DEFAULT_OPTIONS, ...(p.options || {}) }, badge: p.badge, archived: !!p.archived_at };
 }
+
+
+// ---------- project templates (shared: js/templates.js; creating is the database's create_from_template) ----------
+async function findTemplate(api, ref) {
+  const all = await api.q(`project_templates?${api.u}&select=*`);
+  const r = String(ref || '').trim().toLowerCase();
+  const hit = all.find((t) => t.id === ref) || all.find((t) => !t.archived_at && t.name.toLowerCase() === r) || all.find((t) => t.name.toLowerCase() === r);
+  if (!hit) throw new Error(`No template called “${ref}”. Use list_templates.`);
+  return hit;
+}
+const templateOut = (t) => ({
+  id: t.id, name: t.name, icon: t.icon, actions: TPL.countActions(t.body), blanks: TPL.blanksOf(t.body).map((b) => b.name),
+  dates_count_from: t.body.anchor === 'due' ? 'due date' : 'start', kind: t.body.kind || 'parallel',
+  schedule: t.schedule ? TPL.describeSchedule(t.schedule) : null, next_run_at: t.next_run_at || undefined, archived: !!t.archived_at,
+});
+const TEMPLATE_BODY_DOC = 'body = {name (may contain «Blank» words), notes, kind: parallel|sequential|single_actions, review_every, review_unit, anchor: start|due, project_due (days), blanks: [{name, default}], actions: [{title, notes, flagged, estimate_minutes, defer, planned, due (whole days from the start, negative = before; with anchor due they count from the due date), steps_in_order, steps: [...] (4 levels)}]}. «Date», «Month» and «Year» fill themselves.';
 
 // ---------- tools ----------
 const TOOLS = [
@@ -1227,6 +1246,105 @@ const TOOLS = [
         return rows.filter((r) => (r.counts.tasks || 0) + (r.counts.projects || 0) > 0).map((r) => ({ id: r.id, source: r.source, at: r.created_at, projects: r.counts.projects || 0, actions: r.counts.tasks || 0, undone: !!r.undone_at }));
       }
       return api.q('rpc/undo_import', { method: 'POST', body: { batch: mustUuid(import_id, 'import_id'), owner: api.userId } });
+    },
+  },
+  {
+    name: 'list_templates',
+    description: 'List the user\'s project templates (reusable project outlines), with how many actions, the blanks to fill in, whether dates count from the start or the due date, and any schedule.',
+    inputSchema: { type: 'object', properties: { include_archived: { type: 'boolean', default: false } } },
+    async run(api, { include_archived = false }) {
+      const rows = await api.q(`project_templates?${api.u}&select=*`);
+      return rows.filter((t) => include_archived || !t.archived_at).sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name)).map(templateOut);
+    },
+  },
+  {
+    name: 'create_from_template',
+    description: 'Start a new project from a template: every action, step, tag and duration comes along, blanks («Client») are filled with values, and dates are placed relative to date (the start date, or the due date for templates that count back from a deadline). Use list_templates to see the blanks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        template: { type: 'string', description: 'Template name or id' },
+        date: { type: 'string', description: 'YYYY-MM-DD the start (or due) date; default today' },
+        values: { type: 'object', description: 'Blank values, e.g. {"Client": "Smith"}' },
+        name: { type: 'string', description: 'Override the project name' },
+        folder: { type: 'string', description: 'Folder name (default: the template\'s folder)' },
+      },
+      required: ['template'],
+    },
+    async run(api, a) {
+      const t = await findTemplate(api, a.template);
+      if (t.archived_at) throw new Error('That template is archived; restore it first with update_template.');
+      if (a.date && !/^\d{4}-\d{2}-\d{2}$/.test(a.date)) throw new Error('date: YYYY-MM-DD');
+      const folder = a.folder ? await api.resolveFolder(a.folder) : null;
+      const vars = Object.fromEntries(Object.entries(a.values || {}).map(([k, v]) => [k, String(v ?? '')]));
+      const pid = await api.q('rpc/create_from_template', { method: 'POST', body: { template: t.id, anchor: a.date || null, vars, name: a.name || null, folder, tz: api.tz, owner: api.userId } });
+      const projectId = Array.isArray(pid) ? pid[0] : pid;
+      const [p] = await api.q(`projects?${api.u}&id=eq.${mustUuid(projectId, 'project')}&select=*`);
+      const actions = await api.q(`tasks?${api.u}&project_id=eq.${p.id}&parent_id=is.null&order=sort.asc&select=*`);
+      const folders = await api.q(`folders?${api.u}&select=id,name`);
+      const missing = TPL.blanksOf(t.body).filter((b) => !vars[b.name] && !b.default).map((b) => b.name);
+      return { ...projectOut(api, p, folders), from_template: t.name, actions: await api.shape(actions), blanks_left_empty: missing.length ? missing : undefined };
+    },
+  },
+  {
+    name: 'save_as_template',
+    description: 'Save an existing project as a template: its open actions, steps, tags, durations and notes, with dates turned into days from the project\'s start (or due date). blanks turn specific text into fill-in words, e.g. [{"find": "Jones", "name": "Client"}].',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Project name or id' },
+        name: { type: 'string', description: 'Template name (default: the project name)' },
+        dates_count_from: { type: 'string', enum: ['start', 'due'], default: 'start' },
+        blanks: { type: 'array', items: { type: 'object', properties: { find: { type: 'string' }, name: { type: 'string' } }, required: ['find', 'name'] } },
+      },
+      required: ['project'],
+    },
+    async run(api, a) {
+      const projectId = await api.resolveProject(a.project);
+      const [[project], tasks, projectTags, taskTags] = await Promise.all([
+        api.q(`projects?${api.u}&id=eq.${projectId}&select=*`),
+        api.q(`tasks?${api.u}&project_id=eq.${projectId}&select=*`),
+        api.q(`project_tags?${api.u}&project_id=eq.${projectId}&select=project_id,tag_id`),
+        api.q(`task_tags?${api.u}&select=task_id,tag_id`),
+      ]);
+      const { body } = TPL.bodyFromProject({ project, tasks, projectTags, taskTags }, { anchor: a.dates_count_from === 'due' ? 'due' : 'start', blanks: a.blanks || [], tz: api.tz });
+      const existing = await api.q(`project_templates?${api.u}&select=sort`);
+      const [row] = await api.q('project_templates', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name: String(a.name || project.name).trim(), folder_id: project.folder_id || null, body, sort: Math.max(-1, ...existing.map((x) => x.sort || 0)) + 1 } });
+      return templateOut(row);
+    },
+  },
+  {
+    name: 'update_template',
+    description: `Change a template: rename, replace its body, set a schedule (creates a project automatically, e.g. {"every":1,"unit":"month","start":"2026-11-01"}; null stops it), or archive/restore (templates are never deleted). ${TEMPLATE_BODY_DOC}`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        template: { type: 'string', description: 'Template name or id' },
+        name: { type: 'string' }, icon: { type: 'string' },
+        body: { type: 'object' },
+        schedule: { type: ['object', 'null'], properties: { every: { type: 'integer' }, unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] }, start: { type: 'string' } } },
+        archived: { type: 'boolean' },
+      },
+      required: ['template'],
+    },
+    async run(api, a) {
+      const t = await findTemplate(api, a.template);
+      const patch = {};
+      if (a.name !== undefined) patch.name = String(a.name).trim();
+      if (a.icon !== undefined) patch.icon = a.icon;
+      if (a.body !== undefined) {
+        const errors = TPL.validateBody(a.body);
+        if (errors.length) throw new Error(errors.join('; '));
+        patch.body = { ...a.body, blanks: TPL.blanksOf(a.body) };
+      }
+      if (a.schedule !== undefined) {
+        if (a.schedule && (!['day', 'week', 'month', 'year'].includes(a.schedule.unit) || (a.schedule.start && !/^\d{4}-\d{2}-\d{2}$/.test(a.schedule.start)))) throw new Error('schedule: {every, unit: day|week|month|year, start: YYYY-MM-DD}');
+        patch.schedule = a.schedule ? { every: Math.max(1, Math.round(a.schedule.every || 1)), unit: a.schedule.unit, start: a.schedule.start || undefined, tz: api.tz } : null;
+      }
+      if (a.archived !== undefined) patch.archived_at = a.archived ? new Date().toISOString() : null;
+      if (Object.keys(patch).length) await api.q(`project_templates?${api.u}&id=eq.${t.id}`, { method: 'PATCH', body: patch });
+      const [row] = await api.q(`project_templates?${api.u}&id=eq.${t.id}&select=*`);
+      return templateOut(row);
     },
   },
   {

@@ -15,6 +15,7 @@ import { onSearchInput } from './views/search.js';
 import { onDoneFilterChange } from './views/done.js';
 import { setFilter } from './filter.js';
 import { setTagStatus } from './data.js';
+import { openNewProject, openNewTemplate, openSaveAsTemplate } from './views/templates.js';
 import { openSheet, esc } from './state.js';
 import { openNewPerspective, openPerspectiveEditor, openPerspectiveMenu, saveCurrentViewAsPerspective } from './editors/perspective.js';
 import { livePerspectives, movePerspective, archivePerspective, badgeCount } from './perspectives.js';
@@ -39,7 +40,9 @@ app.openTask = (id) => inspectOrEdit(id);
 const findTask = (id) => byId(db.tasks, id) || byId(app.searchExtra, id) || (app.doneCache && byId(app.doneCache.rows, id));
 
 const ACTIONS = {
-  'new-project': () => openProjectEditor(null),
+  'new-project': () => openNewProject(null, () => openProjectEditor(null)),
+  'new-template': openNewTemplate,
+  'toggle-archived-templates': () => { app.showArchivedTemplates = !app.showArchivedTemplates; render(); },
   'new-folder': () => openFolderEditor(null),
   'toggle-inactive': () => { app.showInactive = !app.showInactive; render(); },
   'toggle-reorder': () => { const id = location.hash.split('/')[1]; app.reorder = app.reorder === id ? null : id; render(); },
@@ -121,13 +124,14 @@ const CLICKS = [
   ['[data-persp-menu]', (el) => { const p = byId(db.perspectives, el.dataset.perspMenu); if (p) openPerspectiveMenu(p); }],
   ['[data-persp-move]', async (el) => { const p = byId(db.perspectives, el.dataset.perspMove); if (p) { await movePerspective(p, Number(el.dataset.dir)); render(); } }],
   ['[data-persp-restore]', async (el) => { const p = byId(db.perspectives, el.dataset.perspRestore); if (p) { await archivePerspective(p, false); render(); } }],
+  ['[data-save-template]', (el) => { const p = byId(db.projects, el.dataset.saveTemplate); if (p) openSaveAsTemplate(p); }],
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
   ['[data-copy-geo]', (el) => copyGeoUrl(el)],
   ['[data-setup-auto]', (el) => openAutomationGuide(el.dataset.setupAuto)],
   ['[data-edit-tag]', (el) => openTagEditor(byId(db.tags, el.dataset.editTag))],
   ['[data-edit-folder]', (el) => openFolderEditor(byId(db.folders, el.dataset.editFolder))],
-  ['[data-add-project]', (el) => openProjectEditor(null, { folder_id: el.dataset.addProject })],
+  ['[data-add-project]', (el) => openNewProject(el.dataset.addProject, () => openProjectEditor(null, { folder_id: el.dataset.addProject }))],
   ['[data-edit-project]', (el) => (isWide() ? select('project', el.dataset.editProject) : openProjectEditor(byId(db.projects, el.dataset.editProject)))],
   ['[data-remove-device]', (el) => removeDevice(el.dataset.removeDevice)],
   ['[data-remove-sender]', (el) => removeSender(el.dataset.removeSender)],

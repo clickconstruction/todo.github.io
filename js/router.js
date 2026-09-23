@@ -13,16 +13,17 @@ import { viewAlerts } from './views/alerts.js';
 import { hereNowCount } from './places.js';
 import { viewPerspective, viewPerspectives, perspectiveNav } from './views/perspective.js';
 import { viewImport } from './views/import.js';
+import { viewTemplate } from './views/templates.js';
 
 const VIEWS = {
   search: viewSearch, inbox: viewInbox, forecast: viewForecast, projects: viewProjects, project: viewProject,
   tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone, flagged: viewFlagged, review: viewReview,
-  nearby: viewNearby, places: viewPlaces, alerts: viewAlerts, perspective: viewPerspective, perspectives: viewPerspectives, import: viewImport,
+  nearby: viewNearby, places: viewPlaces, alerts: viewAlerts, perspective: viewPerspective, perspectives: viewPerspectives, import: viewImport, template: viewTemplate,
 };
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
 const AFTER = { nearby: mountNearbyMap };
 // Detail views highlight their parent tab.
-const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings' };
+const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects' };
 
 export function render() {
   if (location.hash === '#today') { history.replaceState(null, '', '#forecast'); } // old links

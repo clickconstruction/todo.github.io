@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -28,6 +28,17 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (String(url).startsWith('https://push.example')) { pushed.push({ url: String(url), init }); return String(url).includes('gone') ? new Response(null, { status: 410 }) : String(url).includes('badjwt') ? new Response('{"reason":"BadJwtToken"}', { status: 403 }) : new Response(null, { status: 201 }); }
   const rpcCalls = globalThis.rpcCalls = globalThis.rpcCalls || [];
+  if (String(url).includes('/rest/v1/rpc/create_from_template')) { // SQL is tested in supabase/tests; here a small mirror
+    const b = JSON.parse(init.body); globalThis.tplCalls = (globalThis.tplCalls || []).concat([b]);
+    const t = db.project_templates.find((x) => x.id === b.template && x.user_id === b.owner && !x.archived_at);
+    if (!t) return new Response(JSON.stringify({ message: 'Template not found.' }), { status: 400 });
+    const TPLm = await import('../js/templates.js');
+    const pv = TPLm.preview(t.body, { anchorKey: b.anchor || '2026-10-05', vars: { ...Object.fromEntries((t.body.blanks || []).map((x) => [x.name, x.default || ''])), ...b.vars } });
+    const pid = id();
+    db.projects.push({ id: pid, user_id: b.owner, name: b.name || pv.name, status: 'active', kind: t.body.kind || 'parallel', folder_id: b.folder || t.folder_id || null, sort: 0, template_id: t.id, created_at: new Date().toISOString() });
+    pv.actions.filter((x) => x.depth === 1).forEach((x, i) => db.tasks.push({ id: id(), user_id: b.owner, title: x.title, project_id: pid, parent_id: null, in_inbox: false, sort: i, due_at: x.due ? `${x.due}T22:00:00.000Z` : null, completed_at: null, dropped_at: null, created_at: new Date().toISOString() }));
+    return new Response(JSON.stringify(pid), { status: 200 });
+  }
   if (String(url).includes('/rest/v1/rpc/import_omnifocus')) { // the SQL function is tested in supabase/tests; here: what the tool sends
     const b = JSON.parse(init.body); (globalThis.importCalls = globalThis.importCalls || []).push(b);
     const counts = { folders: b.payload.folders.length, tags: b.payload.tags.length, projects: b.payload.projects.length, tasks: b.payload.tasks.length, open_tasks: b.payload.tasks.filter((t) => !t.completed_at && !t.dropped_at).length, inbox: 1, review_due: 1, tasks_skipped: 0, projects_skipped: 0, folders_merged: 0, tags_merged: 0 };
@@ -111,7 +122,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 37 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 37 tools, no internals leaked');
+assert(list.body.result.tools.length === 41 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 41 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -565,6 +576,34 @@ assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'r
   try { await tool('update_tag', { tag: 'Someday', status: 'paused' }); } catch (e) { bad = e.message; }
   assert(/on_hold/.test(bad), 'bad status refused');
   void c;
+}
+
+// ---------- project templates ----------
+{
+  await tool('create_project', { name: 'Jones remodel', kind: 'sequential' });
+  const s1 = await tool('capture', { title: 'Site visit with Jones', project: 'Jones remodel', due: '2026-09-01' });
+  await tool('capture', { title: 'Send estimate', project: 'Jones remodel', due: '2026-09-03' });
+  await tool('break_down', { id: s1.id, steps: ['Measure'] });
+  const saved = await tool('save_as_template', { project: 'Jones remodel', name: 'New job', blanks: [{ find: 'Jones', name: 'Client' }] });
+  assert(saved.name === 'New job' && saved.actions === 3 && saved.blanks.join() === 'Client' && saved.kind === 'sequential', 'save_as_template: actions, steps, blanks');
+  const body = db.project_templates.find((t) => t.id === saved.id).body;
+  assert(body.name === '«Client» remodel' && body.actions[0].title === 'Site visit with «Client»' && body.actions[0].due === 0 && body.actions[1].due === 2 && body.actions[0].steps[0].title === 'Measure', 'dates become days from the start; text becomes blanks');
+  assert((await tool('list_templates', {})).some((t) => t.name === 'New job' && t.blanks[0] === 'Client'), 'list_templates');
+  const made = await tool('create_from_template', { template: 'new job', date: '2026-10-05', values: { Client: 'Smith' } });
+  const call = globalThis.tplCalls.at(-1);
+  assert(call.owner === UID && call.anchor === '2026-10-05' && call.vars.Client === 'Smith' && call.tz === 'America/Chicago', 'create_from_template calls the database as the user, in their time zone');
+  assert(made.name === 'Smith remodel' && made.from_template === 'New job' && made.actions.some((x) => x.title === 'Site visit with Smith' && x.due === '2026-10-05'), 'the project comes back with its actions');
+  const left = await tool('create_from_template', { template: saved.id });
+  assert(left.blanks_left_empty && left.blanks_left_empty[0] === 'Client', 'says which blanks were left empty');
+  let bad = '';
+  try { await tool('update_template', { template: 'New job', body: { actions: [{ title: 'x', due: 1.5 }] } }); } catch (e) { bad = e.message; }
+  assert(/whole number/.test(bad), 'update_template validates the body');
+  const up = await tool('update_template', { template: 'New job', schedule: { every: 1, unit: 'month', start: '2026-11-01' }, body: { name: 'Job for «Client»', kind: 'parallel', actions: [{ title: 'Call «Client»', due: 0 }] } });
+  assert(up.schedule === 'Every month from 2026-11-01' && up.actions === 1 && up.blanks[0] === 'Client' && db.project_templates.find((t) => t.id === saved.id).schedule.tz === 'America/Chicago', 'update_template: body and schedule (in the user\'s zone)');
+  await tool('update_template', { template: 'New job', archived: true });
+  bad = '';
+  try { await tool('create_from_template', { template: 'New job' }); } catch (e) { bad = e.message; }
+  assert(/archived/.test(bad) && (await tool('list_templates', {})).every((t) => t.name !== 'New job'), 'archived templates are hidden and can\'t be used');
 }
 
 // ---------- OmniFocus import ----------

@@ -4,6 +4,7 @@ import { projectRow, treeList } from '../rows.js';
 import { flattenTree } from '../tree.js';
 import { PROJECT_KINDS, nextAction } from '../availability.js';
 import { filterBar, applyFilter, closedFor, withClosed, filterNote } from '../filter.js';
+import { templatesSectionHtml } from './templates.js';
 
 export function viewProjects() {
   const isLive = (p) => p.status === 'active' || p.status === 'on_hold';
@@ -23,7 +24,7 @@ export function viewProjects() {
   const loose = shown.filter((p) => !p.folder_id || !byId(db.folders, p.folder_id)).sort(bySort);
   if (loose.length) html += `${db.folders.length ? '<div class="folder-title"><span>No folder</span></div>' : ''}${loose.map(projectRow).join('')}`;
   if (!db.projects.length) html += '<p class="empty">No projects yet. A project is any outcome that takes more than one action.</p>';
-  return html;
+  return html + templatesSectionHtml();
 }
 
 export function viewProject(id) {
@@ -36,7 +37,8 @@ export function viewProject(id) {
   const ordered = entries.map((e) => e.t);
   const folder = p.folder_id && byId(db.folders, p.folder_id);
   return `<a class="back" href="#projects">‹ Projects${folder ? ` / 📁 ${esc(folder.name)}` : ''}</a>
-    <div class="view-head"><h1>${esc(p.name)}</h1><button class="btn small" data-edit-project="${p.id}">Edit</button></div>
+    <div class="view-head"><h1>${esc(p.name)}</h1><span class="head-actions"><button class="btn small" data-save-template="${p.id}" title="Save as template">📋</button><button class="btn small" data-edit-project="${p.id}">Edit</button></span></div>
+    ${p.template_id && byId(db.templates || [], p.template_id) ? `<p class="view-sub from-template">From the template <a href="#template/${p.template_id}">${esc(byId(db.templates, p.template_id).name)}</a></p>` : ''}
     ${p.notes ? `<p class="view-sub" style="white-space:pre-wrap">${esc(p.notes)}</p>` : ''}
     <p class="view-sub project-props"><select data-project-status="${p.id}" style="width:auto;padding:6px 10px">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <span class="chip" title="${esc(PROJECT_KINDS.find(([v]) => v === p.kind)[2])}">${PROJECT_KINDS.find(([v]) => v === p.kind)[1]}</span>

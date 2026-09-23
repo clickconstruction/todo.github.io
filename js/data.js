@@ -9,7 +9,7 @@ const OUTBOX_KEY = 'todo.outbox';
 
 export async function loadAll() {
   const since = new Date(Date.now() - 86400000).toISOString();
-  const [tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives] = await Promise.all([
+  const [tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates] = await Promise.all([
     run(sb.from('tasks').select('*').or(`and(completed_at.is.null,dropped_at.is.null),completed_at.gte.${since}`)),
     run(sb.from('projects').select('*')),
     run(sb.from('folders').select('*')),
@@ -20,8 +20,9 @@ export async function loadAll() {
     run(sb.from('notifications').select('*')),
     run(sb.from('attachments').select('*').is('archived_at', null)),
     run(sb.from('perspectives').select('*').order('sort')),
+    run(sb.from('project_templates').select('*').order('sort')),
   ]);
-  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives });
+  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates });
 }
 
 // Some writes fire database triggers (group completion, complete-with-last-action,
