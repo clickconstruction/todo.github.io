@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -13,6 +13,15 @@ globalThis.fetch = async (url, init = {}) => {
     if (init.headers['X-Goog-Api-Key'] !== 'server-key' || /nowhere/i.test(q)) return new Response(JSON.stringify({}), { status: 200 });
     return new Response(JSON.stringify({ places: [{ id: 'gp1', displayName: { text: 'The Home Depot' }, formattedAddress: '5445 W Alabama St, Houston, TX', location: { latitude: 29.7351, longitude: -95.4710 } }] }), { status: 200 });
   }
+  if (String(url).includes('/storage/v1/object/sign/')) { return new Response(JSON.stringify({ signedURL: `/object/sign/attachments/${String(url).split('/sign/attachments/')[1]}?token=t` }), { status: 200 }); }
+  if (String(url).includes('/storage/v1/object/attachments/')) {
+    globalThis.stored = globalThis.stored || {};
+    const key = decodeURIComponent(String(url).split('/object/attachments/')[1]);
+    if (!init.headers.apikey) return new Response('no key', { status: 401 });
+    globalThis.stored[key] = { body: init.body, type: init.headers['Content-Type'] };
+    return new Response(JSON.stringify({ Key: key }), { status: 200 });
+  }
+  if (String(url).startsWith('https://files.example')) return new Response('drawing bytes', { status: 200, headers: { 'content-type': 'application/pdf' } });
   if (String(url).startsWith('https://push.example')) { pushed.push({ url: String(url), init }); return new Response(null, { status: String(url).includes('gone') ? 410 : 201 }); }
   const rpcCalls = globalThis.rpcCalls = globalThis.rpcCalls || [];
   if (String(url).includes('/rest/v1/rpc/')) { rpcCalls.push({ fn: String(url).split('/rpc/')[1], body: JSON.parse(init.body) }); return new Response('{}', { status: 200 }); }
@@ -67,7 +76,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 25 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 25 tools, no internals leaked');
+assert(list.body.result.tools.length === 27 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 27 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -374,4 +383,23 @@ assert(db.notifications.find((n) => n.id === 'n1').sent_at && db.notifications.f
 assert(!db.notifications.find((n) => n.id === 'n3').sent_at && !db.notifications.find((n) => n.id === 'n4').sent_at, 'future and stale reminders untouched');
 assert((await sendDueReminders(env, restFn, nowR)).due === 0, 'nothing is sent twice');
 assert(reminderMessage({ id: 'x', project_id: 'p', kind: 'at_defer' }, { id: 'p', name: 'Taxes' }, 'America/Chicago').body === 'Project · Available now', 'project reminder text');
+
+// ---------- attachments via MCP ----------
+const att1 = await tool('add_attachment', { task: oneShot.id, name: 'call notes.txt', text: 'Spoke to Jodi; plans ready Friday.' });
+assert(att1.name === 'call notes.txt' && att1.size === 34 && att1.mime.startsWith('text/plain') && att1.url.includes('/storage/v1/object/sign/attachments/' + UID), 'add_attachment (text) uploads into the user folder and returns a signed link');
+const storedKey = Object.keys(globalThis.stored).find((k) => k.endsWith('call notes.txt'));
+assert(storedKey && storedKey.startsWith(UID + '/'), 'file stored under the owner folder');
+const att2 = await tool('add_attachment', { project: oneShot.project_id, name: 'plans.pdf', url: 'https://files.example/plans.pdf' });
+assert(att2.mime === 'application/pdf' && att2.size === 13, 'add_attachment (url) downloads and attaches to a project');
+const att3 = await tool('add_attachment', { task: oneShot.id, name: 'tiny.png', base64: 'iVBORw0KGgo=' });
+assert(att3.size === 8 && att3.mime === 'application/octet-stream', 'add_attachment (base64)');
+let attErr = null; try { await tool('add_attachment', { task: oneShot.id, name: 'x', url: 'file:///etc/passwd' }); } catch (x) { attErr = x.message; }
+assert(/http/.test(attErr || ''), 'only http(s) URLs are fetched');
+const withFiles = await tool('get_task', { id: oneShot.id });
+assert(withFiles.attachments.length === 2 && withFiles.attachments.every((f) => f.url && f.url.includes('token=')), 'get_task lists attachments with download links');
+const rm = await tool('remove_attachment', { id: att3.id });
+assert(rm.archived && db.attachments.find((x) => x.id === att3.id).archived_at, 'remove_attachment archives');
+assert((await tool('get_task', { id: oneShot.id })).attachments.length === 1, 'archived attachment hidden');
+await tool('remove_attachment', { id: att3.id, restore: true });
+assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'restore brings it back');
 console.log('ALL PASSED');

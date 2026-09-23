@@ -17,6 +17,7 @@ Clarify inbox items with update_task: give each a project and/or tags (contexts 
 Use planned for when the user intends to work on something and due only for hard deadlines; flagged means "important now". Dates are YYYY-MM-DD in the user's timezone.
 Never complete, reschedule or re-file tasks the user did not ask you to change.
 Notifications: pass notifications (e.g. [{"kind":"before_due","minutes":60}]) to remind the user on their devices; they follow the item's dates.
+Attachments: add_attachment attaches text, base64 or a URL's file to an action or project; get_task returns download links; remove_attachment archives.
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 For a weekly review: call list_review, go through each project with the user (use its hints), make the changes they want, then mark_reviewed.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
@@ -263,6 +264,7 @@ class Api {
     placeData.tasks.push(...tasks.filter((t) => !known.has(t.id))); // closed tasks too
     const placeOf = makePlaceResolver(placeData);
     const reminders = await this.notificationsFor('task_id', tasks.map((t) => t.id));
+    const files = await this.q(`attachments?${this.u}&task_id=${inList(tasks.map((t) => t.id))}&archived_at=is.null&order=created_at.asc&select=id,task_id,name,size,mime`);
     const projectIds = [...new Set(tasks.map((t) => t.project_id).filter(Boolean))];
     const [{ projects, tags, tagLabel }, links, pLinks] = await Promise.all([
       this.lookups(),
@@ -281,6 +283,7 @@ class Api {
       place: placeSummary(placeOf(t)),
       repeat: t.repeat_rule ? { ...t.repeat_rule, summary: describeRepeat(t.repeat_rule) } : undefined,
       notifications: reminders[t.id],
+      attachments: files.some((f) => f.task_id === t.id) ? files.filter((f) => f.task_id === t.id).map(({ task_id, ...f }) => f) : undefined,
       in_inbox: t.in_inbox,
       status: t.completed_at ? 'completed' : t.dropped_at ? 'dropped' : 'open',
       flagged: t.flagged,
@@ -390,6 +393,33 @@ class Api {
     const add = rows.filter((r, i) => !have.has(key(r)) && rows.findIndex((x) => key(x) === key(r)) === i);
     if (drop.length) await this.q(`notifications?${this.u}&id=${inList(drop)}`, { method: 'DELETE' });
     if (add.length) await this.q('notifications', { method: 'POST', body: add });
+  }
+
+  // ---------- attachments (private Storage bucket "attachments") ----------
+  storageHeaders(extra = {}) {
+    const key = this.env.SUPABASE_SECRET_KEY;
+    return { apikey: key, ...(key.startsWith('ey') ? { Authorization: `Bearer ${key}` } : {}), ...extra };
+  }
+  async signedUrl(path) {
+    const res = await fetch(`${this.env.SUPABASE_URL}/storage/v1/object/sign/attachments/${path.split('/').map(encodeURIComponent).join('/')}`,
+      { method: 'POST', headers: this.storageHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ expiresIn: 3600 }) });
+    if (!res.ok) return null;
+    const { signedURL } = await res.json();
+    return signedURL ? `${this.env.SUPABASE_URL}/storage/v1${signedURL}` : null;
+  }
+  async withLinks(col, id) {
+    const rows = await this.q(`attachments?${this.u}&${col}=eq.${id}&archived_at=is.null&order=created_at.asc&select=id,name,size,mime,path`);
+    return Promise.all(rows.map(async ({ path, ...a }) => ({ ...a, url: await this.signedUrl(path) })));
+  }
+  async upload(col, id, name, bytes, mime) {
+    if (bytes.byteLength > 25 * 1024 * 1024) throw new Error('Attachments are limited to 25 MB');
+    const safe = String(name).replace(/[^\w.\- ]+/g, '_').slice(-120) || 'file';
+    const path = `${this.userId}/${crypto.randomUUID()}/${safe}`;
+    const res = await fetch(`${this.env.SUPABASE_URL}/storage/v1/object/attachments/${path.split('/').map(encodeURIComponent).join('/')}`,
+      { method: 'POST', headers: this.storageHeaders({ 'Content-Type': mime }), body: bytes });
+    if (!res.ok) throw new Error(`Upload failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    const [row] = await this.q('attachments', { method: 'POST', prefer: 'return=representation', body: { user_id: this.userId, [col]: id, path, name: String(name).slice(0, 255), size: bytes.byteLength, mime } });
+    return { id: row.id, name: row.name, size: row.size, mime: row.mime, url: await this.signedUrl(path) };
   }
 
   async setTags(taskId, labels) {
@@ -701,13 +731,14 @@ const TOOLS = [
   },
   {
     name: 'get_task',
-    description: 'Get one task with its notes, project, tags, dates and (for an action group) its sub-actions.',
+    description: 'Get one task with its notes, project, tags, dates, repeat, notifications, attachments (with download links valid for an hour) and (for an action group) its sub-actions.',
     inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
     async run(api, { id }) {
       const task = await api.task(id);
       const [shaped] = await api.shape([task]);
       const kids = await api.q(`tasks?${api.u}&parent_id=eq.${task.id}&order=sort.asc&select=*`);
       if (kids.length) shaped.sub_actions = await api.shape(kids);
+      if (shaped.attachments) shaped.attachments = await api.withLinks('task_id', task.id);
       return shaped;
     },
   },
@@ -1004,6 +1035,7 @@ const TOOLS = [
       const place = p.place_id ? (await api.q(`places?${api.u}&id=eq.${p.place_id}&select=*`))[0] : null;
       return { ...projectOut(api, p, folder ? [{ id: p.folder_id, name: folder.name }] : []), tags: pt,
         notifications: (await api.notificationsFor('project_id', [id]))[id],
+        attachments: (await api.withLinks('project_id', id)).map(({ url, ...f }) => f),
         place: place ? { name: place.name, alert: p.location_trigger, radius_m: p.location_radius_m || place.radius_m } : null };
     },
   },
@@ -1111,6 +1143,52 @@ const TOOLS = [
       const [row] = await api.q(`tags?${api.u}&id=eq.${tag.id}&select=*`);
       const place = row.place_id ? (await api.q(`places?${api.u}&id=eq.${row.place_id}&select=*`))[0] : null;
       return { id: row.id, label: tagLabel(row), place: place ? { name: place.name, alert: row.location_trigger, radius_m: row.location_radius_m || place.radius_m } : null };
+    },
+  },
+  {
+    name: 'add_attachment',
+    description: 'Attach a file to an action or project: text content, base64 bytes, or a public http(s) URL to download (max 25 MB). Returns it with a download link valid for an hour.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'Action id (give task or project)' },
+        project: { type: 'string', description: 'Project name or id' },
+        name: { type: 'string', description: 'File name, e.g. "notes.txt" or "plans.pdf"' },
+        text: { type: 'string', description: 'Text content (saved as UTF-8)' },
+        base64: { type: 'string', description: 'File bytes, base64-encoded' },
+        url: { type: 'string', description: 'Public http(s) URL to download and attach' },
+        mime: { type: 'string', description: 'Content type (guessed from the source if omitted)' },
+      },
+      required: ['name'],
+    },
+    async run(api, a) {
+      const [col, id] = a.task ? ['task_id', (await api.task(a.task)).id] : a.project ? ['project_id', await api.resolveProject(a.project)] : [];
+      if (!col) throw new Error('Give task (id) or project');
+      let bytes; let mime = a.mime;
+      if (a.text !== undefined) { bytes = new TextEncoder().encode(String(a.text)); mime = mime || 'text/plain; charset=utf-8'; }
+      else if (a.base64) { bytes = Uint8Array.from(atob(a.base64.replace(/\s+/g, '')), (c) => c.charCodeAt(0)); mime = mime || 'application/octet-stream'; }
+      else if (a.url) {
+        if (!/^https?:\/\//i.test(a.url)) throw new Error('url must be http(s)');
+        const res = await fetch(a.url, { redirect: 'follow' });
+        if (!res.ok) throw new Error(`Couldn't download (${res.status})`);
+        const len = Number(res.headers.get('content-length') || 0);
+        if (len > 25 * 1024 * 1024) throw new Error('Attachments are limited to 25 MB');
+        bytes = new Uint8Array(await res.arrayBuffer());
+        mime = mime || (res.headers.get('content-type') || 'application/octet-stream').split(';')[0];
+      } else throw new Error('Give text, base64 or url');
+      return api.upload(col, id, a.name, bytes, mime);
+    },
+  },
+  {
+    name: 'remove_attachment',
+    description: 'Remove (archive) an attachment by id, or restore it with restore: true. Attachments are never deleted.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, restore: { type: 'boolean', default: false } }, required: ['id'] },
+    async run(api, { id, restore = false }) {
+      mustUuid(id, 'id');
+      const rows = await api.q(`attachments?${api.u}&id=eq.${id}&select=id,name`);
+      if (!rows.length) throw new Error('Attachment not found');
+      await api.q(`attachments?${api.u}&id=eq.${id}`, { method: 'PATCH', body: { archived_at: restore ? null : new Date().toISOString() } });
+      return { id, name: rows[0].name, archived: !restore };
     },
   },
   {

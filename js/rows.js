@@ -24,6 +24,8 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
     meta.push(`<span class="meta-place ${isInside(loc) ? 'here' : ''}" title="${esc(loc.via ? `${loc.place.name} (via ${loc.via.kind} ${loc.via.label})` : loc.place.name)}">📍 ${esc(loc.place.name)}${d ? ` · ${d}` : ''}</span>`);
   }
   const bells = isOpen(t) ? db.notifications.filter((n) => n.task_id === t.id && !n.sent_at).length : 0;
+  const clips = db.attachments.filter((a) => a.task_id === t.id && !a.archived_at).length;
+  if (clips) meta.push(`<span class="meta-clip" title="${clips} attachment${clips === 1 ? '' : 's'}">📎${clips > 1 ? clips : ''}</span>`);
   if (bells) meta.push(`<span class="meta-bell" title="${bells} notification${bells === 1 ? '' : 's'}">🔔</span>`);
   if (t.repeat_rule && isOpen(t)) meta.push(`<span class="meta-repeat" title="${esc(describe(t.repeat_rule))}">🔁</span>`);
   if (t.estimate_minutes) meta.push(`<span class="meta-estimate" title="Estimate">⏱ ${fmtMinutes(t.estimate_minutes)}</span>`);

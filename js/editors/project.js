@@ -6,6 +6,7 @@ import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { locationFieldHtml, wireLocationField } from './place.js';
 import { repeatFieldHtml, wireRepeatField } from './repeatField.js';
 import { notifyFieldHtml, wireNotifyField, remindersFor, saveReminders, refreshReminders } from './notifyField.js';
+import { attachFieldHtml, wireAttachField, uploadFiles } from './attachField.js';
 import { PROJECT_KINDS } from '../availability.js';
 import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
 import { fromDateInput, fromDateTimeInput, toDateInput, fmtStamp, HOURS } from '../dates.js';
@@ -44,6 +45,7 @@ function projectFieldsHtml(p, project) {
     </fieldset>
     ${project ? `<label>Status<select name="status">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
     <label>Notes<textarea name="notes" placeholder="Purpose, what done looks like…">${esc(p.notes)}</textarea></label>
+    ${attachFieldHtml()}
     ${project && p.completed_at ? dateTimeField('completed_at_edit', p.status === 'dropped' ? 'Dropped' : 'Completed', p.completed_at) : ''}
     ${project ? '<p class="view-sub" style="margin:0">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>' : ''}
     ${stampsHtml(project)}`;
@@ -62,6 +64,7 @@ function wireProjectForm(form, project, onTagsChange) {
   wireQuickButtons(form);
   const collectRepeat = wireRepeatField(form, project || {}, onTagsChange);
   const collectReminders = wireNotifyField(form, remindersFor('project_id', project && project.id), onTagsChange);
+  const collectFiles = wireAttachField(form, 'project_id', project && project.id);
   form.addEventListener('change', (e) => {
     if (e.target.name === 'kind') $('.kind-hint', form).textContent = PROJECT_KINDS.find(([v]) => v === e.target.value)[2];
   });
@@ -90,7 +93,7 @@ function wireProjectForm(form, project, onTagsChange) {
     }
     if (project) fields.status = f.get('status');
     if (project && f.get('completed_at_edit') && ['completed', 'dropped'].includes(fields.status)) fields.completed_at = fromDateTimeInput(f.get('completed_at_edit'));
-    return fields.name ? { fields, tagIds: selectedTags(), reminders: collectReminders() } : null;
+    return fields.name ? { fields, tagIds: selectedTags(), reminders: collectReminders(), files: collectFiles() } : null;
   };
 }
 
@@ -124,6 +127,7 @@ export function openProjectEditor(project, defaults = {}) {
     db.projects.push(row);
     await setLinks('project_tags', 'projectTags', 'project_id', row.id, data.tagIds);
     await saveReminders('project_id', row.id, data.reminders);
+    if (data.files && data.files.length) await uploadFiles('project_id', row.id, data.files);
     location.hash = `#project/${row.id}`;
   };
   sheet.showModal();

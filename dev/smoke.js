@@ -36,7 +36,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders };
+  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -985,4 +985,55 @@ async function reminders(check) {
   await wait(250);
   check('#task link opens the action in its project', location.hash === '#project/p1' && $('#sheet').open);
   $('#sheet').close();
+}
+
+// Attachments: upload on existing items, pending until save on new ones, open via signed URL,
+// remove = archive with Undo, 📎 on rows.
+async function attachments(check) {
+  const { db } = await import('/js/state.js');
+  const { openEditor } = await import('/js/editors/task.js');
+  const pickFiles = async (f, files) => {
+    const input = $('[data-attach-input]', f);
+    const dt = new DataTransfer(); files.forEach((x) => dt.items.add(x));
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await wait(250);
+  };
+  const png = new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], 'photo.png', { type: 'image/png' });
+  const pdf = new File(['%PDF-1.4 plans'], 'plans.pdf', { type: 'application/pdf' });
+
+  openEditor(db.tasks.find((t) => t.id === 't2'));
+  let f = $('#editor');
+  check('attachments field present', !!$('[data-attach-input]', f));
+  await pickFiles(f, [png, pdf]);
+  const rows = db.attachments.filter((a) => a.task_id === 't2');
+  check('existing item uploads right away', rows.length === 2 && rows.every((a) => a.path.startsWith('u1/')) && Object.keys(window.__mock.files).length >= 2);
+  check('list shows name, size and an image thumbnail', has('#editor [data-attach-list]', 'photo.png', 'plans.pdf') && !!$('#editor img.attach-thumb'));
+  const opened = [];
+  const realOpen = window.open;
+  window.open = () => ({ close() {}, set location(u) { opened.push(u); } });
+  $('[data-attach-open]', f).click();
+  await wait(100);
+  window.open = realOpen;
+  check('opening uses a signed URL', opened.length === 1 && opened[0].startsWith('blob:'));
+  $(`[data-attach-remove="${rows[1].id}"]`, f).click();
+  await wait(200);
+  check('remove archives (not deleted)', !!window.__mock.tables.attachments.find((a) => a.id === rows[1].id).archived_at && !has('#editor [data-attach-list]', 'plans.pdf'));
+  [...$$('#toast button')].find((b) => b.textContent === 'Undo').click();
+  await wait(200);
+  check('undo restores it', !window.__mock.tables.attachments.find((a) => a.id === rows[1].id).archived_at);
+  $('[data-cancel]', f).click();
+  await go('#project/p1');
+  check('row shows 📎 with count', has('[data-task="t2"] .meta-clip', '📎2'));
+
+  // New item: pending until saved.
+  openEditor(null, {});
+  f = $('#editor');
+  f.elements.title.value = 'Send drawings';
+  await pickFiles(f, [pdf]);
+  check('new item: file waits for save', has('#editor [data-attach-list]', 'uploads when saved') && !db.attachments.some((a) => a.name === 'plans.pdf' && !a.task_id));
+  f.requestSubmit();
+  await wait(300);
+  const made = db.tasks.find((t) => t.title === 'Send drawings');
+  check('saved item gets its attachment', made && db.attachments.some((a) => a.task_id === made.id && a.name === 'plans.pdf'));
 }

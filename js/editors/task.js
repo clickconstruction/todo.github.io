@@ -9,6 +9,7 @@ import { locationFieldHtml, wireLocationField } from './place.js';
 import { placeFor } from '../places.js';
 import { repeatFieldHtml, wireRepeatField } from './repeatField.js';
 import { notifyFieldHtml, wireNotifyField, remindersFor } from './notifyField.js';
+import { attachFieldHtml, wireAttachField } from './attachField.js';
 import { skipOccurrence } from '../data.js';
 
 const notesAreLong = (text) => text.length > 280 || text.split('\n').length > 8;
@@ -33,6 +34,7 @@ function taskFieldsHtml(t, task) {
     <label>Subtask of<select name="parent_id"></select></label>
     <label class="flag-toggle"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}> Flagged</label>
     <label class="notes-field">Notes<textarea name="notes" placeholder="Links, details…">${esc(t.notes)}</textarea></label>
+    ${attachFieldHtml()}
     ${task ? `<label>Status<select name="status">
         <option value="open" ${!t.completed_at && !t.dropped_at ? 'selected' : ''}>Open</option>
         <option value="completed" ${t.completed_at ? 'selected' : ''}>Completed</option>
@@ -73,6 +75,7 @@ function wireTaskForm(form, t, task, onTagsChange) {
   const collectLocation = wireLocationField(form, onTagsChange);
   const collectRepeat = wireRepeatField(form, t, onTagsChange);
   const collectReminders = wireNotifyField(form, remindersFor('task_id', task && task.id), onTagsChange);
+  const collectFiles = wireAttachField(form, 'task_id', task && task.id);
   const skip = $('[data-skip-occurrence]', form);
   if (skip && task) skip.onclick = () => skipOccurrence(task, () => { const sheet = form.closest('dialog'); if (sheet) sheet.close(); });
   if (form.elements.status) {
@@ -97,6 +100,7 @@ function wireTaskForm(form, t, task, onTagsChange) {
       ...collectLocation(),
       repeat_rule: collectRepeat(),
       notifications: collectReminders(),
+      attachments_pending: collectFiles(),
     };
     if (f.has('status')) {
       const status = f.get('status');
