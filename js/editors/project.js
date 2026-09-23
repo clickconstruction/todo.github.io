@@ -5,6 +5,7 @@ import { insertFolder, updateProject, setLinks } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { locationFieldHtml, wireLocationField } from './place.js';
 import { repeatFieldHtml, wireRepeatField } from './repeatField.js';
+import { notifyFieldHtml, wireNotifyField, remindersFor, saveReminders, refreshReminders } from './notifyField.js';
 import { PROJECT_KINDS } from '../availability.js';
 import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
 import { fromDateInput, fromDateTimeInput, toDateInput, fmtStamp, HOURS } from '../dates.js';
@@ -33,6 +34,7 @@ function projectFieldsHtml(p, project) {
     ${dateField('due_at', 'Due', p.due_at)}
     ${estimateField(p.estimate_minutes)}
     ${repeatFieldHtml(p)}
+    ${notifyFieldHtml()}
     <fieldset class="review-block"><legend>Review</legend>
       ${project ? dateField('next_review_at', 'Next review', p.next_review_at) : ''}
       <label class="review-every">Review every<span class="review-every">
@@ -59,6 +61,7 @@ function wireProjectForm(form, project, onTagsChange) {
   const collectLocation = wireLocationField(form, onTagsChange);
   wireQuickButtons(form);
   const collectRepeat = wireRepeatField(form, project || {}, onTagsChange);
+  const collectReminders = wireNotifyField(form, remindersFor('project_id', project && project.id), onTagsChange);
   form.addEventListener('change', (e) => {
     if (e.target.name === 'kind') $('.kind-hint', form).textContent = PROJECT_KINDS.find(([v]) => v === e.target.value)[2];
   });
@@ -87,13 +90,16 @@ function wireProjectForm(form, project, onTagsChange) {
     }
     if (project) fields.status = f.get('status');
     if (project && f.get('completed_at_edit') && ['completed', 'dropped'].includes(fields.status)) fields.completed_at = fromDateTimeInput(f.get('completed_at_edit'));
-    return fields.name ? { fields, tagIds: selectedTags() } : null;
+    return fields.name ? { fields, tagIds: selectedTags(), reminders: collectReminders() } : null;
   };
 }
 
-async function saveProject(project, { fields, tagIds }) {
+async function saveProject(project, { fields, tagIds, reminders }) {
   await setLinks('project_tags', 'projectTags', 'project_id', project.id, tagIds);
-  return updateProject(byId(db.projects, project.id) || project, fields);
+  await saveReminders('project_id', project.id, reminders);
+  const row = await updateProject(byId(db.projects, project.id) || project, fields);
+  await refreshReminders('project_id', project.id);
+  return row;
 }
 
 export function openProjectEditor(project, defaults = {}) {
@@ -117,6 +123,7 @@ export function openProjectEditor(project, defaults = {}) {
     const [row] = await run(sb.from('projects').insert({ ...data.fields, sort: db.projects.length }).select());
     db.projects.push(row);
     await setLinks('project_tags', 'projectTags', 'project_id', row.id, data.tagIds);
+    await saveReminders('project_id', row.id, data.reminders);
     location.hash = `#project/${row.id}`;
   };
   sheet.showModal();

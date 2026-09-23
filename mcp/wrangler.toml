@@ -7,6 +7,10 @@ routes = [
   { pattern = "mcp.todotooling.com", custom_domain = true }
 ]
 
+# Custom notifications: send due reminders every minute (src/reminders.js).
+[triggers]
+crons = ["* * * * *"]
+
 [vars]
 SUPABASE_URL = "https://cgssdelgtxlrfgozchps.supabase.co"
 TIMEZONE = "America/Chicago"

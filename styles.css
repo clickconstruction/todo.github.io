@@ -466,3 +466,14 @@ h1.review { color: #3b82f6; }
 .meta-repeat { opacity: .85; }
 .sheet label.review-every, .inspector-form label.review-every { display: flex; align-items: center; gap: 8px; }
 .sheet .review-every > .review-every { display: flex; gap: 8px; flex: 1; }
+
+/* Notifications */
+.notify-field { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 12px; margin: 0; display: grid; gap: 8px; min-width: 0; }
+.notify-field legend { font-size: 13px; font-weight: 600; color: var(--muted); padding: 0 4px; }
+.notify-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.notify-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; color: var(--text); }
+.notify-list .hint { margin-left: 4px; }
+.notify-list .warn { color: var(--flag); opacity: 1; }
+.notify-at { display: flex; gap: 8px; }
+.notify-at[hidden] { display: none; }
+.meta-bell { opacity: .85; }

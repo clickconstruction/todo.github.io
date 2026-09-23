@@ -4,6 +4,7 @@
 import { sb, db, app, esc, run, toast } from '../state.js';
 import { activePlaces, placeFor } from '../places.js';
 import { alertsPermission, enableAlerts } from '../alerts.js';
+import { resetSettings } from './settings.js';
 
 const GEO_URL = 'https://mcp.todotooling.com/geo';
 const KEY_STORE = 'todo.geo.key';
@@ -113,6 +114,7 @@ export async function createGeoKey() {
   const device = isIOS() ? 'iPhone' : 'this device';
   await run(sb.from('api_tokens').insert({ name: `Location alerts (${device})`, token_hash, token_hint: token.slice(-4), scope: 'geo' }));
   try { localStorage.setItem(KEY_STORE, token); } catch { toast('Private mode: copy the URLs now; the key can’t be saved.'); }
+  resetSettings(); // Settings lists tokens; reload it next time it's shown
   app.render();
 }
 

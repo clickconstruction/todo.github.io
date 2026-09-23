@@ -8,6 +8,7 @@ import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { locationFieldHtml, wireLocationField } from './place.js';
 import { placeFor } from '../places.js';
 import { repeatFieldHtml, wireRepeatField } from './repeatField.js';
+import { notifyFieldHtml, wireNotifyField, remindersFor } from './notifyField.js';
 import { skipOccurrence } from '../data.js';
 
 const notesAreLong = (text) => text.length > 280 || text.split('\n').length > 8;
@@ -27,6 +28,7 @@ function taskFieldsHtml(t, task) {
     ${dateField('due_at', 'Due', t.due_at)}
     ${estimateField(t.estimate_minutes)}
     ${repeatFieldHtml(t, { skippable: !!task && isOpen(task) })}
+    ${notifyFieldHtml()}
     ${locationFieldHtml(t, { inherited: task ? placeFor({ ...task, place_id: null }) : null })}
     <label>Subtask of<select name="parent_id"></select></label>
     <label class="flag-toggle"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}> Flagged</label>
@@ -70,6 +72,7 @@ function wireTaskForm(form, t, task, onTagsChange) {
   form.elements.project_id.addEventListener('change', drawParents);
   const collectLocation = wireLocationField(form, onTagsChange);
   const collectRepeat = wireRepeatField(form, t, onTagsChange);
+  const collectReminders = wireNotifyField(form, remindersFor('task_id', task && task.id), onTagsChange);
   const skip = $('[data-skip-occurrence]', form);
   if (skip && task) skip.onclick = () => skipOccurrence(task, () => { const sheet = form.closest('dialog'); if (sheet) sheet.close(); });
   if (form.elements.status) {
@@ -93,6 +96,7 @@ function wireTaskForm(form, t, task, onTagsChange) {
       estimate_minutes: f.get('estimate_minutes') === '' ? null : Math.max(0, Math.round(Number(f.get('estimate_minutes')))),
       ...collectLocation(),
       repeat_rule: collectRepeat(),
+      notifications: collectReminders(),
     };
     if (f.has('status')) {
       const status = f.get('status');

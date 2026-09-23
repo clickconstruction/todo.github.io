@@ -36,7 +36,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat };
+  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -899,4 +899,90 @@ async function repeat(check) {
   // Library: summaries and end conditions.
   check('describe: weekdays', describe({ every: 1, unit: 'week', weekdays: [1, 2, 3, 4, 5] }) === 'Every week on weekdays');
   check('end after N: last occurrence has no next', nextOccurrence({ due_at: new Date().toISOString(), repeat_rule: { every: 1, unit: 'day', end_count: 3, n: 3 } }) === null);
+}
+
+// Custom notifications: add presets / custom / specific time, fire times follow dates,
+// saving keeps unchanged reminders, bell on rows, reminders come along with repeats.
+async function reminders(check) {
+  const { db } = await import('/js/state.js');
+  const task = (id) => db.tasks.find((t) => t.id === id);
+  const mine = (id) => db.notifications.filter((n) => n.task_id === id);
+  const { openEditor } = await import('/js/editors/task.js');
+  const pick = (f, v) => { const s = $('[data-notify-add]', f); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); };
+
+  openEditor(task('t3')); // due today 5pm
+  let f = $('#editor');
+  check('notifications field present, empty', !!$('[data-notify-add]', f) && !$$('[data-notify-list] li', f).length);
+  pick(f, 'before_due:60');
+  check('preset added with its fire time', has('#editor [data-notify-list]', '1 hour before due') && /4:00/.test(text('#editor [data-notify-list]')), text('#editor [data-notify-list]'));
+  pick(f, 'before_planned:0');
+  check('warns when the date it needs is missing', has('#editor [data-notify-list]', 'needs a planned date'));
+  window.prompt = () => '3h';
+  pick(f, 'custom');
+  check('custom offset (3h) added', has('#editor [data-notify-list]', '3 hours before due'));
+  pick(f, 'at');
+  $('[data-notify-at]', f).value = '2026-12-24T08:00';
+  $('[data-notify-at-add]', f).click();
+  check('specific time added', has('#editor [data-notify-list]', 'at ', 'dec 24'));
+  $$('[data-notify-remove]', f)[1].click(); // remove "when planned"
+  check('remove works', !has('#editor [data-notify-list]', 'when planned'));
+  f.requestSubmit();
+  await wait(250);
+  check('three reminders saved', mine('t3').length === 3, mine('t3').map((n) => n.kind).join());
+  const hourBefore = mine('t3').find((n) => n.kind === 'before_due' && n.offset_minutes === 60);
+  check('fire time = due − 1 hour', new Date(task('t3').due_at) - new Date(hourBefore.fire_at) === 3600e3);
+  window.prompt = () => 'Smoke tag';
+
+  await go('#project/p1');
+  check('row shows 🔔', !!$('[data-task="t3"] .meta-bell'));
+
+  // Saving again keeps unchanged reminders (a fired one isn't re-sent).
+  window.__mock.tables.notifications.find((n) => n.id === hourBefore.id).sent_at = '2026-01-01T00:00:00Z';
+  const { loadAll } = await import('/js/data.js');
+  await loadAll();
+  openEditor(task('t3'));
+  f = $('#editor');
+  f.elements.notes.value = 'edited';
+  f.requestSubmit();
+  await wait(250);
+  check('unrelated save keeps reminders (and sent state)', mine('t3').length === 3 && window.__mock.tables.notifications.find((n) => n.id === hourBefore.id).sent_at);
+
+  // Moving the due date moves and re-arms.
+  openEditor(task('t3'));
+  f = $('#editor');
+  $('[data-qd="due_at"][data-step="+1d"]', f).click();
+  f.requestSubmit();
+  await wait(250);
+  const moved = window.__mock.tables.notifications.find((n) => n.id === hourBefore.id);
+  check('moving the due date moves and re-arms the reminder', new Date(task('t3').due_at) - new Date(moved.fire_at) === 3600e3 && !moved.sent_at);
+
+  // Projects have the field too.
+  const { openProjectEditor } = await import('/js/editors/project.js');
+  openProjectEditor(db.projects.find((p) => p.id === 'p2'));
+  f = $('#project-form');
+  pick(f, 'at_defer:0');
+  f.requestSubmit();
+  await wait(250);
+  check('project reminder saved', db.notifications.some((n) => n.project_id === 'p2' && n.kind === 'at_defer'));
+
+  // Reminders come along with a repeat.
+  openEditor(task('t1'));
+  f = $('#editor');
+  f.elements.repeat_preset.value = 'weekly';
+  f.elements.repeat_preset.dispatchEvent(new Event('change', { bubbles: true }));
+  pick(f, 'before_due:1440');
+  f.requestSubmit();
+  await wait(250);
+  await go('#project/p1');
+  $('[data-check="t1"]').click();
+  await wait(400);
+  const next = db.tasks.find((t) => t.title === 'Call GVEC about utilities' && !t.completed_at);
+  const nextRem = next && window.__mock.tables.notifications.find((n) => n.task_id === next.id);
+  check('next occurrence brings its reminder', !!nextRem && new Date(next.due_at) - new Date(nextRem.fire_at) === 86400e3);
+
+  // #task/<id> links (from a notification) open the item.
+  location.hash = `#task/${next ? next.id : 't2'}`;
+  await wait(250);
+  check('#task link opens the action in its project', location.hash === '#project/p1' && $('#sheet').open);
+  $('#sheet').close();
 }

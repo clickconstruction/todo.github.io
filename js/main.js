@@ -30,6 +30,7 @@ const inspectOrEdit = (id) => {
   const t = findTask(id);
   if (t) openEditor(t);
 };
+app.openTask = (id) => inspectOrEdit(id);
 const findTask = (id) => byId(db.tasks, id) || byId(app.searchExtra, id) || (app.doneCache && byId(app.doneCache.rows, id));
 
 const ACTIONS = {

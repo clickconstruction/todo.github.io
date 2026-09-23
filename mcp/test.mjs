@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -335,4 +335,43 @@ assert(/repeating/.test(skipErr || ''), 'skip on a non-repeating action is refus
 assert(!(await tool('update_task', { id: rep.id, repeat: null })).repeat, 'repeat: null stops repeating');
 const repP = await tool('create_project', { name: 'Monthly close', repeat: { every: 1, unit: 'month' }, due: inWeek(5) });
 assert(repP.repeat && repP.repeat.summary === 'Every month', 'projects take a repeat rule');
+
+// ---------- custom notifications via MCP + cron ----------
+const rem = await tool('update_task', { id: oneShot.id, notifications: [{ kind: 'before_due', minutes: 60 }, { kind: 'at', at: '2026-10-01T15:00:00Z' }] });
+assert(rem.notifications && rem.notifications.length === 2 && rem.notifications.some((n) => n.kind === 'before_due' && n.minutes === 60), 'update_task sets notifications and shows them');
+assert(db.notifications.every((n) => n.user_id === UID && n.task_id === oneShot.id), 'notifications scoped to user and task');
+let remErr = null; try { await tool('update_task', { id: oneShot.id, notifications: [{ kind: 'at' }] }); } catch (x) { remErr = x.message; }
+assert(/needs at/.test(remErr || ''), '"at" notification without a time is refused');
+db.notifications.find((n) => n.kind === 'before_due' && n.task_id === oneShot.id).sent_at = 'sent-marker';
+await tool('update_task', { id: oneShot.id, notifications: [{ kind: 'before_due', minutes: 60 }] });
+assert(db.notifications.filter((n) => n.task_id === oneShot.id).length === 1 && db.notifications.find((n) => n.task_id === oneShot.id).sent_at === 'sent-marker', 'unchanged reminder kept (not re-sent), removed one dropped');
+assert((await tool('update_task', { id: oneShot.id, notifications: [] })).notifications === undefined, 'notifications: [] removes them');
+const projRem = await tool('update_project', { project: oneShot.project_id, notifications: [{ kind: 'before_due', minutes: 1440 }] });
+assert(projRem.notifications.length === 1 && projRem.notifications[0].minutes === 1440, 'projects take notifications');
+const capRem = await tool('capture', { title: 'Call the inspector', due: inWeek(2), notifications: [{ kind: 'before_due', minutes: 30 }] });
+assert(capRem.notifications && capRem.notifications.length === 1, 'capture with notifications');
+
+const { sendDueReminders, reminderMessage } = await import('./src/reminders.js');
+const nowR = new Date();
+const openT = mk({ title: 'Pick up permit', due_at: new Date(nowR.getTime() + 3600e3).toISOString() });
+const doneT = mk({ title: 'Already done', completed_at: nowR.toISOString() });
+db.push_subscriptions.push({ id: 'ps9', user_id: UID, endpoint: 'https://push.example.com/dev9', ...keys });
+db.notifications.push(
+  { id: 'n1', user_id: UID, task_id: openT.id, project_id: null, kind: 'before_due', offset_minutes: 60, fire_at: new Date(nowR - 30e3).toISOString(), sent_at: null },
+  { id: 'n2', user_id: UID, task_id: doneT.id, project_id: null, kind: 'at', offset_minutes: 0, fire_at: new Date(nowR - 60e3).toISOString(), sent_at: null },
+  { id: 'n3', user_id: UID, task_id: openT.id, project_id: null, kind: 'at', offset_minutes: 0, fire_at: new Date(nowR.getTime() + 3600e3).toISOString(), sent_at: null },
+  { id: 'n4', user_id: UID, task_id: openT.id, project_id: null, kind: 'at', offset_minutes: 0, fire_at: new Date(nowR - 10 * 3600e3).toISOString(), sent_at: null },
+);
+const pushedBefore = pushed.length;
+const restFn = async (path, opts = {}) => { const r = await fetch(`https://x.supabase.co/rest/v1/${path}`, { method: opts.method || 'GET', headers: {}, body: opts.body ? JSON.stringify(opts.body) : undefined }); const t = await r.text(); return t ? JSON.parse(t) : []; };
+const out = await sendDueReminders(env, restFn, nowR);
+const newPushes = pushed.slice(pushedBefore);
+assert(out.due === 2, `cron picks up due, unsent reminders from the last 6h (got ${out.due})`);
+assert(newPushes.length >= 1 && newPushes.every((x) => x.url.startsWith('https://push.example.com')), 'cron pushes the live one');
+const msgBody = JSON.parse(await decrypt(new Uint8Array(newPushes[newPushes.length - 1].init.body)));
+assert(msgBody.title === '⏰ Pick up permit' && /^Due at /.test(msgBody.body) && msgBody.url === `#task/${openT.id}`, `reminder text: ${msgBody.title} / ${msgBody.body}`);
+assert(db.notifications.find((n) => n.id === 'n1').sent_at && db.notifications.find((n) => n.id === 'n2').sent_at, 'due reminders marked sent (completed item: no push)');
+assert(!db.notifications.find((n) => n.id === 'n3').sent_at && !db.notifications.find((n) => n.id === 'n4').sent_at, 'future and stale reminders untouched');
+assert((await sendDueReminders(env, restFn, nowR)).due === 0, 'nothing is sent twice');
+assert(reminderMessage({ id: 'x', project_id: 'p', kind: 'at_defer' }, { id: 'p', name: 'Taxes' }, 'America/Chicago').body === 'Project · Available now', 'project reminder text');
 console.log('ALL PASSED');

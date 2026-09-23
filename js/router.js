@@ -24,6 +24,13 @@ const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'n
 
 export function render() {
   if (location.hash === '#today') { history.replaceState(null, '', '#forecast'); } // old links
+  // #task/<id> (from a notification): show the action in its list and open it.
+  const taskLink = location.hash.match(/^#task\/([^/]+)$/);
+  if (taskLink) {
+    const t = db.tasks.find((x) => x.id === taskLink[1]);
+    history.replaceState(null, '', t && t.project_id ? `#project/${t.project_id}` : '#inbox');
+    if (t && app.openTask) setTimeout(() => app.openTask(t.id), 0);
+  }
   const [view, ...args] = (location.hash.slice(1) || 'inbox').split('/');
   $('#view').innerHTML = (VIEWS[view] || viewInbox)(...args);
   if (AFTER[view]) AFTER[view](...args);

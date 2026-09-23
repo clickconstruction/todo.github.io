@@ -8,6 +8,7 @@
 
 import PostalMime from 'postal-mime';
 import { handleGeo, makePlaceResolver, loadPlaceData } from './geo.js';
+import { sendDueReminders } from './reminders.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -15,6 +16,7 @@ const INSTRUCTIONS = `Todo Tooling is the user's GTD system. Capture anything ne
 Clarify inbox items with update_task: give each a project and/or tags (contexts like "Laptop", people like "Waiting : Hiro"); an item leaves the Inbox once it has a project or tag.
 Use planned for when the user intends to work on something and due only for hard deadlines; flagged means "important now". Dates are YYYY-MM-DD in the user's timezone.
 Never complete, reschedule or re-file tasks the user did not ask you to change.
+Notifications: pass notifications (e.g. [{"kind":"before_due","minutes":60}]) to remind the user on their devices; they follow the item's dates.
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 For a weekly review: call list_review, go through each project with the user (use its hints), make the changes they want, then mark_reviewed.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
@@ -63,6 +65,12 @@ export default {
     }
     const out = await handle(body, api);
     return out ? json(out) : new Response(null, { status: 202, headers: CORS });
+  },
+
+  // Cron (every minute): send custom notifications whose time has come.
+  async scheduled(event, env, ctx) {
+    if (!(env.SUPABASE_SECRET_KEY || '').trim() || !(env.VAPID_PRIVATE_JWK || '').trim()) return;
+    ctx.waitUntil(sendDueReminders(env, (path, opts) => rest(env, path, opts)).then((r) => { if (r.due) console.log('reminders', r); }));
   },
 
   // Email Routing sends inbox@todotooling.com here; each accepted email becomes an Inbox task.
@@ -254,6 +262,7 @@ class Api {
     const known = new Set(placeData.tasks.map((t) => t.id));
     placeData.tasks.push(...tasks.filter((t) => !known.has(t.id))); // closed tasks too
     const placeOf = makePlaceResolver(placeData);
+    const reminders = await this.notificationsFor('task_id', tasks.map((t) => t.id));
     const projectIds = [...new Set(tasks.map((t) => t.project_id).filter(Boolean))];
     const [{ projects, tags, tagLabel }, links, pLinks] = await Promise.all([
       this.lookups(),
@@ -271,6 +280,7 @@ class Api {
       estimate_minutes: t.estimate_minutes ?? undefined,
       place: placeSummary(placeOf(t)),
       repeat: t.repeat_rule ? { ...t.repeat_rule, summary: describeRepeat(t.repeat_rule) } : undefined,
+      notifications: reminders[t.id],
       in_inbox: t.in_inbox,
       status: t.completed_at ? 'completed' : t.dropped_at ? 'dropped' : 'open',
       flagged: t.flagged,
@@ -352,6 +362,36 @@ class Api {
     return patch;
   }
 
+  // Custom notifications: { id -> [{kind, minutes, at, fires_at, sent}] } for task_id or project_id.
+  async notificationsFor(col, ids) {
+    if (!ids.length) return {};
+    const rows = await this.q(`notifications?${this.u}&${col}=${inList(ids)}&order=fire_at.asc&select=*`);
+    const out = {};
+    rows.forEach((n) => { (out[n[col]] = out[n[col]] || []).push({ kind: n.kind, minutes: n.kind === 'before_due' || n.kind === 'before_planned' ? n.offset_minutes : undefined, at: n.at || undefined, fires_at: n.fire_at, sent: !!n.sent_at }); });
+    return out;
+  }
+
+  async setNotifications(col, id, list) {
+    const rows = list.map((n) => {
+      if (!['before_due', 'before_planned', 'at_defer', 'at'].includes(n.kind)) throw new Error('notification kind must be before_due, before_planned, at_defer or at');
+      const row = { user_id: this.userId, [col]: id, kind: n.kind, offset_minutes: Math.min(525600, Math.max(0, Math.round(Number(n.minutes) || 0))) };
+      if (n.kind === 'at') {
+        if (!n.at || isNaN(new Date(n.at))) throw new Error('an "at" notification needs at (an ISO time)');
+        row.at = new Date(n.at).toISOString();
+      }
+      return row;
+    });
+    // Keep unchanged reminders (so one that already fired isn't re-sent); remove and add the rest.
+    const key = (n) => `${n.kind}|${n.kind === 'at' ? new Date(n.at).toISOString() : n.offset_minutes}`;
+    const existing = await this.q(`notifications?${this.u}&${col}=eq.${id}&select=id,kind,offset_minutes,at`);
+    const wanted = new Set(rows.map(key));
+    const have = new Set(existing.map(key));
+    const drop = existing.filter((n) => !wanted.has(key(n))).map((n) => n.id);
+    const add = rows.filter((r, i) => !have.has(key(r)) && rows.findIndex((x) => key(x) === key(r)) === i);
+    if (drop.length) await this.q(`notifications?${this.u}&id=${inList(drop)}`, { method: 'DELETE' });
+    if (add.length) await this.q('notifications', { method: 'POST', body: add });
+  }
+
   async setTags(taskId, labels) {
     const ids = [];
     for (const l of labels) ids.push(await this.ensureTag(l));
@@ -421,6 +461,11 @@ const TOOLS = [
           description: 'Repeat rule, or null to stop repeating. {every, unit: day|week|month|year, weekdays?: [0-6] (Sun=0, with unit week), from?: assigned|completion (default assigned = fixed schedule), end_count?, end_until?: YYYY-MM-DD}. Completing it creates the next occurrence.',
           properties: { every: { type: 'integer' }, unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] }, weekdays: { type: 'array', items: { type: 'integer' } }, from: { type: 'string', enum: ['assigned', 'completion'] }, end_count: { type: 'integer' }, end_until: { type: 'string' } },
         },
+        notifications: {
+          type: 'array',
+          description: 'Replaces the custom notifications. Each: {kind: before_due|before_planned|at_defer|at, minutes?: minutes before (0 = at the time), at?: ISO time for kind at}. [] removes all.',
+          items: { type: 'object', properties: { kind: { type: 'string', enum: ['before_due', 'before_planned', 'at_defer', 'at'] }, minutes: { type: 'integer' }, at: { type: 'string' } }, required: ['kind'] },
+        },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
@@ -437,7 +482,7 @@ const TOOLS = [
         body.sort = sib.length ? (sib[0].sort || 0) + 1 : 0;
       }
       const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body });
-      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m', 'repeat'].includes(k) && v !== undefined));
+      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m', 'repeat', 'notifications'].includes(k) && v !== undefined));
       if (!Object.keys(fields).length) return (await api.shape([row]))[0];
       return TOOLS.find((t) => t.name === 'update_task').run(api, { id: row.id, ...fields });
     },
@@ -694,6 +739,11 @@ const TOOLS = [
           description: 'Repeat rule, or null to stop repeating. {every, unit: day|week|month|year, weekdays?: [0-6] (Sun=0, with unit week), from?: assigned|completion (default assigned = fixed schedule), end_count?, end_until?: YYYY-MM-DD}. Completing it creates the next occurrence.',
           properties: { every: { type: 'integer' }, unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] }, weekdays: { type: 'array', items: { type: 'integer' } }, from: { type: 'string', enum: ['assigned', 'completion'] }, end_count: { type: 'integer' }, end_until: { type: 'string' } },
         },
+        notifications: {
+          type: 'array',
+          description: 'Replaces the custom notifications. Each: {kind: before_due|before_planned|at_defer|at, minutes?: minutes before (0 = at the time), at?: ISO time for kind at}. [] removes all.',
+          items: { type: 'object', properties: { kind: { type: 'string', enum: ['before_due', 'before_planned', 'at_defer', 'at'] }, minutes: { type: 'integer' }, at: { type: 'string' } }, required: ['kind'] },
+        },
         skip_occurrence: { type: 'boolean', description: 'Move a repeating action to its next occurrence without completing it' },
         move: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'Reorder among its siblings (same project and parent). Order decides the next action in sequential projects.' },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
@@ -752,6 +802,7 @@ const TOOLS = [
       const parentId = patch.parent_id !== undefined ? patch.parent_id : task.parent_id;
       patch.in_inbox = !(projectId || parentId || tagCount);
       await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: patch });
+      if (Array.isArray(a.notifications)) await api.setNotifications('task_id', task.id, a.notifications);
       if (a.skip_occurrence) {
         if (!(patch.repeat_rule || task.repeat_rule)) throw new Error('skip_occurrence needs a repeating action');
         await api.q('rpc/repeat_skip', { method: 'POST', body: { task_id: task.id, owner: api.userId } });
@@ -867,6 +918,11 @@ const TOOLS = [
           description: 'Repeat rule, or null to stop repeating. {every, unit: day|week|month|year, weekdays?: [0-6] (Sun=0, with unit week), from?: assigned|completion (default assigned = fixed schedule), end_count?, end_until?: YYYY-MM-DD}. Completing the project starts a fresh copy with all its actions.',
           properties: { every: { type: 'integer' }, unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] }, weekdays: { type: 'array', items: { type: 'integer' } }, from: { type: 'string', enum: ['assigned', 'completion'] }, end_count: { type: 'integer' }, end_until: { type: 'string' } },
         },
+        notifications: {
+          type: 'array',
+          description: 'Replaces the custom notifications. Each: {kind: before_due|before_planned|at_defer|at, minutes?: minutes before (0 = at the time), at?: ISO time for kind at}. [] removes all.',
+          items: { type: 'object', properties: { kind: { type: 'string', enum: ['before_due', 'before_planned', 'at_defer', 'at'] }, minutes: { type: 'integer' }, at: { type: 'string' } }, required: ['kind'] },
+        },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
@@ -877,7 +933,8 @@ const TOOLS = [
       const folder_id = folder ? await api.resolveFolder(folder) : null;
       const body = { user_id: api.userId, name: String(name).trim(), notes, folder_id, kind, complete_with_last: !!complete_with_last, ...(await api.locationPatch(more)), ...projectPatch(api, more) };
       const [row] = await api.q('projects', { method: 'POST', prefer: 'return=representation', body });
-      return projectOut(api, row, folder ? [{ id: folder_id, name: folder }] : []);
+      if (Array.isArray(more.notifications)) await api.setNotifications('project_id', row.id, more.notifications);
+      return { ...projectOut(api, row, folder ? [{ id: folder_id, name: folder }] : []), notifications: (await api.notificationsFor('project_id', [row.id]))[row.id] };
     },
   },
   {
@@ -904,6 +961,16 @@ const TOOLS = [
         review_unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
         next_review: { type: ['string', 'null'], description: 'YYYY-MM-DD next review date; null to recompute from the cadence' },
         completed_at: { type: 'string', description: 'When it was completed/dropped (ISO time or YYYY-MM-DD), to backdate a closed project' },
+        repeat: {
+          type: ['object', 'null'],
+          description: 'Repeat rule, or null to stop repeating. {every, unit: day|week|month|year, weekdays?: [0-6] (Sun=0, with unit week), from?: assigned|completion (default assigned = fixed schedule), end_count?, end_until?: YYYY-MM-DD}. Completing the project starts a fresh copy with all its actions.',
+          properties: { every: { type: 'integer' }, unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] }, weekdays: { type: 'array', items: { type: 'integer' } }, from: { type: 'string', enum: ['assigned', 'completion'] }, end_count: { type: 'integer' }, end_until: { type: 'string' } },
+        },
+        notifications: {
+          type: 'array',
+          description: 'Replaces the custom notifications. Each: {kind: before_due|before_planned|at_defer|at, minutes?: minutes before (0 = at the time), at?: ISO time for kind at}. [] removes all.',
+          items: { type: 'object', properties: { kind: { type: 'string', enum: ['before_due', 'before_planned', 'at_defer', 'at'] }, minutes: { type: 'integer' }, at: { type: 'string' } }, required: ['kind'] },
+        },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
@@ -929,12 +996,14 @@ const TOOLS = [
         if (tagIds.length) await api.q('project_tags', { method: 'POST', body: [...new Set(tagIds)].map((tag_id) => ({ project_id: id, tag_id, user_id: api.userId })) });
       }
       if (Object.keys(patch).length) await api.q(`projects?${api.u}&id=eq.${id}`, { method: 'PATCH', body: patch });
+      if (Array.isArray(a.notifications)) await api.setNotifications('project_id', id, a.notifications);
       const [p] = await api.q(`projects?${api.u}&id=eq.${id}&select=*`);
       const folder = p.folder_id ? (await api.q(`folders?${api.u}&id=eq.${p.folder_id}&select=name`))[0] : null;
       const { tags: allTags, tagLabel } = await api.lookups();
       const pt = (await api.q(`project_tags?${api.u}&project_id=eq.${id}&select=tag_id`)).map((l) => allTags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel);
       const place = p.place_id ? (await api.q(`places?${api.u}&id=eq.${p.place_id}&select=*`))[0] : null;
       return { ...projectOut(api, p, folder ? [{ id: p.folder_id, name: folder.name }] : []), tags: pt,
+        notifications: (await api.notificationsFor('project_id', [id]))[id],
         place: place ? { name: place.name, alert: p.location_trigger, radius_m: p.location_radius_m || place.radius_m } : null };
     },
   },

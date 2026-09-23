@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      api_tokens: [], push_subscriptions: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      api_tokens: [], push_subscriptions: [], notifications: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -115,6 +115,10 @@
       created_at: now(), updated_at: now() };
     tables.tasks.push(c);
     tables.task_tags.filter((x) => x.task_id === t.id).forEach((x) => tables.task_tags.push({ ...x, task_id: c.id }));
+    tables.notifications.filter((n) => n.task_id === t.id).forEach((n) => {
+      const copy = { ...n, id: id(), task_id: c.id, sent_at: null, at: n.at ? move(n.at) : null };
+      tables.notifications.push(copy); fireAt(copy);
+    });
     return c;
   }
   function repeatTask(t) {
@@ -149,6 +153,15 @@
     const map = {};
     tables.tasks.filter((t) => t.project_id === p.id && !t.parent_id && !t.dropped_at).forEach((t) => { map[t.id] = cloneTask(t, shift, null, np.id, t.repeat_rule || null).id; });
     tables.tasks.filter((t) => t.project_id === p.id && t.parent_id && map[t.parent_id] && !t.dropped_at).forEach((t) => cloneTask(t, shift, map[t.parent_id], np.id, t.repeat_rule || null));
+  }
+
+  // Mirrors notifications_fire_at(): fire time follows the item's dates; moving it re-arms.
+  function fireAt(n, before) {
+    const item = n.task_id ? tables.tasks.find((t) => t.id === n.task_id) : tables.projects.find((p) => p.id === n.project_id);
+    const base = n.kind === 'at' ? n.at : item && { before_due: item.due_at, before_planned: item.planned_at, at_defer: item.defer_at }[n.kind];
+    const fire = base ? new Date(new Date(base) - (n.kind === 'at' ? 0 : (n.offset_minutes || 0) * 60000)).toISOString() : null;
+    if (before && fire !== before.fire_at) n.sent_at = null;
+    n.fire_at = fire;
   }
 
   function taskRules(t, before) {
@@ -186,6 +199,7 @@
     folders: () => ({ archived_at: null }),
     tags: () => ({ parent_id: null, place_id: null, location_trigger: null, location_radius_m: null }),
     places: () => ({ address: '', google_place_id: null, radius_m: 402, notes: '', archived_at: null }),
+    notifications: () => ({ task_id: null, project_id: null, offset_minutes: 0, at: null, sent_at: null }),
   };
   const NO_DELETE = { places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
 
@@ -229,7 +243,7 @@
       if (st.op === 'insert') {
         const add = [].concat(st.payload).map((p) => ({ id: id(), user_id: uid, created_at: now(), updated_at: now(), sort: 0, ...(DEFAULTS[table] ? DEFAULTS[table]() : {}), ...p }));
         rows.push(...add);
-        add.forEach((r) => { if (table === 'projects') { reviewSchedule(r); projectStatusChange(r, null); } if (table === 'tasks') taskRules(r, null); });
+        add.forEach((r) => { if (table === 'projects') { reviewSchedule(r); projectStatusChange(r, null); } if (table === 'tasks') taskRules(r, null); if (table === 'notifications') fireAt(r); });
         return { data: add.map(copy), error: null };
       }
       if (st.op === 'update') {
@@ -239,6 +253,10 @@
           Object.assign(r, st.payload, { updated_at: now() });
           if (table === 'projects') { reviewSchedule(r, before); projectStatusChange(r, before.status); }
           if (table === 'tasks') taskRules(r, before);
+          if (table === 'notifications') fireAt(r, before);
+          if ((table === 'tasks' || table === 'projects') && ['due_at', 'planned_at', 'defer_at'].some((k) => r[k] !== before[k])) {
+            tables.notifications.filter((n) => n[table === 'tasks' ? 'task_id' : 'project_id'] === r.id).forEach((n) => { const b = { ...n }; fireAt(n, b); });
+          }
         });
         return { data: hit.map(copy), error: null };
       }
