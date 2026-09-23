@@ -6,6 +6,7 @@ import { startOfToday, addDays, sameDay, dayStart, isDeferred } from '../dates.j
 import { taskList, projectRow } from '../rows.js';
 import { filterBar, passes, sortTasks } from '../filter.js';
 import { isFlaggedTask } from './basic.js';
+import { calendarEvents, calendarErrors, liveCalendars, fmtEventTime } from '../calendars.js';
 
 const DAYS_AHEAD = 6;
 const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -58,15 +59,18 @@ export const forecastBadgeCount = () => {
 export function viewForecast(selected = 'today') {
   const { today, tasks, overdue, plannedPast, days, future, liveProjects, overdueProjects } = forecastData();
   const pastCount = overdue.length + plannedPast.length + overdueProjects.length;
-  const cell = (id, label, sub, n, cls = '') => `<a class="fc-day ${selected === id ? 'on' : ''} ${cls}" href="#forecast/${id}" aria-current="${selected === id}">
-    <span class="fc-label">${label}</span><span class="fc-sub">${sub}</span><b class="fc-n">${n || ''}</b></a>`;
+  // Calendar events for the strip's days (loaded in the background; counts show once they arrive).
+  const events = liveCalendars().some((c) => c.enabled) ? calendarEvents(key(days[0]), key(days[days.length - 1])) : [];
+  const eventsOn = (k) => events.filter((e) => e.days.includes(k));
+  const cell = (id, label, sub, n, cls = '', ev = 0) => `<a class="fc-day ${selected === id ? 'on' : ''} ${cls}" href="#forecast/${id}" aria-current="${selected === id}">
+    <span class="fc-label">${label}</span><span class="fc-sub">${sub}</span><b class="fc-n">${n || ''}</b>${ev ? `<span class="fc-ev" title="${ev} calendar event${ev === 1 ? '' : 's'}">${ev} ev</span>` : ''}</a>`;
   const strip = [
     cell('past', 'Past', '', pastCount, overdue.length ? 'late' : ''),
     ...days.map((d, i) => {
       const it = dayItems(d, tasks.filter(isOpen));
       const tagged = i === 0 ? forecastTagTasks(tasks).filter((t) => !it.due.includes(t) && !it.planned.includes(t)).length : 0;
       const n = it.due.length + it.planned.length + projectsOn(d, liveProjects).length + tagged;
-      return cell(i === 0 ? 'today' : key(d), i === 0 ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' }), d.getDate(), n, it.due.length && i === 0 ? 'due' : '');
+      return cell(i === 0 ? 'today' : key(d), i === 0 ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' }), d.getDate(), n, it.due.length && i === 0 ? 'due' : '', eventsOn(key(d)).length);
     }),
     cell('future', 'Future', '', future.length),
   ].join('');
@@ -88,6 +92,16 @@ export function viewForecast(selected = 'today') {
     const day = selected === 'today' ? today : new Date(selected + 'T00:00');
     const it = dayItems(day, tasks);
     const isToday = sameDay(day, today);
+    // Calendar first: the day's fixed commitments frame what the actions can fit around.
+    const dayKey = key(day);
+    const inStrip = days.some((d) => key(d) === dayKey);
+    const dayEvents = inStrip ? eventsOn(dayKey) : (liveCalendars().some((c) => c.enabled) ? calendarEvents(dayKey, dayKey) : []);
+    if (dayEvents.length) {
+      body += `<h2 class="section-title">Calendar · ${dayEvents.length}</h2><ul class="list cal-list">${dayEvents.map((e) => `<li class="cal-event ${e.busy ? '' : 'free'}" style="--cal:${esc(e.color)}">
+        <span class="cal-time">${esc(fmtEventTime(e))}</span><span class="cal-main"><span class="cal-title">${esc(e.title)}</span>
+        ${e.location || e.calendar ? `<span class="cal-meta">${[e.location, e.calendar].filter(Boolean).map((x) => esc(x.split('\n')[0])).join(' · ')}</span>` : ''}</span></li>`).join('')}</ul>`;
+    }
+    calendarErrors().forEach((c) => { body += `<p class="persp-warning">📅 ${esc(c.name)}: ${esc(c.error)} <a href="#settings">Settings</a></p>`; });
     if (isToday && pastCount) body += `<a class="fc-banner" href="#forecast/past">${overdue.length ? `<b>${overdue.length} overdue</b>` : ''}${overdue.length && plannedPast.length ? ' · ' : ''}${plannedPast.length ? `${plannedPast.length} planned earlier` : ''} → triage</a>`;
     body += section('Due', it.due);
     body += section('Planned', it.planned);

@@ -2,6 +2,7 @@
 import { saveSettings, DEFAULT_SETTINGS, minutesToInput, inputToMinutes } from '../prefs.js';
 import { keyboardHtml, shortcutListHtml } from '../shortcuts.js';
 import { localTz } from '../repeat.js';
+import { liveCalendars, maskUrl, COLORS, checkLink, addCalendar, updateCalendar, archiveCalendar, fmtEventTime } from '../calendars.js';
 import { sb, app, esc, run, toast, openSheet, $, sortedTags, tagLabel } from '../state.js';
 import { fmtDate } from '../dates.js';
 import { resultLines, stripIcon, when, timeOnly } from '../pushResult.js';
@@ -50,6 +51,7 @@ export function viewSettings() {
       <button class="btn small danger" data-remove-sender="${e.id}">Remove</button></li>`).join('')}</ul>
     <form class="capture" data-add-sender style="margin-top:12px"><input type="email" name="email" placeholder="Add another address you send from" autocomplete="off"><button class="btn">Add</button></form>
     ${datesSection()}
+    ${calendarsSection()}
     ${keyboardSection()}
     <h2 class="section-title">Import</h2>
     <p class="view-sub" style="margin-bottom:8px">Moving from OmniFocus? Bring folders, projects, tags, repeats and review schedules over; you'll see a preview first.</p>
@@ -242,4 +244,71 @@ document.addEventListener('change', async (e) => {
   if (time) { const m = inputToMinutes(time.value); if (m !== null) await saveSettings({ [time.dataset.settingTime]: m }); return; }
   const tag = e.target.closest && e.target.closest('[data-setting-forecast-tag]');
   if (tag) await saveSettings({ forecast_tag_id: tag.value || null });
+});
+
+// ---------- Calendars: private iCal links shown in Forecast ----------
+const calState = { adding: false, checking: false, checked: null, error: '', name: '', url: '', color: COLORS[0] };
+function calendarsSection() {
+  const list = liveCalendars();
+  const status = (c) => (c.last_error ? `<span class="cal-bad">⚠️ ${esc(c.last_error)}</span>` : c.last_ok_at ? `<span class="cal-ok">✓ ${c.event_count ?? ''} event${c.event_count === 1 ? '' : 's'}</span>` : '');
+  const form = calState.adding ? `<form class="cal-add" data-cal-add>
+      <label>Name<input type="text" name="cal_name" value="${esc(calState.name)}" placeholder="Work" autocomplete="off" required></label>
+      <label>Private iCal link<input type="url" name="cal_url" value="${esc(calState.url)}" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" autocomplete="off" spellcheck="false" required></label>
+      <div class="cal-colors" role="radiogroup" aria-label="Color">${COLORS.map((c) => `<button type="button" class="cal-color ${calState.color === c ? 'on' : ''}" data-cal-color="${c}" style="--cal:${c}" role="radio" aria-checked="${calState.color === c}" aria-label="Color ${c}"></button>`).join('')}</div>
+      <details class="cal-help"><summary>Where do I find the link?</summary>
+        <p><b>Google:</b> calendar.google.com → ⚙️ Settings → your calendar (left) → <i>Integrate calendar</i> → <i>Secret address in iCal format</i>.</p>
+        <p><b>iCloud:</b> Calendar app → the calendar’s ⓘ → <i>Public Calendar</i> → Share link (webcal://…).</p>
+        <p><b>Outlook:</b> Settings → Calendar → Shared calendars → <i>Publish a calendar</i> → the ICS link.</p>
+        <p class="hint">Treat the link like a password: anyone with it can read that calendar. Here only you can see it.</p></details>
+      ${calState.error ? `<p class="persp-warning">⚠️ ${esc(calState.error)}</p>` : ''}
+      ${calState.checked ? `<div class="cal-check">✓ ${calState.checked.name ? `“${esc(calState.checked.name)}”, ` : ''}${calState.checked.count} events.
+        ${calState.checked.upcoming.length ? `Next: ${calState.checked.upcoming.map((e) => `${esc(e.title)} (${esc((e.allDay ? new Date(`${e.days[0]}T12:00:00`) : new Date(e.start)).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }))}${e.allDay ? '' : `, ${esc(fmtEventTime(e))}`})`).join(' · ')}` : ''}</div>` : ''}
+      <div class="actions"><button type="button" class="btn" data-cal-cancel>Cancel</button><div class="right">
+        ${calState.checked ? '<button type="submit" class="btn primary" data-cal-save>Add calendar</button>' : `<button type="submit" class="btn primary" data-cal-check ${calState.checking ? 'disabled' : ''}>${calState.checking ? 'Checking…' : 'Check link'}</button>`}</div></div>
+    </form>` : '<button class="btn" data-cal-new>+ Add a calendar</button>';
+  return `<h2 class="section-title">Calendars</h2>
+    <p class="view-sub">Show your calendar events in Forecast, next to what’s due and planned. Read-only; events aren’t stored.</p>
+    <div class="settings-card">
+      ${list.map((c) => `<div class="cal-row"><span class="cal-dot" style="--cal:${esc(c.color)}"></span>
+        <span class="set-text"><b>${esc(c.name)}</b><span class="hint">${esc(maskUrl(c.url))} ${status(c)}</span></span>
+        <label class="cal-toggle" title="Show in Forecast"><input type="checkbox" data-cal-enabled="${c.id}" ${c.enabled ? 'checked' : ''}> Show</label>
+        <button class="btn small" data-cal-remove="${c.id}">Remove</button></div>`).join('')}
+      ${form}
+    </div>`;
+}
+
+document.addEventListener('click', async (e) => {
+  if (!location.hash.startsWith('#settings')) return;
+  const t = e.target;
+  if (t.closest('[data-cal-new]')) { Object.assign(calState, { adding: true, checked: null, error: '', name: '', url: '', color: COLORS[liveCalendars().length % COLORS.length] }); app.render(); setTimeout(() => { const i = document.querySelector('[name=cal_name]'); if (i) i.focus(); }, 0); return; }
+  if (t.closest('[data-cal-cancel]')) { calState.adding = false; app.render(); return; }
+  const col = t.closest('[data-cal-color]');
+  if (col) { calState.color = col.dataset.calColor; app.render(); return; }
+  const rm = t.closest('[data-cal-remove]');
+  if (rm) { const c = liveCalendars().find((x) => x.id === rm.dataset.calRemove); if (c) archiveCalendar(c); }
+});
+document.addEventListener('input', (e) => {
+  if (!e.target.closest || !e.target.closest('[data-cal-add]')) return;
+  if (e.target.name === 'cal_name') calState.name = e.target.value;
+  if (e.target.name === 'cal_url') { calState.url = e.target.value; calState.checked = null; calState.error = ''; }
+});
+document.addEventListener('change', async (e) => {
+  const en = e.target.closest && e.target.closest('[data-cal-enabled]');
+  if (en) { const c = liveCalendars().find((x) => x.id === en.dataset.calEnabled); if (c) updateCalendar(c, { enabled: en.checked }); }
+});
+document.addEventListener('submit', async (e) => {
+  const form = e.target.closest && e.target.closest('[data-cal-add]');
+  if (!form) return;
+  e.preventDefault();
+  if (!calState.name.trim() || !calState.url.trim()) return;
+  if (!calState.checked) {
+    calState.checking = true; calState.error = ''; app.render();
+    try { calState.checked = await checkLink(calState.url); if (!calState.name.trim() && calState.checked.name) calState.name = calState.checked.name; } catch (err) { calState.error = err.message; }
+    calState.checking = false; app.render();
+    return;
+  }
+  const row = await addCalendar({ name: calState.name.trim(), url: calState.url, color: calState.color, count: calState.checked.count });
+  Object.assign(calState, { adding: false, checked: null, url: '', name: '' });
+  app.render();
+  toast(`Added “${row.name}”. Its events show in Forecast.`);
 });

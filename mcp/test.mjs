@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -20,6 +20,13 @@ globalThis.fetch = async (url, init = {}) => {
     if (!init.headers.apikey) return new Response('no key', { status: 401 });
     globalThis.stored[key] = { body: init.body, type: init.headers['Content-Type'] };
     return new Response(JSON.stringify({ Key: key }), { status: 200 });
+  }
+  if (String(url).startsWith('https://cal.example/')) {
+    const u = String(url);
+    if (u.includes('missing')) return new Response('nope', { status: 404 });
+    if (u.includes('html')) return new Response('<html>login</html>', { status: 200 });
+    const d = new Date(); const pad = (n) => String(n).padStart(2, '0'); const ymd = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+    return new Response(['BEGIN:VCALENDAR', 'X-WR-CALNAME:Work', 'BEGIN:VEVENT', 'UID:1', `DTSTART;TZID=America/Chicago:${ymd}T140000`, `DTEND;TZID=America/Chicago:${ymd}T150000`, 'SUMMARY:Site walk', 'LOCATION:1000 Main St', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n'), { status: 200, headers: { 'content-type': 'text/calendar' } });
   }
   if (String(url).startsWith('https://files.example')) return new Response('drawing bytes', { status: 200, headers: { 'content-type': 'application/pdf' } });
   if (String(url).includes('/auth/v1/user')) {
@@ -618,6 +625,45 @@ assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'r
   const fc = await tool('forecast', { days: 2 });
   assert(fc.today_tag && fc.today_tag.tag === 'Today' && fc.today_tag.items.some((x) => x.id === pick.id), 'forecast includes the "always show in Today" tag');
   db.user_settings.length = 0;
+}
+
+// ---------- iCal reading (js/ics.js) ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const I = await import('../js/ics.js');
+  const cal = I.parseCalendar(readFileSync(new URL('../dev/fixtures/calendar-sample.ics', import.meta.url), 'utf8'), { tz: 'America/Chicago' });
+  const wk = I.eventsBetween(cal, '2026-09-21', '2026-09-30', { tz: 'America/Chicago' });
+  const at = (title) => wk.filter((e) => e.title === title).map((e) => `${e.days.join('+')}${e.allDay ? '' : '@' + new Date(e.start).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })}`).join(',');
+  assert(cal.name === 'Work' && at('Standup') === '2026-09-21@9:00 AM,2026-09-23@9:00 AM,2026-09-30@9:00 AM', 'ics: weekly rule, skipped date (EXDATE), alarms ignored', at('Standup'));
+  assert(at('Standup (moved)') === '2026-09-28@10:00 AM', 'ics: a moved occurrence replaces the original');
+  assert(at('Jodi out of office') === '2026-09-23+2026-09-24+2026-09-25' && !at('Cancelled call'), 'ics: multi-day all-day event; cancelled events hidden');
+  assert(wk.some((e) => e.title === 'Site walk: Smith, Jones' && e.location === '1000 Main St\nHouston'), 'ics: escaped text');
+  assert(at("Mom's birthday") === '2026-09-24', 'ics: yearly all-day');
+  const nov = I.eventsBetween(cal, '2026-11-01', '2026-11-30', { tz: 'America/Chicago' });
+  const outlook = nov.find((e) => e.title.startsWith('Outlook meeting'));
+  assert(outlook && outlook.title.endsWith('folded over two lines') && new Date(outlook.start).toISOString() === '2026-11-02T14:00:00.000Z', 'ics: Windows zone names, folded lines, daylight saving');
+  assert(nov.filter((e) => e.title === 'Board meeting').map((e) => e.days[0]).join() === '2026-11-10', 'ics: 2nd Tuesday of the month');
+  assert(!I.eventsBetween(cal, '2027-01-01', '2027-01-31', { tz: 'America/Chicago' }).some((e) => e.title === 'Board meeting'), 'ics: COUNT ends a series');
+}
+
+// ---------- calendars ----------
+{
+  const cf = async (body, auth = 'Bearer user-jwt') => { const r = await worker.fetch(new Request('https://mcp.todotooling.com/calendar/fetch', { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), env, ctx); return { status: r.status, text: await r.text() }; };
+  assert((await cf({ url: 'https://cal.example/a.ics' }, 'Bearer nope')).status === 401, '/calendar/fetch needs a signed-in user');
+  const ok = await cf({ url: 'webcal://cal.example/a.ics' });
+  assert(ok.status === 200 && ok.text.startsWith('BEGIN:VCALENDAR'), 'fetches a calendar link (webcal:// works)');
+  assert(/https:\/\/ or webcal/.test((await cf({ url: 'http://cal.example/a.ics' })).text), 'only https links');
+  assert(/doesn’t exist any more/.test((await cf({ url: 'https://cal.example/missing.ics' })).text), 'a dead link is explained');
+  const html = await cf({ url: 'https://cal.example/html' });
+  assert(html.status === 422 && !html.text.includes('<html>'), 'non-calendar pages are refused (never passed through)');
+  db.calendars.push({ id: '00000000-0000-0000-0000-00000000ca11', user_id: UID, name: 'Work', url: 'https://cal.example/work.ics', color: '#1D9E75', enabled: true, sort: 0, archived_at: null });
+  db.calendars.push({ id: '00000000-0000-0000-0000-00000000ca12', user_id: 'someone-else', name: 'Theirs', url: 'https://cal.example/theirs.ics', color: '#1D9E75', enabled: true, sort: 0, archived_at: null });
+  assert((await cf({ id: '00000000-0000-0000-0000-00000000ca11' })).status === 200, 'fetches a saved calendar by id');
+  assert((await cf({ id: '00000000-0000-0000-0000-00000000ca12' })).status === 404, 'can’t read someone else’s calendar');
+  const fc = await tool('forecast', { days: 2 });
+  const todayEvents = Object.values(fc.days)[0].events || [];
+  assert(todayEvents.some((e) => e.title === 'Site walk' && e.calendar === 'Work' && e.location === '1000 Main St') && !JSON.stringify(fc).includes('cal.example'), 'forecast includes calendar events, never the links');
+  db.calendars.length = 0;
 }
 
 // ---------- OmniFocus import ----------

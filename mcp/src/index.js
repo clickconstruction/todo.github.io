@@ -10,6 +10,7 @@ import PostalMime from 'postal-mime';
 import { handleGeo, makePlaceResolver, loadPlaceData } from './geo.js';
 import { sendDueReminders } from './reminders.js';
 import { deliver, sendQueuedTests } from './deliver.js';
+import { handleCalendarFetch, calendarEvents } from './calendar.js';
 import * as P from '../../js/perspective-engine.js';
 import * as OF from '../../js/omnifocus-import.js';
 import * as TPL from '../../js/templates.js';
@@ -50,6 +51,10 @@ export default {
       if (!(env.SUPABASE_SECRET_KEY || '').trim() || !(env.VAPID_PRIVATE_JWK || '').trim()) return json({ error: 'Server not configured' }, 503);
       return handlePushTest(request, env);
     }
+    if (url.pathname === '/calendar/fetch') {
+      if (!(env.SUPABASE_SECRET_KEY || '').trim()) return json({ error: 'Server not configured' }, 503);
+      return handleCalendarFetch(request, env, ctx, { rest: (path, opts) => rest(env, path, opts), json, sha256Hex, cors: CORS });
+    }
     if (url.pathname === '/geo') {
       if (!(env.SUPABASE_SECRET_KEY || '').trim()) return json({ error: 'Server not configured' }, 503);
       return handleGeo(request, env, ctx, { rest: (path, opts) => rest(env, path, opts), sha256Hex, json });
@@ -74,6 +79,7 @@ export default {
     let body;
     try { body = await request.json(); } catch { return json(rpcError(null, -32700, 'Parse error'), 400); }
     const api = new Api(env, auth.userId);
+    api.ctx = ctx;
     await api.loadSettings();
     if (Array.isArray(body)) {
       const out = (await Promise.all(body.map((m) => handle(m, api)))).filter(Boolean);
@@ -803,7 +809,7 @@ const TOOLS = [
   },
   {
     name: 'forecast',
-    description: 'Day-by-day view of what is due, planned, or becoming available (deferred until that day), plus past-due and past-planned items, and (today_tag) the actions with the user\'s "always show in Today" tag. Use for "what is coming up this week" and daily planning.',
+    description: 'Day-by-day view of what is due, planned, or becoming available (deferred until that day), plus past-due and past-planned items, calendar events from the user\'s calendars (events, per day; times are ISO), and (today_tag) the actions with the user\'s "always show in Today" tag. Use for "what is coming up this week" and daily planning.',
     inputSchema: { type: 'object', properties: { days: { type: 'integer', default: 7, description: 'How many days from today (1-60)' } } },
     async run(api, { days = 7 }) {
       days = Math.min(Math.max(1, Math.round(Number(days) || 7)), 60);
@@ -836,6 +842,13 @@ const TOOLS = [
         if (due && due < today) out.past.overdue_projects.push(row);
         [due, planned].filter((d, i, a) => d && a.indexOf(d) === i).forEach((d) => { if (out.days[d]) out.days[d].projects.push(row); });
       });
+      // Calendar events (Settings → Calendars), per day, alongside the tasks.
+      try {
+        const lastDay = Object.keys(out.days).pop();
+        const { events, errors } = await calendarEvents(api, today, lastDay, api.ctx, { sha256Hex });
+        events.forEach((e) => e.days.forEach((d) => { if (out.days[d]) (out.days[d].events = out.days[d].events || []).push({ title: e.title, start: e.allDay ? undefined : e.start, end: e.allDay ? undefined : e.end, all_day: e.allDay || undefined, location: e.location || undefined, calendar: e.calendar }); }));
+        if (errors.length) out.calendar_errors = errors;
+      } catch { out.calendar_errors = [{ error: 'Calendars unavailable right now.' }]; }
       items.forEach((t) => {
         if (t.due && t.due < today) out.past.overdue.push(t);
         else if (t.planned && t.planned < today && !(t.due && t.due < today)) out.past.planned_earlier.push(t);

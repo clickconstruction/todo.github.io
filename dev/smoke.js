@@ -38,7 +38,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -838,6 +838,62 @@ async function keyboard(check) {
   check('Settings → Keyboard: keyboard and every shortcut', !!$('.settings-card .kbd') && $$('.settings-card .kbd-key.on').length > 20 && has(undefined, 'keyboard', 'selected item', 'go to'));
   $('.settings-card [data-kbd="/"]').click();
   check('tapping a key shows its shortcuts', has('.settings-card [data-kbd-tip]', '/: search', '?: show keyboard shortcuts'), text('.settings-card [data-kbd-tip]'));
+}
+
+// Calendars: add a private iCal link (checked first), events in Forecast, hide, errors, remove.
+async function calendars(check) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const day = (off) => { const d = new Date(); d.setDate(d.getDate() + off); return d; };
+  const ymd = (d) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+  const today = day(0);
+  const ics = ['BEGIN:VCALENDAR', 'X-WR-CALNAME:Work', `X-WR-TIMEZONE:${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
+    'BEGIN:VEVENT', 'UID:a', `DTSTART:${ymd(today)}T140000`, `DTEND:${ymd(today)}T150000`, 'SUMMARY:Site walk: Smith', 'LOCATION:1000 Main St', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:b', `DTSTART;VALUE=DATE:${ymd(today)}`, `DTEND;VALUE=DATE:${ymd(day(2))}`, 'SUMMARY:Jodi out', 'TRANSP:TRANSPARENT', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:c', `DTSTART:${ymd(day(-7))}T090000`, `DTEND:${ymd(day(-7))}T093000`, 'RRULE:FREQ=DAILY', 'SUMMARY:Standup', 'END:VEVENT',
+    'END:VCALENDAR'].join('\r\n');
+  let fail = null;
+  window.__calendarFetch = async (body) => { if (fail) throw new Error(fail); return ics; };
+  try {
+    await go('#settings');
+    check('calendars section', has(undefined, 'calendars', 'add a calendar'));
+    $('[data-cal-new]').click(); await wait(60);
+    check('add form with help for Google, iCloud and Outlook', !!$('[name=cal_url]') && ['Google', 'Secret address in iCal format', 'iCloud', 'Outlook'].every((w) => $('.cal-help').textContent.includes(w)));
+    const nm = $('[name=cal_name]'); nm.value = 'Work'; nm.dispatchEvent(new Event('input', { bubbles: true }));
+    const u = $('[name=cal_url]'); u.value = 'https://calendar.google.com/calendar/ical/abc%40group/private-SECRET123/basic.ics'; u.dispatchEvent(new Event('input', { bubbles: true }));
+    fail = 'That link isn’t a calendar feed (.ics). Use the private iCal address.';
+    $('[data-cal-add]').requestSubmit(); await wait(150);
+    check('a bad link is explained, nothing saved', has('.cal-add', 'isn’t a calendar feed') && !T().calendars.length);
+    fail = null;
+    $('[data-cal-add]').requestSubmit(); await wait(150);
+    check('check shows the calendar and what’s next (all-day on its own day)', has('.cal-check', '“work”', '3 events', 'next:', `jodi out (${today.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).toLowerCase()})`) && !!$('[data-cal-save]'), text('.cal-check'));
+    $('[data-cal-add]').requestSubmit(); await wait(250);
+    const row = T().calendars[0];
+    check('saved, link masked on screen', row && row.name === 'Work' && has(undefined, 'calendar.google.com/…/basic.ics') && !has(undefined, 'secret123'));
+    await go('#forecast');
+    await wait(150); // feeds load in the background
+    await go('#forecast');
+    check('Forecast → Today shows a Calendar section, all-day first', has(undefined, 'calendar · 3') && $$('.cal-event .cal-title').map((x) => x.textContent).join('|') === 'Jodi out|Standup|Site walk: Smith', $$('.cal-event .cal-title').map((x) => x.textContent).join('|'));
+    check('times, place and calendar shown', has('.cal-list', '9am', '2pm–3pm', '1000 main st · work') || has('.cal-list', '9', '1000 main st · work'), text('.cal-list'));
+    check('the day strip counts events', has('.fc-day.on', '3 ev'));
+    $$('.fc-day')[2].click(); await wait(100);
+    check('another day shows its events (multi-day event continues)', has(undefined, 'jodi out', 'standup') && !has(undefined, 'site walk'));
+    await go('#settings');
+    const en = $('[data-cal-enabled]'); en.checked = false; en.dispatchEvent(new Event('change', { bubbles: true })); await wait(200);
+    await go('#forecast');
+    check('hiding a calendar hides its events', !has(undefined, 'calendar ·') && T().calendars[0].enabled === false);
+    await go('#settings');
+    const en2 = $('[data-cal-enabled]'); en2.checked = true; en2.dispatchEvent(new Event('change', { bubbles: true })); await wait(200);
+    // A link that stops working: Forecast says so and points to Settings.
+    fail = 'That link doesn’t exist any more. It may have been reset: copy the private iCal link again.';
+    const { forgetFeed } = await import('/js/calendars.js'); forgetFeed(row.id);
+    await go('#forecast'); await wait(150); await go('#forecast');
+    check('a broken link is shown in Forecast', has(undefined, 'work: that link doesn’t exist any more'));
+    fail = null; forgetFeed(row.id);
+    await go('#settings');
+    check('settings shows the calendar’s problem', has('.cal-row', 'doesn’t exist any more'));
+    $(`[data-cal-remove="${row.id}"]`).click(); await wait(200);
+    check('remove archives it (with Undo)', !!T().calendars[0].archived_at && !$('.cal-row') && has('#toast', 'undo'));
+  } finally { window.__calendarFetch = undefined; }
 }
 
 // P4: estimates, row signals, project flags and tags.
