@@ -770,3 +770,4 @@ form label.prop-inline.review-every select { width: auto; }
 .tpl-moves { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .tpl-moves .danger-text { margin-left: auto; }
 .from-template { margin-top: -8px; font-size: 14px; }
+.prop-val.follows { color: var(--muted); font-size: 14px; }

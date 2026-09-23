@@ -50,10 +50,17 @@ export function wireStepsFields(form, t, task, { onChange = () => {}, onBeforeBr
     label.classList.toggle('hint', !p);
     $('[data-part-of]', form).textContent = p ? 'Change' : 'Make it a step of…';
     const proj = form.elements.project_id;
-    if (proj) { // a step lives in its parent's project
+    if (proj) { // a step lives in its parent's project: say so instead of showing a locked dropdown
       if (p) proj.value = p.project_id || '';
       proj.disabled = !!p;
-      proj.title = p ? 'Steps follow the project of the task they belong to' : '';
+      proj.hidden = !!p;
+      const follows = form.querySelector('[data-project-follows]');
+      if (follows) {
+        follows.hidden = !p;
+        const name = p && p.project_id ? (byId(db.projects, p.project_id) || {}).name : '';
+        follows.textContent = p ? `${name || 'No project'} · from its task` : '';
+        follows.title = p ? `Steps are in the same project as the task they belong to (“${p.title}”).` : '';
+      }
     }
     onChange();
   };

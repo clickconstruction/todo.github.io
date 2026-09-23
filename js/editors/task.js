@@ -36,7 +36,7 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
     ${section('organize', 'Organize', `
       ${partOfFieldHtml(t)}
       ${propInline('Project', `<select name="project_id"><option value="">${task && task.in_inbox ? 'None (Inbox)' : 'None'}</option>
-        ${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`)}
+        ${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select><span class="prop-val follows" data-project-follows hidden></span>`)}
       ${prop('tags', 'Tags', tagPickerHtml())}`)}
     ${section('dates', 'Dates', `
       ${prop('defer_at', 'Defer until', dateField('defer_at', 'Defer until', t.defer_at))}

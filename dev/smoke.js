@@ -325,7 +325,7 @@ async function steps(check) {
   check('picker search narrows', $$('#sheet2 [data-po]').filter((b) => b.dataset.po).length === 1);
   $('#sheet2 [data-po="t2"]').click();
   await wait(50);
-  check('picking sets the label and locks the project', has('#editor .part-of', 'order fittings for jodi') && $('#editor').elements.project_id.disabled && $('#editor').elements.project_id.value === 'p1');
+  check('picking sets the label and locks the project', has('#editor .part-of', 'order fittings for jodi') && $('#editor').elements.project_id.disabled && $('#editor').elements.project_id.value === 'p1' && has('#editor [data-project-follows]', 'click plumbing · from its task'));
   $('#editor').requestSubmit();
   await wait(300);
   check('moved under, into its project', task('t11').parent_id === 't2' && task('t11').project_id === 'p1');
@@ -497,6 +497,10 @@ async function layout(check) {
   check('collapsed section stays collapsed next time', $('#editor [data-sec="alerts"]').classList.contains('closed'));
   $('#sheet').close();
   try { localStorage.removeItem('todo.inspector.closed'); } catch { /* ignore */ }
+  openEditor(db.tasks.find((t) => t.id === 't7')); // a step of “Inside deadmans switch”
+  await wait(80);
+  check('a step says which project it follows instead of a locked dropdown', $('#editor [name=project_id]').hidden && has('#editor [data-project-follows]', 'end of life planning · from its task'), text('#editor [data-project-follows]'));
+  $('#sheet').close();
   const { openProjectEditor } = await import('/js/editors/project.js');
   openProjectEditor(db.projects.find((p) => p.id === 'p2'));
   await wait(120);
