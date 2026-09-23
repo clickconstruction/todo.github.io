@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -104,7 +104,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 31 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 31 tools, no internals leaked');
+assert(list.body.result.tools.length === 35 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 35 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -476,6 +476,60 @@ assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'r
   assert(conv.name === 'Build a 2m telescope' && conv.actions.length === 4 && conv.actions.every((x) => !x.parent_id), 'convert_to_project: steps become the project\'s actions');
   assert(db.tasks.find((x) => x.id === big.id).dropped_at && /Became the project/.test(db.tasks.find((x) => x.id === big.id).completion_note), 'the task is dropped with a note, not deleted');
   assert(db.tasks.find((x) => x.id === rough.id).project_id === conv.id, 'deeper steps come along into the project');
+}
+
+// ---------- perspectives ----------
+{
+  const P = await import('../js/perspective-engine.js');
+  // Engine unit checks (the same file the app runs).
+  const tags = [{ id: 'w', name: 'Waiting', parent_id: null }, { id: 'h', name: 'Hiro', parent_id: 'w' }, { id: 'ph', name: 'Phone', parent_id: null }];
+  const now = new Date('2026-09-23T15:00:00Z');
+  const T = (o) => ({ id: o.id, title: o.id, sort: 0, created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', completed_at: null, dropped_at: null, ...o });
+  const data = {
+    tasks: [T({ id: 'a', due_at: '2026-09-22T22:00:00Z' }), T({ id: 'b', due_at: '2026-09-23T22:00:00Z', estimate_minutes: 10 }), T({ id: 'c', due_at: '2026-09-27T22:00:00Z' }), T({ id: 'd', flagged: true }), T({ id: 'e', completed_at: '2026-09-22T12:00:00Z' }), T({ id: 'f', project_id: 'pp' })],
+    projects: [{ id: 'pp', name: 'Shop', sort: 0 }], folders: [], tags,
+    taskTags: [{ task_id: 'a', tag_id: 'h' }, { task_id: 'b', tag_id: 'ph' }], projectTags: [{ project_id: 'pp', tag_id: 'ph' }],
+  };
+  const ev = (rules, options = { show: 'remaining' }) => P.evaluate({ rules, options }, data, { now, tz: 'America/Chicago' }).tasks.map((t) => t.id).join('');
+  assert(ev({ match: 'all', rules: [{ type: 'tag', tags: ['w'] }] }) === 'a', 'engine: a parent tag matches its sub-tags');
+  assert(ev({ match: 'all', rules: [{ type: 'tag', tags: ['w'], sub: false }] }) === '', 'engine: sub:false means exactly that tag');
+  assert(ev({ match: 'all', rules: [{ type: 'tag', tags: ['ph'] }] }, { show: 'remaining', sort_by: 'title' }) === 'bf', 'engine: project tags count');
+  assert(ev({ match: 'any', rules: [{ type: 'overdue' }, { type: 'date', field: 'due', when: 'next', days: 7 }] }, { show: 'remaining', sort_by: 'due' }) === 'abc', 'engine: due soon (overdue or within 7 days), sorted by due');
+  assert(ev({ match: 'all', rules: [{ type: 'date', field: 'due', when: 'today' }] }) === 'b', 'engine: today in the user\'s timezone');
+  assert(ev({ match: 'none', rules: [{ type: 'flagged' }, { type: 'date', field: 'due', when: 'any' }] }, { show: 'remaining', sort_by: 'title' }) === 'f', 'engine: none-of');
+  assert(ev({ match: 'all', rules: [{ type: 'date', field: 'completed', when: 'past', days: 3 }] }, { show: 'all' }) === 'e', 'engine: completed in the last N days');
+  assert(ev({ match: 'all', rules: [{ type: 'duration', op: 'max', minutes: 15 }] }) === 'b', 'engine: duration');
+  const warn = P.evaluate({ rules: { match: 'all', rules: [{ type: 'mystery' }] }, options: {} }, data, { now, tz: 'America/Chicago' });
+  assert(warn.tasks.length === 0 && /doesn’t understand/.test(warn.warnings[0]), 'engine: an unknown rule matches nothing and warns');
+  const grouped = P.evaluate({ rules: { match: 'all', rules: [] }, options: { show: 'remaining', group_by: 'due' } }, data, { now, tz: 'America/Chicago' }).groups.map((g) => g.label).join('|');
+  assert(grouped === 'Overdue|Today|Next 7 days|No due date', 'engine: group by due date', grouped);
+  assert(P.describe({ rules: { match: 'all', rules: [{ type: 'tag', tags: ['h'] }, { match: 'any', rules: [{ type: 'flagged' }, { type: 'duration', op: 'max', minutes: 15 }] }] }, options: { show: 'available' } }, data) === 'Available · tagged Waiting : Hiro · (flagged or 15 min or less)', 'engine: plain-English summary');
+  assert(P.validate({ rules: { match: 'all', rules: [{ type: 'date', field: 'due', when: 'soonish' }] } }).length === 1, 'engine: validate catches bad rules');
+
+  // Through MCP.
+  const made = await tool('create_perspective', { template: 'calls', badge: true, options: { show: 'remaining' } });
+  assert(made.name === 'Calls' && made.summary === 'Remaining · tagged Phone' && made.rules.rules[0].tags.length === 1, 'create_perspective from a template (tag name resolved)');
+  let dup = '';
+  try { await tool('create_perspective', { template: 'calls' }); } catch (e) { dup = e.message; }
+  assert(/already exists/.test(dup), 'perspective names are unique');
+  const ran = await tool('run_perspective', { perspective: 'calls' });
+  assert(ran.count >= 1 && ran.groups.every((g) => g.items.every((x) => x.tags.includes('Phone') || x.project_tags.includes('Phone'))), 'run_perspective by name returns only matching items, grouped');
+  const preview = await tool('run_perspective', { rules: { match: 'all', rules: [{ type: 'tag', tags: ['Waiting'] }] }, options: { show: 'remaining', group_by: 'tag' } });
+  assert(preview.name === 'Preview' && preview.count >= 1 && preview.groups.some((g) => g.label === 'Waiting : Hiro'), 'run_perspective previews unsaved rules (names ok)');
+  let bad = '';
+  try { await tool('run_perspective', { rules: { match: 'all', rules: [{ type: 'tag', tags: ['Nope'] }] } }); } catch (e) { bad = e.message; }
+  assert(/No tag called/.test(bad), 'unknown tag names are reported');
+  bad = '';
+  try { await tool('create_perspective', { name: 'Broken', rules: { match: 'all', rules: [{ type: 'duration', minutes: -1 }] } }); } catch (e) { bad = e.message; }
+  assert(/minutes/.test(bad), 'invalid rules are refused with a clear message');
+  const quick = await tool('create_perspective', { name: 'Quick calls', icon: '⚡', rules: { match: 'all', rules: [{ type: 'tag', tags: ['Phone'] }, { type: 'duration', op: 'max', minutes: 15 }] } });
+  const lp = await tool('list_perspectives', {});
+  assert(lp.map((x) => x.name).join() === 'Calls,Quick calls' && lp.every((x) => typeof x.open_count === 'number'), 'list_perspectives in order with counts');
+  const upd = await tool('update_perspective', { perspective: quick.id, name: 'Short calls', options: { group_by: 'none' }, move: 'top' });
+  assert(upd.name === 'Short calls' && upd.options.group_by === 'none' && upd.options.show === 'available' && upd.options.sort_by === 'project', 'update_perspective renames and merges options');
+  assert((await tool('list_perspectives', {}))[0].name === 'Short calls', 'update_perspective move');
+  await tool('update_perspective', { perspective: 'Short calls', archived: true });
+  assert((await tool('list_perspectives', {})).length === 1 && (await tool('list_perspectives', { include_archived: true })).length === 2, 'archive hides it (never deleted)');
 }
 
 // ---------- delivery log, /push/test, queued tests, history ----------

@@ -37,7 +37,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, steps, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -379,6 +379,122 @@ async function steps(check) {
   check('turn into a project: steps become its actions', proj && find('Fill SS-4').project_id === proj.id && !find('Fill SS-4').parent_id);
   const was = T().tasks.find((t) => t.id === 't12');
   check('the task is dropped with a note (not deleted)', !!was.dropped_at && /became the project/i.test(was.completion_note || '') && location.hash === `#project/${proj.id}`);
+}
+
+// Perspectives: templates, rule editor with live preview, view, menu, save view, archive.
+async function perspectives(check) {
+  const { db } = await import('/js/state.js');
+  const P = () => db.perspectives.filter((p) => !p.archived_at);
+  await go('#perspectives');
+  check('perspectives: empty state invites a template', has(undefined, 'no perspectives yet'));
+  $('[data-act="new-perspective"]').click();
+  await wait(100);
+  check('template picker lists templates with summaries', $$('#sheet [data-template]').length === 7 && has('#sheet', 'calls', 'available · tagged phone', 'quick wins', 'waiting for'));
+  $('#sheet [data-template="calls"]').click();
+  await wait(100);
+  check('editor opens with a live preview', has('#sheet [data-preview]', '1 match now', 'call gvec about utilities'), text('#sheet [data-preview]'));
+  // Add a rule: duration at most 10 → nothing matches (GVEC is 15m).
+  $('#sheet [data-rule-add=""]:not([data-group])').click();
+  await wait(50);
+  const type = $('#sheet [data-rule-type="1"]');
+  type.value = 'duration'; type.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(50);
+  const mins = $('#sheet [data-rule-field="1"][data-key="minutes"]');
+  mins.value = '10'; mins.dispatchEvent(new Event('input', { bubbles: true }));
+  await wait(50);
+  check('preview updates as rules change', has('#sheet [data-preview]', '0 matches now', '10 min or less'), text('#sheet [data-preview]'));
+  mins.value = '30'; mins.dispatchEvent(new Event('input', { bubbles: true }));
+  $('#sheet [data-icon="⚡"]').click();
+  $('#sheet form').requestSubmit();
+  await wait(300);
+  const calls = P().find((p) => p.name === 'Calls');
+  check('saved and opened', calls && location.hash === `#perspective/${calls.id}` && calls.icon === '⚡' && calls.rules.rules.length === 2);
+  check('view shows summary, groups with counts and matches', has(undefined, 'available · tagged phone · 30 min or less', 'click plumbing · 1', 'call gvec about utilities'), text());
+  check('sidebar lists it', has('#nav-perspectives', 'calls'));
+  // Completing keeps it visible (struck through) so Undo has context.
+  $('[data-check="t1"]').click();
+  await wait(300);
+  check('a completed match stays until reload', !!$('[data-task="t1"].completed'));
+  // Menu: badge, duplicate, archive.
+  $(`[data-persp-menu="${calls.id}"]`).click();
+  await wait(50);
+  $('#sheet [data-m="dup"]').click();
+  await wait(300);
+  check('duplicate', P().some((p) => p.name === 'Calls copy') && location.hash.startsWith('#perspective/'));
+  const copy = P().find((p) => p.name === 'Calls copy');
+  $(`[data-persp-menu="${copy.id}"]`).click();
+  await wait(50);
+  $('#sheet [data-m="badge"]').click();
+  await wait(250);
+  check('badge toggle', db.perspectives.find((p) => p.id === copy.id).badge);
+  await go('#perspectives');
+  check('list shows both with summaries', $$('.persp-list .persp-row').length === 2 && has('.persp-list', 'calls copy'));
+  $(`[data-persp-move="${copy.id}"][data-dir="-1"]`).click();
+  await wait(250);
+  check('reorder', $$('.persp-list .persp-name')[0].textContent === 'Calls copy');
+  await go(`#perspective/${copy.id}`);
+  $(`[data-persp-edit="${copy.id}"]`).click();
+  await wait(100);
+  $('#sheet [data-persp-archive]').click();
+  await wait(300);
+  check('archive: gone from the sidebar, listed as archived', !has('#nav-perspectives', 'calls copy') && has(undefined, 'archived · 1') && location.hash === '#perspectives');
+  $(`[data-persp-restore="${copy.id}"]`).click();
+  await wait(250);
+  check('restore', has('#nav-perspectives', 'calls copy'));
+  // Save the current view.
+  await go('#flagged');
+  $('[data-act="save-perspective"]').click();
+  await wait(100);
+  check('save view: flagged becomes a rule', $('#sheet [name=name]').value === 'Flagged' && has('#sheet [data-preview]', 'flagged'));
+  $('#sheet [data-cancel]').click();
+  // A rule from a newer version warns instead of silently hiding things.
+  const { savePerspective } = await import('/js/perspectives.js');
+  const odd = await savePerspective(null, { name: 'Future', icon: '🔭', rules: { v: 1, match: 'all', rules: [] }, options: {} });
+  odd.rules = { v: 2, match: 'all', rules: [{ type: 'near_me' }] };
+  await go(`#perspective/${odd.id}`);
+  check('unknown rules warn', has(undefined, 'newer version', 'doesn’t understand'));
+  // Phones: More lists perspectives.
+  $('#more-tab').click();
+  await wait(100);
+  check('More sheet lists perspectives', has('#sheet', 'perspectives', 'calls', 'calls copy', 'all perspectives'));
+  $('#sheet').close();
+}
+
+// Editor layout: sections with summaries, rows that open to edit, remembered collapse.
+async function layout(check) {
+  const { db } = await import('/js/state.js');
+  const { openEditor } = await import('/js/editors/task.js');
+  try { localStorage.removeItem('todo.inspector.closed'); } catch { /* ignore */ }
+  openEditor(db.tasks.find((t) => t.id === 't1'));
+  await wait(120);
+  const f = $('#editor');
+  check('sections: Organize, Dates, Repeat and alerts, Status/files/history', ['organize', 'dates', 'alerts', 'more'].every((k) => $(`[data-sec="${k}"]`, f)));
+  check('rows show values, empty ones say None', has('#editor [data-prop="due_at"]', 'due') && !$('[data-prop-val="due_at"]', f).classList.contains('is-empty') && $('[data-prop-val="planned_at"]', f).textContent === 'None');
+  check('section summaries', has('#editor [data-sec-sum="organize"]', 'click plumbing', '1 tag') && has('#editor [data-sec-sum="dates"]', 'due'), text('#editor [data-sec-sum="organize"]') + ' | ' + text('#editor [data-sec-sum="dates"]'));
+  check('quick buttons hidden until a row opens', !$('[data-qd="planned_at"]', f).offsetParent);
+  $('[data-prop-toggle="planned_at"]', f).click();
+  check('tapping a row opens its editor', !!$('[data-qd="planned_at"]', f).offsetParent && $('[data-prop="planned_at"]', f).classList.contains('open'));
+  $('[data-qd="planned_at"][data-step="today"]', f).click();
+  await wait(30);
+  check('value updates as you edit', $('[data-prop-val="planned_at"]', f).textContent !== 'None' && has('#editor [data-sec-sum="dates"]', 'planned'));
+  $('[data-prop-toggle="due_at"]', f).click();
+  check('one row open at a time', !$('[data-prop="planned_at"]', f).classList.contains('open') && $('[data-prop="due_at"]', f).classList.contains('open'));
+  check('Status section starts collapsed', $('[data-sec="more"]', f).classList.contains('closed'));
+  $('[data-sec-toggle="alerts"]', f).click();
+  check('collapse remembered', JSON.parse(localStorage.getItem('todo.inspector.closed')).includes('alerts'));
+  f.requestSubmit();
+  await wait(250);
+  check('saving still reads hidden fields', !!T().tasks.find((t) => t.id === 't1').planned_at && T().tasks.find((t) => t.id === 't1').due_at);
+  openEditor(db.tasks.find((t) => t.id === 't1'));
+  await wait(80);
+  check('collapsed section stays collapsed next time', $('#editor [data-sec="alerts"]').classList.contains('closed'));
+  $('#sheet').close();
+  try { localStorage.removeItem('todo.inspector.closed'); } catch { /* ignore */ }
+  const { openProjectEditor } = await import('/js/editors/project.js');
+  openProjectEditor(db.projects.find((p) => p.id === 'p2'));
+  await wait(120);
+  check('project editor uses the same layout, with Review', ['organize', 'dates', 'review', 'alerts', 'more'].every((k) => $(`#sheet [data-sec="${k}"]`)) && has('#sheet [data-sec-sum="review"]', 'every'), text('#sheet [data-sec-sum="review"]'));
+  $('#sheet').close();
 }
 
 // P4: estimates, row signals, project flags and tags.

@@ -26,6 +26,7 @@ export const filterBar = (extra = '') => `<div class="filter-bar" role="group" a
   <label><span aria-hidden="true">⏱</span><select data-filter="fits" aria-label="Fits in">${FITS.map(([v, l]) => `<option value="${v}" ${Number(filter.fits) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   ${extra}
   ${app.here ? `<label><span aria-hidden="true">↕</span><select data-filter="sort" aria-label="Sort">${SORTS.map(([v, l]) => `<option value="${v}" ${filter.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
+  <button type="button" class="btn small save-persp" data-act="save-perspective" title="Save this view as a perspective">🔭 Save view</button>
 </div>`;
 
 // "Nearest first" (needs a location fix); otherwise the list's own order.

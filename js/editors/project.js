@@ -11,6 +11,7 @@ import { historyFieldHtml, wireHistoryField } from './historyField.js';
 import { PROJECT_KINDS } from '../availability.js';
 import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
 import { fromDateInput, fromDateTimeInput, toDateInput, fmtStamp, HOURS } from '../dates.js';
+import { section, prop, propInline, wireProps } from './props.js';
 
 export const REVIEW_UNITS = [['day', 'Days'], ['week', 'Weeks'], ['month', 'Months'], ['year', 'Years']];
 
@@ -18,39 +19,41 @@ function projectFieldsHtml(p, project) {
   const folderOptions = db.folders.filter((f) => !f.archived_at || f.id === p.folder_id).sort(bySort)
     .map((f) => `<option value="${f.id}" ${f.id === p.folder_id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
   return `
-    <input type="text" name="name" value="${esc(p.name)}" placeholder="Outcome, e.g. Launch todotooling.com" required autocomplete="off" aria-label="Project name">
-    <label>Folder
-      <select name="folder_id"><option value="">No folder</option>${folderOptions}<option value="__new">+ New folder…</option></select></label>
-    <input type="text" name="new_folder" placeholder="New folder name" autocomplete="off" hidden>
-    <div class="field"><span class="field-label">Type</span>
-      <div class="segmented" role="radiogroup" aria-label="Project type">
+    <div class="title-row">
+      <input type="text" name="name" value="${esc(p.name)}" placeholder="Outcome, e.g. Launch todotooling.com" required autocomplete="off" aria-label="Project name">
+      <label class="flag-pill" title="Flag (its actions show in Flagged)"><input type="checkbox" name="flagged" ${p.flagged ? 'checked' : ''}><span aria-hidden="true">⚑</span><span class="sr-only">Flagged</span></label>
+    </div>
+    <label class="notes-field"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes: purpose, what done looks like…" rows="2">${esc(p.notes)}</textarea></label>
+    ${section('organize', 'Organize', `
+      ${propInline('Folder', `<select name="folder_id"><option value="">No folder</option>${folderOptions}<option value="__new">+ New folder…</option></select>`)}
+      <input type="text" name="new_folder" placeholder="New folder name" autocomplete="off" hidden>
+      <div class="field kind-field"><div class="segmented" role="radiogroup" aria-label="Project type">
         ${PROJECT_KINDS.map(([v, l, hint]) => `<label title="${esc(hint)}"><input type="radio" name="kind" value="${v}" ${p.kind === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}
-      </div></div>
-    <p class="view-sub kind-hint" style="margin:0">${esc(PROJECT_KINDS.find(([v]) => v === p.kind)[2])}</p>
-    <label class="flag-toggle"><input type="checkbox" name="complete_with_last" ${p.complete_with_last ? 'checked' : ''}> Complete project when its last action is done</label>
-    <label class="flag-toggle"><input type="checkbox" name="flagged" ${p.flagged ? 'checked' : ''}> Flagged <span class="hint">its actions show in Flagged</span></label>
-    ${tagPickerHtml('actions inherit these')}
-    ${locationFieldHtml(p)}
-    ${dateField('defer_at', 'Defer until', p.defer_at)}
-    ${dateField('planned_at', 'Planned', p.planned_at)}
-    ${dateField('due_at', 'Due', p.due_at)}
-    ${estimateField(p.estimate_minutes)}
-    ${repeatFieldHtml(p)}
-    ${notifyFieldHtml()}
-    <fieldset class="review-block"><legend>Review</legend>
-      ${project ? dateField('next_review_at', 'Next review', p.next_review_at) : ''}
-      <label class="review-every">Review every<span class="review-every">
+      </div><p class="hint kind-hint" style="margin:0">${esc(PROJECT_KINDS.find(([v]) => v === p.kind)[2])}</p></div>
+      <label class="flag-toggle"><input type="checkbox" name="complete_with_last" ${p.complete_with_last ? 'checked' : ''}> Complete when its last action is done</label>
+      ${prop('tags', 'Tags', tagPickerHtml('actions inherit these'))}`)}
+    ${section('dates', 'Dates', `
+      ${prop('defer_at', 'Defer until', dateField('defer_at', 'Defer until', p.defer_at))}
+      ${prop('planned_at', 'Planned', dateField('planned_at', 'Planned', p.planned_at))}
+      ${prop('due_at', 'Due', dateField('due_at', 'Due', p.due_at))}
+      ${prop('estimate', 'Duration', estimateField(p.estimate_minutes))}`)}
+    ${section('review', 'Review', `
+      ${project ? prop('next_review_at', 'Next review', dateField('next_review_at', 'Next review', p.next_review_at)) : ''}
+      <label class="prop prop-inline review-every">Review every<span class="review-every">
         <input type="number" name="review_every" min="1" max="999" inputmode="numeric" value="${p.review_every || 1}" aria-label="Review every">
         <select name="review_unit" aria-label="Unit">${REVIEW_UNITS.map(([v, l]) => `<option value="${v}" ${(p.review_unit || 'week') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></span></label>
-      ${project ? `<p class="hint" style="margin:0">Last reviewed: ${p.last_reviewed_at ? esc(fmtStamp(p.last_reviewed_at)) : 'never'}</p>` : ''}
-    </fieldset>
-    ${project ? `<label>Status<select name="status">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
-    <label>Notes<textarea name="notes" placeholder="Purpose, what done looks like…">${esc(p.notes)}</textarea></label>
-    ${attachFieldHtml()}
-    ${project && p.completed_at ? dateTimeField('completed_at_edit', p.status === 'dropped' ? 'Dropped' : 'Completed', p.completed_at) : ''}
-    ${project ? '<p class="view-sub" style="margin:0">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>' : ''}
-    ${stampsHtml(project)}
-    ${historyFieldHtml(project)}`;
+      ${project ? `<p class="hint prop-note">Last reviewed ${p.last_reviewed_at ? esc(fmtStamp(p.last_reviewed_at)) : 'never'}</p>` : ''}`)}
+    ${section('alerts', 'Repeat and alerts', `
+      ${prop('repeat', 'Repeat', repeatFieldHtml(p))}
+      ${prop('notify', 'Notifications', notifyFieldHtml())}
+      ${prop('location', 'Location', locationFieldHtml(p))}`)}
+    ${project ? section('more', 'Status, files and history', `
+      ${propInline('Status', `<select name="status">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
+      ${p.completed_at ? dateTimeField('completed_at_edit', p.status === 'dropped' ? 'Dropped' : 'Completed', p.completed_at) : ''}
+      <p class="hint prop-note">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>
+      ${attachFieldHtml()}
+      ${historyFieldHtml(project)}`) : section('files', 'Files', attachFieldHtml())}
+    ${stampsHtml(project)}`;
 }
 
 // Shared wiring; returns collect() → Promise<{ fields, tagIds } | null> (creates a new folder if asked).
@@ -64,6 +67,7 @@ function wireProjectForm(form, project, onTagsChange) {
   const selectedTags = wireTagPicker(form, project ? db.projectTags.filter((x) => x.project_id === project.id).map((x) => x.tag_id) : [], onTagsChange);
   const collectLocation = wireLocationField(form, onTagsChange);
   wireQuickButtons(form);
+  wireProps(form);
   const collectRepeat = wireRepeatField(form, project || {}, onTagsChange);
   const collectReminders = wireNotifyField(form, remindersFor('project_id', project && project.id), onTagsChange);
   const collectFiles = wireAttachField(form, 'project_id', project && project.id);

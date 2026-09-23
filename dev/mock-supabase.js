@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      perspectives: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -233,10 +233,11 @@
     folders: () => ({ archived_at: null }),
     tags: () => ({ parent_id: null, place_id: null, location_trigger: null, location_radius_m: null }),
     places: () => ({ address: '', google_place_id: null, radius_m: 402, notes: '', archived_at: null }),
+    perspectives: () => ({ icon: '🔭', rules: { v: 1, match: 'all', rules: [] }, options: { show: 'available', group_by: 'project', sort_by: 'project', layout: 'tree' }, badge: false, sort: 0, archived_at: null }),
     notifications: () => ({ task_id: null, project_id: null, offset_minutes: 0, at: null, sent_at: null }),
     attachments: () => ({ task_id: null, project_id: null, size: 0, mime: 'application/octet-stream', archived_at: null }),
   };
-  const NO_DELETE = { attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
+  const NO_DELETE = { perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
 
   // ----- PostgREST-ish filter parsing for .or() strings -----
   function splitTop(s) {

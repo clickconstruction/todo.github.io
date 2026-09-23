@@ -14,7 +14,9 @@ import { isWide, select, clearSelection, moveSelection } from './inspector.js';
 import { onSearchInput } from './views/search.js';
 import { onDoneFilterChange } from './views/done.js';
 import { setFilter } from './filter.js';
-import { openSheet } from './state.js';
+import { openSheet, esc } from './state.js';
+import { openNewPerspective, openPerspectiveEditor, openPerspectiveMenu, saveCurrentViewAsPerspective } from './editors/perspective.js';
+import { livePerspectives, movePerspective, archivePerspective, badgeCount } from './perspectives.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
 import { enableAlerts } from './alerts.js';
@@ -55,6 +57,8 @@ const ACTIONS = {
   'push-test-now': pushTestNow,
   'push-test-later': pushTestLater,
   'sign-out': () => sb.auth.signOut(),
+  'new-perspective': openNewPerspective,
+  'save-perspective': saveCurrentViewAsPerspective,
 };
 
 // Click handlers keyed by data-attribute; first match wins.
@@ -111,6 +115,10 @@ const CLICKS = [
   ['[data-indent]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.indent); if (t) indentTask(t); }],
   ['[data-outdent]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.outdent); if (t) outdentTask(t); }],
   ['[data-move]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.move); if (t) moveTask(t, Number(el.dataset.dir)); }],
+  ['[data-persp-edit]', (el) => { const p = byId(db.perspectives, el.dataset.perspEdit); if (p) openPerspectiveEditor(p); }],
+  ['[data-persp-menu]', (el) => { const p = byId(db.perspectives, el.dataset.perspMenu); if (p) openPerspectiveMenu(p); }],
+  ['[data-persp-move]', async (el) => { const p = byId(db.perspectives, el.dataset.perspMove); if (p) { await movePerspective(p, Number(el.dataset.dir)); render(); } }],
+  ['[data-persp-restore]', async (el) => { const p = byId(db.perspectives, el.dataset.perspRestore); if (p) { await archivePerspective(p, false); render(); } }],
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
   ['[data-copy-geo]', (el) => copyGeoUrl(el)],
@@ -177,7 +185,10 @@ $('#more-tab').onclick = () => {
   const due = reviewDueCount();
   const here = hereNowCount();
   const links = [['#review', '🔁', `Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
-  const sheet = openSheet(`<form method="dialog" class="more-sheet"><h2>More</h2>
+  const persp = livePerspectives().map((p) => { const n = badgeCount(p); return [`#perspective/${p.id}`, esc(p.icon), `${esc(p.name)}${n ? ` <b class="badge persp inline">${n}</b>` : ''}`]; });
+  const sheet = openSheet(`<form method="dialog" class="more-sheet"><h2>Perspectives</h2>
+    <nav class="more-links">${persp.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}<a href="#perspectives" data-more-link><span>🔭</span>${persp.length ? 'All perspectives' : 'Perspectives: saved views'}</a></nav>
+    <h2>More</h2>
     <nav class="more-links">${links.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}</nav>
     <div class="actions"><div class="right"><button class="btn">Close</button></div></div></form>`);
   sheet.querySelectorAll('[data-more-link]').forEach((a) => { a.onclick = () => sheet.close(); });

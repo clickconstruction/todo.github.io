@@ -11,11 +11,12 @@ import { viewSettings } from './views/settings.js';
 import { viewNearby, viewPlaces, mountNearbyMap } from './views/nearby.js';
 import { viewAlerts } from './views/alerts.js';
 import { hereNowCount } from './places.js';
+import { viewPerspective, viewPerspectives, perspectiveNav } from './views/perspective.js';
 
 const VIEWS = {
   search: viewSearch, inbox: viewInbox, forecast: viewForecast, projects: viewProjects, project: viewProject,
   tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone, flagged: viewFlagged, review: viewReview,
-  nearby: viewNearby, places: viewPlaces, alerts: viewAlerts,
+  nearby: viewNearby, places: viewPlaces, alerts: viewAlerts, perspective: viewPerspective, perspectives: viewPerspectives,
 };
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
 const AFTER = { nearby: mountNearbyMap };
@@ -44,7 +45,9 @@ export function render() {
   $('#badge-review').textContent = reviewDueCount() || '';
   $('#badge-nearby').textContent = hereNowCount() || '';
   // Views that live under "More" on phones light up the More tab.
-  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts'].includes(view));
+  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts', 'perspective', 'perspectives'].includes(view));
+  const nav = $('#nav-perspectives');
+  if (nav) nav.innerHTML = perspectiveNav(view === 'perspective' ? args[0] : null);
   renderInspector();
   if ('setAppBadge' in navigator) (inboxCount + dueCount ? navigator.setAppBadge(inboxCount + dueCount) : navigator.clearAppBadge()).catch(() => {});
 }

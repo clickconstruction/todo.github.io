@@ -1,0 +1,1 @@
+{ "type": "module", "private": true, "description": "Marks the app modules as ES modules so the MCP server and Node tests can import shared files (js/perspective-engine.js)." }

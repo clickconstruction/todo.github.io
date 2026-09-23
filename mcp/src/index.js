@@ -10,6 +10,7 @@ import PostalMime from 'postal-mime';
 import { handleGeo, makePlaceResolver, loadPlaceData } from './geo.js';
 import { sendDueReminders } from './reminders.js';
 import { deliver, sendQueuedTests } from './deliver.js';
+import * as P from '../../js/perspective-engine.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -22,6 +23,7 @@ Attachments: add_attachment attaches text, base64 or a URL's file to an action o
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 For a weekly review: call list_review, go through each project with the user (use its hints), make the changes they want, then mark_reviewed.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
+Perspectives are the user's saved views (e.g. Calls, Today): list_perspectives, then run_perspective to see what's in one; to answer "what should I do now" questions, prefer the user's own perspectives. create_perspective/update_perspective build them (preview rules with run_perspective first).
 Big tasks: break_down splits a task into steps (in_order for one at a time); steps can have steps, up to 4 levels. get_task shows the steps tree and progress. Move a task under another with update_task parent. If a task grows into a real project, offer convert_to_project.
 Places: an action, tag or project can have a place (a saved location) plus an optional location_alert (arrive, leave or nearby) and radius. Actions inherit a place from their tags, group, project or project tags. Pass place as a saved place's name or id, or as an address/business to look up (it is saved as a new place). Use list_nearby with the user's coordinates to find what can be done nearby. Places are archived, never deleted.`;
 
@@ -538,6 +540,62 @@ async function stepsTree(api, rootId) {
   return { steps: build(rootId), progress: { done: leaves.filter((t) => t.completed_at).length, total: leaves.length } };
 }
 
+
+// ---------- perspectives (shared engine: js/perspective-engine.js) ----------
+const RULES_DOC = 'Rules: {"match":"all"|"any"|"none","rules":[...]} where each rule is a group of the same shape or one of: {"type":"flagged"|"inbox"|"available"|"overdue"|"repeating"|"has_notes"|"has_steps"|"is_step"|"untagged"|"no_project"|"has_place"|"has_estimate"}, {"type":"tag","tags":["Phone","Waiting : Hiro"],"sub":true}, {"type":"project","projects":["Click Plumbing"]}, {"type":"folder","folders":["Work"]}, {"type":"date","field":"due"|"planned"|"defer"|"completed"|"added"|"changed","when":"overdue"|"today"|"next"|"past"|"before"|"after"|"any"|"none","days":7,"date":"YYYY-MM-DD"}, {"type":"duration","op":"max"|"min","minutes":15}, {"type":"text","contains":"words"}. Tags, projects and folders may be given by name or id.';
+const OPTIONS_DOC = 'Display: {"show":"available"|"remaining"|"completed"|"dropped"|"all","group_by":"project"|"folder"|"tag"|"due"|"flagged"|"none","sort_by":"project"|"due"|"planned"|"defer"|"added"|"changed"|"completed"|"duration"|"title","layout":"tree"|"flat"}';
+
+async function perspectiveData(api, needClosed) {
+  const [open, closed, projects, folders, tags, taskTags, projectTags] = await Promise.all([
+    api.q(`tasks?${api.u}&${OPEN}&select=*`),
+    needClosed ? api.q(`tasks?${api.u}&or=(completed_at.not.is.null,dropped_at.not.is.null)&order=updated_at.desc&limit=500&select=*`) : [],
+    api.q(`projects?${api.u}&select=*`),
+    api.q(`folders?${api.u}&select=*`),
+    api.q(`tags?${api.u}&select=id,name,parent_id`),
+    api.q(`task_tags?${api.u}&select=task_id,tag_id`),
+    api.q(`project_tags?${api.u}&select=project_id,tag_id`),
+  ]);
+  const ids = new Set(open.map((t) => t.id));
+  return { tasks: [...open, ...closed.filter((t) => !ids.has(t.id))], open, projects, folders, tags, taskTags, projectTags };
+}
+const needsClosed = (x) => ['completed', 'dropped', 'all'].includes((x.options || {}).show) || JSON.stringify(x.rules || {}).includes('"completed"');
+
+// Names → ids in tag/project/folder rules (agents speak in names). Unknown names are errors.
+function resolveRuleNames(rules, data) {
+  const tagLabel = (t) => { const p = t.parent_id && data.tags.find((x) => x.id === t.parent_id); return p ? `${p.name} : ${t.name}` : t.name; };
+  const find = (list, key, label) => (ref) => {
+    const r = String(ref).trim();
+    const hit = list.find((x) => x.id === r) || list.find((x) => label(x).toLowerCase() === r.toLowerCase()) || list.find((x) => x.name.toLowerCase() === r.toLowerCase());
+    if (!hit) throw new Error(`No ${key} called “${r}”`);
+    return hit.id;
+  };
+  const tag = find(data.tags, 'tag', tagLabel);
+  const project = find(data.projects, 'project', (x) => x.name);
+  const folder = find(data.folders, 'folder', (x) => x.name);
+  const walk = (r) => {
+    if (!r || typeof r !== 'object') return r;
+    if (Array.isArray(r.rules)) return { match: r.match || 'all', rules: r.rules.map(walk), ...(r.v ? { v: r.v } : {}) };
+    const out = { ...r };
+    if (r.type === 'tag') out.tags = (r.tags || []).map(tag);
+    if (r.type === 'project') out.projects = (r.projects || []).map(project);
+    if (r.type === 'folder') out.folders = (r.folders || []).map(folder);
+    return out;
+  };
+  return { v: 1, ...walk(rules) };
+}
+
+async function findPerspective(api, ref) {
+  const all = await api.q(`perspectives?${api.u}&select=*`);
+  const r = String(ref || '').trim().toLowerCase();
+  const hit = all.find((p) => p.id === ref) || all.find((p) => !p.archived_at && p.name.toLowerCase() === r) || all.find((p) => p.name.toLowerCase() === r);
+  if (!hit) throw new Error(`No perspective called “${ref}”. Use list_perspectives.`);
+  return hit;
+}
+
+function perspectiveOut(p, data) {
+  return { id: p.id, name: p.name, icon: p.icon, summary: P.describe(p, data), rules: p.rules, options: { ...P.DEFAULT_OPTIONS, ...(p.options || {}) }, badge: p.badge, archived: !!p.archived_at };
+}
+
 // ---------- tools ----------
 const TOOLS = [
   {
@@ -988,6 +1046,126 @@ const TOOLS = [
       const actions = await api.q(`tasks?${api.u}&project_id=eq.${p.id}&parent_id=is.null&order=sort.asc&select=*`);
       const folders = await api.q(`folders?${api.u}&select=id,name`);
       return { ...projectOut(api, p, folders), actions: await api.shape(actions) };
+    },
+  },
+  {
+    name: 'list_perspectives',
+    description: 'List the user\'s perspectives (saved views built from rules), in their order, with a plain-English summary and how many open items each shows now. Use run_perspective to see the items.',
+    inputSchema: { type: 'object', properties: { include_archived: { type: 'boolean', default: false } } },
+    async run(api, { include_archived = false }) {
+      const all = (await api.q(`perspectives?${api.u}&order=sort.asc&select=*`)).filter((p) => include_archived || !p.archived_at).sort((x, y) => (x.sort - y.sort) || x.name.localeCompare(y.name));
+      const data = await perspectiveData(api, all.some(needsClosed));
+      const { available } = availabilityOf(data.open, data.projects);
+      return all.map((p) => ({ ...perspectiveOut(p, data), open_count: P.evaluate(p, data, { tz: api.tz, available }).tasks.filter((t) => !t.completed_at && !t.dropped_at).length }));
+    },
+  },
+  {
+    name: 'run_perspective',
+    description: `Show what a perspective contains right now, grouped and sorted the way it is set up. Pass a saved perspective (name or id), or pass rules/options to preview an unsaved one (e.g. to try rules before create_perspective). ${RULES_DOC} ${OPTIONS_DOC}`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        perspective: { type: 'string', description: 'Name or id of a saved perspective' },
+        rules: { type: 'object', description: 'Preview these rules instead of a saved perspective' },
+        options: { type: 'object', description: 'Display options for a preview' },
+        limit: { type: 'integer', default: 100, description: 'Max items returned (the count is always complete)' },
+      },
+    },
+    async run(api, a) {
+      let p;
+      if (a.perspective) p = await findPerspective(api, a.perspective);
+      else if (a.rules) p = { name: 'Preview', rules: a.rules, options: a.options || {} };
+      else throw new Error('Pass perspective (name or id), or rules to preview');
+      const data = await perspectiveData(api, needsClosed(p));
+      if (!a.perspective) {
+        p.rules = resolveRuleNames(p.rules, data);
+        const errors = P.validate({ rules: p.rules, options: p.options });
+        if (errors.length) throw new Error(errors.join('; '));
+      }
+      const { available } = availabilityOf(data.open, data.projects);
+      const r = P.evaluate(p, data, { tz: api.tz, available });
+      const limit = Math.min(Math.max(1, +a.limit || 100), 500);
+      const picked = new Set(r.tasks.slice(0, limit).map((t) => t.id));
+      const shaped = new Map((await api.shape(r.tasks.filter((t) => picked.has(t.id)))).map((x) => [x.id, x]));
+      const byId = new Map(data.tasks.map((t) => [t.id, t]));
+      const withContext = (t) => { const x = shaped.get(t.id); if (x && t.parent_id && byId.get(t.parent_id)) x.part_of = byId.get(t.parent_id).title; return x; };
+      return {
+        ...(p.id ? perspectiveOut(p, data) : { name: 'Preview', summary: P.describe(p, data), rules: p.rules, options: r.options }),
+        count: r.tasks.length,
+        open_count: r.tasks.filter((t) => !t.completed_at && !t.dropped_at).length,
+        groups: r.groups.map((g) => ({ label: g.label || null, count: g.tasks.length, items: g.tasks.filter((t) => picked.has(t.id)).map(withContext).filter(Boolean) })).filter((g) => g.items.length || g.count),
+        warnings: r.warnings.length ? r.warnings : undefined,
+        truncated: r.tasks.length > limit || undefined,
+      };
+    },
+  },
+  {
+    name: 'create_perspective',
+    description: `Save a new perspective. Start from a template (calls, quick, today, due, waiting, stalled) and/or give rules and options. Preview with run_perspective first when unsure. ${RULES_DOC} ${OPTIONS_DOC}`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        icon: { type: 'string', description: 'One emoji' },
+        template: { type: 'string', enum: ['calls', 'quick', 'today', 'due', 'waiting', 'stalled', 'blank'] },
+        rules: { type: 'object' },
+        options: { type: 'object' },
+        badge: { type: 'boolean', description: 'Show its count in the sidebar' },
+      },
+    },
+    async run(api, a) {
+      const data = await perspectiveData(api, false);
+      const base = a.template ? P.instantiate(P.TEMPLATES.find((t) => t.key === a.template) || P.TEMPLATES[P.TEMPLATES.length - 1], data.tags) : { name: 'New perspective', icon: '🔭', rules: { v: 1, match: 'all', rules: [] }, options: { ...P.DEFAULT_OPTIONS } };
+      const rules = a.rules ? resolveRuleNames(a.rules, data) : base.rules;
+      const options = { ...P.DEFAULT_OPTIONS, ...base.options, ...(a.options || {}) };
+      const errors = P.validate({ rules, options });
+      if (errors.length) throw new Error(errors.join('; '));
+      const name = String(a.name || base.name).trim();
+      const existing = await api.q(`perspectives?${api.u}&select=sort,name,archived_at`);
+      if (existing.some((x) => !x.archived_at && x.name.toLowerCase() === name.toLowerCase())) throw new Error(`A perspective called “${name}” already exists; use update_perspective`);
+      const sort = Math.max(-1, ...existing.map((x) => x.sort || 0)) + 1;
+      const [row] = await api.q('perspectives', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name, icon: a.icon || base.icon, rules, options, badge: !!a.badge, sort } });
+      return perspectiveOut(row, data);
+    },
+  },
+  {
+    name: 'update_perspective',
+    description: `Change a perspective: rename, new icon, replace its rules or options (options merge), badge, move up/down, or archive (archived: true; perspectives are never deleted; false restores). ${RULES_DOC} ${OPTIONS_DOC}`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        perspective: { type: 'string', description: 'Name or id' },
+        name: { type: 'string' }, icon: { type: 'string' },
+        rules: { type: 'object' }, options: { type: 'object' }, badge: { type: 'boolean' },
+        archived: { type: 'boolean' },
+        move: { type: 'string', enum: ['up', 'down', 'top', 'bottom'] },
+      },
+      required: ['perspective'],
+    },
+    async run(api, a) {
+      const p = await findPerspective(api, a.perspective);
+      const data = await perspectiveData(api, false);
+      const patch = {};
+      if (a.name !== undefined) patch.name = String(a.name).trim();
+      if (a.icon !== undefined) patch.icon = a.icon;
+      if (a.badge !== undefined) patch.badge = !!a.badge;
+      if (a.rules !== undefined) patch.rules = resolveRuleNames(a.rules, data);
+      if (a.options !== undefined) patch.options = { ...P.DEFAULT_OPTIONS, ...(p.options || {}), ...a.options };
+      if (a.archived !== undefined) patch.archived_at = a.archived ? new Date().toISOString() : null;
+      const errors = P.validate({ rules: patch.rules, options: patch.options });
+      if (errors.length) throw new Error(errors.join('; '));
+      if (Object.keys(patch).length) await api.q(`perspectives?${api.u}&id=eq.${p.id}`, { method: 'PATCH', body: patch });
+      if (a.move) {
+        const list = (await api.q(`perspectives?${api.u}&archived_at=is.null&select=id,sort,name`)).sort((x, y) => (x.sort - y.sort) || x.name.localeCompare(y.name));
+        const i = list.findIndex((x) => x.id === p.id);
+        if (i >= 0) {
+          const [me] = list.splice(i, 1);
+          list.splice({ up: Math.max(0, i - 1), down: Math.min(list.length, i + 1), top: 0, bottom: list.length }[a.move], 0, me);
+          await Promise.all(list.map((x, sort) => (x.sort === sort ? null : api.q(`perspectives?${api.u}&id=eq.${x.id}`, { method: 'PATCH', body: { sort } }))));
+        }
+      }
+      const [row] = await api.q(`perspectives?${api.u}&id=eq.${p.id}&select=*`);
+      return perspectiveOut(row, data);
     },
   },
   {

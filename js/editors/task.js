@@ -14,41 +14,50 @@ import { historyFieldHtml, wireHistoryField } from './historyField.js';
 import { skipOccurrence } from '../data.js';
 import { stepsFieldHtml, partOfFieldHtml, wireStepsFields } from './steps.js';
 import { openBreakdown } from './breakdown.js';
+import { section, prop, propInline, wireProps } from './props.js';
 
 const notesAreLong = (text) => text.length > 280 || text.split('\n').length > 8;
 
-function taskFieldsHtml(t, task) {
+// Layout: title (with complete + flag), notes, Steps, then sections of rows that open to edit
+// (Organize, Dates, Repeat and alerts, and Status/files/history). See ./props.js.
+function taskFieldsHtml(t, task, { inspector = false } = {}) {
   const projects = db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold' || p.id === t.project_id)
     .sort((a, b) => a.name.localeCompare(b.name));
+  const done = !!t.completed_at;
   return `
-    <input type="text" name="title" value="${esc(t.title)}" placeholder="What is it?" required autocomplete="off" aria-label="Title">
+    <div class="title-row">
+      ${inspector && task ? `<button type="button" class="check ${done ? 'done' : ''} ${t.flagged ? 'flagged' : ''}" data-check="${task.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>` : ''}
+      <input type="text" name="title" value="${esc(t.title)}" placeholder="What is it?" required autocomplete="off" aria-label="Title">
+      <label class="flag-pill" title="Flag"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}><span aria-hidden="true">⚑</span><span class="sr-only">Flagged</span></label>
+    </div>
+    <label class="notes-field"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes" rows="2">${esc(t.notes)}</textarea></label>
     ${stepsFieldHtml(task)}
-    <label>Project
-      <select name="project_id"><option value="">${task && task.in_inbox ? 'None (stays in Inbox)' : 'None'}</option>
-        ${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
-      </select></label>
-    ${partOfFieldHtml(t)}
-    ${tagPickerHtml()}
-    ${dateField('defer_at', 'Defer until', t.defer_at)}
-    ${dateField('planned_at', 'Planned', t.planned_at)}
-    ${dateField('due_at', 'Due', t.due_at)}
-    ${estimateField(t.estimate_minutes)}
-    ${repeatFieldHtml(t, { skippable: !!task && isOpen(task) })}
-    ${notifyFieldHtml()}
-    ${locationFieldHtml(t, { inherited: task ? placeFor({ ...task, place_id: null }) : null })}
-    <label class="flag-toggle"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}> Flagged</label>
-    <label class="notes-field">Notes<textarea name="notes" placeholder="Links, details…">${esc(t.notes)}</textarea></label>
-    ${attachFieldHtml()}
-    ${task ? `<label>Status<select name="status">
+    ${section('organize', 'Organize', `
+      ${partOfFieldHtml(t)}
+      ${propInline('Project', `<select name="project_id"><option value="">${task && task.in_inbox ? 'None (Inbox)' : 'None'}</option>
+        ${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`)}
+      ${prop('tags', 'Tags', tagPickerHtml())}`)}
+    ${section('dates', 'Dates', `
+      ${prop('defer_at', 'Defer until', dateField('defer_at', 'Defer until', t.defer_at))}
+      ${prop('planned_at', 'Planned', dateField('planned_at', 'Planned', t.planned_at))}
+      ${prop('due_at', 'Due', dateField('due_at', 'Due', t.due_at))}
+      ${prop('estimate', 'Duration', estimateField(t.estimate_minutes))}`)}
+    ${section('alerts', 'Repeat and alerts', `
+      ${prop('repeat', 'Repeat', repeatFieldHtml(t, { skippable: !!task && isOpen(task) }))}
+      ${prop('notify', 'Notifications', notifyFieldHtml())}
+      ${prop('location', 'Location', locationFieldHtml(t, { inherited: task ? placeFor({ ...task, place_id: null }) : null }))}`)}
+    ${task ? section('more', 'Status, files and history', `
+      ${propInline('Status', `<select name="status">
         <option value="open" ${!t.completed_at && !t.dropped_at ? 'selected' : ''}>Open</option>
         <option value="completed" ${t.completed_at ? 'selected' : ''}>Completed</option>
-        <option value="dropped" ${t.dropped_at && !t.completed_at ? 'selected' : ''}>Dropped</option></select></label>
+        <option value="dropped" ${t.dropped_at && !t.completed_at ? 'selected' : ''}>Dropped</option></select>`)}
       <div class="done-box" data-done-box ${t.completed_at ? '' : 'hidden'}>
         ${t.completed_at ? dateTimeField('completed_at_edit', '✓ Completed', t.completed_at) : '<b>✓ Completed when you save</b>'}
         <label>Completion note<textarea name="completion_note" placeholder="Outcome, who you spoke to, what's next…">${esc(t.completion_note || '')}</textarea></label></div>
       <div data-dropped-box ${t.dropped_at && !t.completed_at ? '' : 'hidden'}>${t.dropped_at ? dateTimeField('dropped_at_edit', 'Dropped', t.dropped_at) : ''}</div>
-      ${stampsHtml(task)}
-      ${historyFieldHtml(task)}` : ''}`;
+      ${attachFieldHtml()}
+      ${historyFieldHtml(task)}`) : section('files', 'Files', attachFieldHtml())}
+    ${task ? stampsHtml(task) : ''}`;
 }
 
 const secondaryButtons = (task) => `
@@ -58,6 +67,7 @@ const secondaryButtons = (task) => `
 // Wire behaviour shared by sheet and panel; returns collect() → { fields, tagIds } or null.
 function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
   wireQuickButtons(form);
+  wireProps(form);
   const selectedTags = wireTagPicker(form, task ? tagsFor(task.id).map((x) => x.id) : [], onTagsChange);
 
   const collectSteps = wireStepsFields(form, t, task, { onChange: onTagsChange, ...stepsOpts });
@@ -160,7 +170,7 @@ export function openEditor(task, defaults = {}) {
 export function renderTaskInspector(container, task) {
   container.innerHTML = `<form class="inspector-form" data-inspector-task="${task.id}" novalidate>
     <div class="inspector-head"><span class="inspector-kind">Action</span><span class="save-state" aria-live="polite"></span></div>
-    ${taskFieldsHtml(task, task)}
+    ${taskFieldsHtml(task, task, { inspector: true })}
     <div class="actions">${secondaryButtons(task)}</div>
   </form>`;
   const form = $('form', container);

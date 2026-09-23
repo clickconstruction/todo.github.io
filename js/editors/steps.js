@@ -11,14 +11,14 @@ export function stepsFieldHtml(task) {
   if (!task) {
     return `<fieldset class="steps-field"><legend>Steps</legend>
       <p class="hint" style="margin:0">Too big to do in one go? Split it into small steps.</p>
-      <button type="button" class="btn" data-breakdown>🪜 Break it down</button></fieldset>`;
+      <button type="button" class="link-btn" data-breakdown>🪜 Break it down</button></fieldset>`;
   }
   const kids = stepsOf(task);
   const deepest = depthOf(task) >= MAX_DEPTH;
   if (!kids.length) {
     return `<fieldset class="steps-field"><legend>Steps</legend>
       <p class="hint" style="margin:0">${deepest ? 'Steps can go 4 levels deep; this is the deepest.' : 'Too big to do in one go? Split it into small steps.'}</p>
-      ${deepest || !isOpen(task) ? '' : '<button type="button" class="btn" data-breakdown>🪜 Break it down</button>'}</fieldset>`;
+      ${deepest || !isOpen(task) ? '' : '<button type="button" class="link-btn" data-breakdown>🪜 Break it down</button>'}</fieldset>`;
   }
   const p = progress(task);
   const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
@@ -27,8 +27,8 @@ export function stepsFieldHtml(task) {
     <ol class="steps-mini">${kids.map((k) => `<li class="${k.completed_at ? 'done' : k.dropped_at ? 'dropped' : ''}">${esc(k.title)}${stepsOf(k).length ? ` <span class="hint">· ${progress(k).done}/${progress(k).total}</span>` : ''}</li>`).join('')}</ol>
     <label class="flag-toggle"><input type="checkbox" name="steps_in_order" ${task.steps_in_order ? 'checked' : ''}> Do in order <span class="hint">only the next step is available</span></label>
     <div class="steps-actions">
-      ${isOpen(task) && !deepest ? '<button type="button" class="btn small" data-breakdown>🪜 Add or edit steps</button>' : ''}
-      ${isOpen(task) ? '<button type="button" class="btn small" data-to-project>📁 Turn into a project</button>' : ''}
+      ${isOpen(task) && !deepest ? '<button type="button" class="link-btn" data-breakdown>Edit steps</button>' : ''}
+      ${isOpen(task) ? '<button type="button" class="link-btn muted" data-to-project>Turn into a project</button>' : ''}
     </div></fieldset>`;
 }
 

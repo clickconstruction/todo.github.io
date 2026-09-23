@@ -1,7 +1,7 @@
 // App-shell service worker: precache the shell, serve it cache-first, and
 // leave Supabase API traffic to the network. Bump VERSION on every deploy
 // that changes a shell file so clients pick up the new copy.
-const VERSION = 'v34';
+const VERSION = 'v35';
 const SHELL = [
   './',
   'index.html',
@@ -29,7 +29,7 @@ const SHELL = [
   'js/editors/attachField.js',
   'js/editors/historyField.js',
   'js/pushResult.js',
-  'js/tree.js',
+  'js/tree.js', 'js/perspective-engine.js', 'js/perspectives.js', 'js/views/perspective.js', 'js/editors/perspective.js', 'js/editors/props.js',
   'js/editors/breakdown.js',
   'js/editors/steps.js',
   'js/editors/place.js',

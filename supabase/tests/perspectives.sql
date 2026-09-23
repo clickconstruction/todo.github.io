@@ -1,0 +1,26 @@
+-- Perspectives (migration 20260928000001/2). One rolled-back transaction; every row should be ok = true.
+begin;
+insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','p1@test.invalid'),('00000000-0000-0000-0000-0000000000e2','00000000-0000-0000-0000-000000000000','authenticated','authenticated','p2@test.invalid');
+create temp table r (n int generated always as identity, test text, ok boolean, detail text); grant all on r to authenticated;
+insert into public.perspectives (id, user_id, name) values ('00000000-0000-0000-0000-00000000e009','00000000-0000-0000-0000-0000000000e2','Theirs');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e1","role":"authenticated"}', true);
+insert into public.perspectives (id, name, rules) values ('00000000-0000-0000-0000-00000000e001','Calls','{"v":1,"match":"all","rules":[{"type":"flagged"}]}');
+insert into r (test, ok, detail) select 'create with defaults', count(*) = 1 and bool_and(options->>'show' = 'available' and icon = '🔭'), '' from public.perspectives;
+insert into r (test, ok, detail) select 'cannot see others', count(*) = 0, '' from public.perspectives where name = 'Theirs';
+do $$ begin insert into public.perspectives (name) values ('calls'); insert into r (test, ok, detail) values ('names unique (case-insensitive)', false, '');
+exception when unique_violation then insert into r (test, ok, detail) values ('names unique (case-insensitive)', true, sqlerrm); end $$;
+do $$ begin insert into public.perspectives (name, rules) values ('Bad', '{"match":"all"}'); insert into r (test, ok, detail) values ('rules must have a rules array', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('rules must have a rules array', true, sqlerrm); end $$;
+update public.perspectives set archived_at = now() where id = '00000000-0000-0000-0000-00000000e001';
+insert into public.perspectives (name) values ('Calls');
+insert into r (test, ok, detail) select 'archived name can be reused', count(*) = 2, '' from public.perspectives;
+delete from public.perspectives where id = '00000000-0000-0000-0000-00000000e001';
+insert into r (test, ok, detail) select 'delete does nothing (no delete policy)', count(*) = 2, '' from public.perspectives;
+update public.perspectives set name = 'Hacked' where id = '00000000-0000-0000-0000-00000000e009';
+reset role;
+insert into r (test, ok, detail) select 'cannot edit others', name = 'Theirs', name from public.perspectives where id = '00000000-0000-0000-0000-00000000e009';
+do $$ begin delete from public.perspectives where id = '00000000-0000-0000-0000-00000000e009'; insert into r (test, ok, detail) values ('delete blocked even for admins', false, '');
+exception when others then insert into r (test, ok, detail) values ('delete blocked even for admins', true, sqlerrm); end $$;
+select test, ok, detail from r order by n;
+rollback;
