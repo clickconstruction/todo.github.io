@@ -254,6 +254,7 @@ class Api {
       project_id: t.project_id,
       tags: links.filter((l) => l.task_id === t.id).map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel),
       in_inbox: t.in_inbox,
+      status: t.completed_at ? 'completed' : t.dropped_at ? 'dropped' : 'open',
       flagged: t.flagged,
       due: localDate(t.due_at, this.tz),
       defer: localDate(t.defer_at, this.tz),
@@ -414,7 +415,7 @@ const TOOLS = [
   },
   {
     name: 'update_task',
-    description: 'Clarify or edit a task. Only fields you pass change. Setting a project or tags moves an Inbox item out of the Inbox. Pass null to clear a date or project.',
+    description: 'Edit any field of a task; only fields you pass change. Clarify inbox items by giving them a project and/or tags. An item with no project, no parent and no tags lives in the Inbox (removing them moves it back). Pass null to clear a date, project or parent.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -422,10 +423,15 @@ const TOOLS = [
         title: { type: 'string' },
         notes: { type: 'string' },
         project: { type: ['string', 'null'], description: 'Project name or id; null to remove' },
+        parent: { type: ['string', 'null'], description: 'Id of an open action in the same project to make this a subtask of; null for top-level' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Replaces all tags. Labels like "Laptop" or "Waiting : Hiro"; missing tags are created.' },
+        add_tags: { type: 'array', items: { type: 'string' }, description: 'Tags to add, keeping existing ones' },
+        remove_tags: { type: 'array', items: { type: 'string' }, description: 'Tags to remove' },
         flagged: { type: 'boolean' },
         due: { type: ['string', 'null'], description: 'YYYY-MM-DD (due 5pm local) or null' },
         defer: { type: ['string', 'null'], description: 'YYYY-MM-DD (hidden until then) or null' },
+        status: { type: 'string', enum: ['open', 'completed', 'dropped'], description: 'Only change when the user says so' },
+        completion_note: { type: 'string' },
       },
       required: ['id'],
     },
@@ -438,12 +444,40 @@ const TOOLS = [
       if (a.due !== undefined) patch.due_at = zonedToIso(a.due, 17, api.tz);
       if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, 0, api.tz);
       if (a.project !== undefined) patch.project_id = await api.resolveProject(a.project);
-      let tagCount = null;
-      if (Array.isArray(a.tags)) tagCount = await api.setTags(task.id, a.tags);
-      if (task.in_inbox && ((patch.project_id !== undefined ? patch.project_id : task.project_id) || tagCount)) patch.in_inbox = false;
-      if (Object.keys(patch).length) {
-        await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: patch });
+      if (a.completion_note !== undefined) patch.completion_note = String(a.completion_note).trim();
+      if (a.status !== undefined) {
+        patch.completed_at = a.status === 'completed' ? (task.completed_at || new Date().toISOString()) : null;
+        patch.dropped_at = a.status === 'dropped' ? (task.dropped_at || new Date().toISOString()) : null;
       }
+      const projectId = patch.project_id !== undefined ? patch.project_id : task.project_id;
+      if (a.parent !== undefined) {
+        if (a.parent === null || a.parent === '') patch.parent_id = null;
+        else {
+          const parent = await api.task(a.parent);
+          if (parent.id === task.id || parent.parent_id) throw new Error('Parent must be a different top-level action');
+          if (parent.project_id !== projectId) throw new Error('Parent must be in the same project');
+          patch.parent_id = parent.id;
+        }
+      } else if (patch.project_id !== undefined && patch.project_id !== task.project_id) {
+        patch.parent_id = null; // moving projects detaches from the old parent
+      }
+      // Tags: replace, or add/remove.
+      if (Array.isArray(a.tags) || Array.isArray(a.add_tags) || Array.isArray(a.remove_tags)) {
+        const { tags, tagLabel } = await api.lookups();
+        const links = await api.q(`task_tags?${api.u}&task_id=eq.${task.id}&select=tag_id`);
+        let labels = Array.isArray(a.tags) ? a.tags
+          : links.map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel);
+        if (Array.isArray(a.add_tags)) labels = labels.concat(a.add_tags);
+        if (Array.isArray(a.remove_tags)) {
+          const drop = a.remove_tags.map((x) => String(x).toLowerCase().trim());
+          labels = labels.filter((l) => !drop.includes(l.toLowerCase()) && !drop.includes(l.split(':').pop().trim().toLowerCase()));
+        }
+        await api.setTags(task.id, labels);
+      }
+      const tagCount = (await api.q(`task_tags?${api.u}&task_id=eq.${task.id}&select=tag_id`)).length;
+      const parentId = patch.parent_id !== undefined ? patch.parent_id : task.parent_id;
+      patch.in_inbox = !(projectId || parentId || tagCount);
+      await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: patch });
       return (await api.shape([await api.task(task.id)]))[0];
     },
   },

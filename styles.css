@@ -226,3 +226,18 @@ textarea { min-height: 80px; resize: vertical; }
 .done-box { display: grid; gap: 8px; padding: 12px; border-radius: 10px; background: color-mix(in srgb, var(--ok) 12%, transparent); }
 .done-box b { color: var(--ok); font-size: 14px; }
 @media (max-width: 420px) { .tabs a { font-size: 11px; } .tab-icon { font-size: 20px; } }
+
+/* Search */
+.desktop-only { display: none !important; }
+.search-fab {
+  position: fixed; z-index: 11; top: calc(env(safe-area-inset-top) + 14px); right: 16px;
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface-2); border: 1px solid var(--line); text-decoration: none; font-size: 18px;
+}
+input[type=search] { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); outline: none; font-size: 17px; }
+input[type=search]:focus { border-color: var(--accent); }
+@media (min-width: 900px) {
+  .desktop-only { display: flex !important; }
+  .search-fab { display: none; }
+}
+@media (max-width: 899px) { .view-head { padding-right: 52px; } }

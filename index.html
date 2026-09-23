@@ -37,6 +37,7 @@
 
 <div id="app" class="app" hidden>
   <nav class="tabs" aria-label="Views">
+    <a href="#search" data-view="search" class="desktop-only"><span class="tab-icon">🔍</span><span>Search</span></a>
     <a href="#inbox" data-view="inbox"><span class="tab-icon">📥</span><span>Inbox</span><b class="badge" id="badge-inbox"></b></a>
     <a href="#today" data-view="today"><span class="tab-icon">☀️</span><span>Today</span><b class="badge due" id="badge-today"></b></a>
     <a href="#projects" data-view="projects"><span class="tab-icon">🗂️</span><span>Projects</span></a>
@@ -44,6 +45,7 @@
     <a href="#done" data-view="done"><span class="tab-icon">✅</span><span>Done</span></a>
     <a href="#settings" data-view="settings"><span class="tab-icon">⚙️</span><span>Settings</span></a>
   </nav>
+  <a href="#search" class="search-fab" aria-label="Search">🔍</a>
   <main id="view" class="view"></main>
   <button type="button" id="fab" class="fab" aria-label="New inbox item">+</button>
 </div>

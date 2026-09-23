@@ -155,7 +155,8 @@
   }
 
   async function saveTask(task, fields, tagIds) {
-    fields.in_inbox = !(fields.project_id || tagIds.length) && (task ? task.in_inbox : true);
+    // Anything with no project, no tags and no parent action lives in the Inbox, so nothing falls out of every list.
+    fields.in_inbox = !(fields.project_id || fields.parent_id || tagIds.length);
     let row;
     if (task) {
       [row] = await run(sb.from('tasks').update(fields).eq('id', task.id).select());
@@ -339,9 +340,10 @@
     if (t.defer_at && isDeferred(t)) meta.push(`<span>⏸ ${esc(fmtDate(t.defer_at))}</span>`);
     if (t.due_at) meta.push(`<span class="meta-due ${isOverdue(t) ? 'overdue' : ''}">📅 ${esc(fmtDate(t.due_at))}</span>`);
     if (t.flagged) meta.push('<span class="meta-flag">⚑</span>');
+    if (t.dropped_at && !t.completed_at) meta.push('<span class="chip">Dropped</span>');
     if (t.notes) meta.push('<span>📝</span>');
     const checkCls = ['check', done && 'done', t.flagged && 'flagged', isOverdue(t) && 'overdue'].filter(Boolean).join(' ');
-    return `<li class="row ${done ? 'completed' : ''} ${t.parent_id ? 'row-sub' : ''}" data-task="${t.id}">
+    return `<li class="row ${done || t.dropped_at ? 'completed' : ''} ${t.parent_id ? 'row-sub' : ''}" data-task="${t.id}">
       <button class="${checkCls}" data-check="${t.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>
       <div class="row-main"><div class="row-title">${esc(t.title)}</div>${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}</div>
     </li>`;
@@ -424,6 +426,70 @@
       ${taskList(ordered, { showProject: false }) || '<p class="empty">No actions. What is the very next physical step?</p>'}
       <p class="view-sub" style="margin-top:20px"><a href="#done/all/${p.id}">✓ Completed in this project →</a></p>`;
   }
+
+  // ---------- Search ----------
+  let searchExtra = []; // completed/dropped matches fetched from the server
+  let searchSeq = 0;
+  const searchTerms = (q) => q.toLowerCase().split(/\s+/).filter(Boolean);
+  const matchesAll = (hay, terms) => { const h = hay.toLowerCase(); return terms.every((w) => h.includes(w)); };
+  const taskHaystack = (t) => [t.title, t.notes, t.completion_note, (byId(db.projects, t.project_id) || {}).name, ...tagsFor(t.id).map(tagLabel)].join(' ');
+
+  function searchResultsHtml(q) {
+    const terms = searchTerms(q);
+    if (!terms.length) return '<p class="empty">Search actions, notes, projects, folders and tags.</p>';
+    const open = db.tasks.filter((t) => isOpen(t) && matchesAll(taskHaystack(t), terms)).sort(taskSort);
+    const projects = db.projects.filter((p) => matchesAll(p.name + ' ' + p.notes, terms));
+    const folders = db.folders.filter((f) => matchesAll(f.name, terms));
+    const tags = db.tags.filter((tg) => matchesAll(tagLabel(tg), terms));
+    const closed = searchExtra.filter((t) => !isOpen(t) && matchesAll(taskHaystack(t), terms));
+    let html = '';
+    if (projects.length || folders.length || tags.length) {
+      html += `<div class="tally">${[
+        ...folders.map((f) => `<a class="chip" href="#projects">📁 ${esc(f.name)}${f.archived_at ? ' (archived)' : ''}</a>`),
+        ...projects.map((p) => `<a class="chip" href="#project/${p.id}">🗂️ ${esc(p.name)}${p.status === 'active' ? '' : ' (' + p.status.replace('_', ' ') + ')'}</a>`),
+        ...tags.map((tg) => `<a class="chip" href="#tag/${tg.id}">🏷️ ${esc(tagLabel(tg))}</a>`),
+      ].join('')}</div>`;
+    }
+    if (open.length) html += `<h2 class="section-title">Open · ${open.length}</h2>${taskList(open)}`;
+    if (closed.length) html += `<h2 class="section-title">Completed & dropped · ${closed.length}</h2>${taskList(closed)}`;
+    return html || '<p class="empty">No matches.</p>';
+  }
+
+  // Completed/dropped items aren't all loaded locally, so ask the server (each word must appear in title, notes or completion note).
+  async function searchServer(q) {
+    const seq = ++searchSeq;
+    const terms = searchTerms(q).map((w) => w.replace(/[,()*%\\]/g, '')).filter(Boolean);
+    if (!terms.length) { searchExtra = []; return; }
+    let query = sb.from('tasks').select('*').or('completed_at.not.is.null,dropped_at.not.is.null').order('updated_at', { ascending: false }).limit(100);
+    terms.forEach((w) => { query = query.or(`title.ilike.*${w}*,notes.ilike.*${w}*,completion_note.ilike.*${w}*`); });
+    const { data, error } = await query;
+    if (error || seq !== searchSeq) return;
+    searchExtra = data;
+    const box = $('#search-results');
+    if (box) box.innerHTML = searchResultsHtml($('#search-input').value);
+  }
+
+  function viewSearch(q = '') {
+    q = decodeURIComponent(q);
+    setTimeout(() => {
+      const input = $('#search-input');
+      if (input && document.activeElement !== input) { input.focus(); input.setSelectionRange(q.length, q.length); }
+    }, 0);
+    if (q) searchServer(q);
+    return `<div class="view-head"><h1>Search</h1></div>
+      <input type="search" id="search-input" value="${esc(q)}" placeholder="Search everything…" autocomplete="off" enterkeyhint="search">
+      <div id="search-results" style="margin-top:12px">${searchResultsHtml(q)}</div>`;
+  }
+
+  let searchTimer;
+  $('#view').addEventListener('input', (e) => {
+    if (e.target.id !== 'search-input') return;
+    const q = e.target.value;
+    history.replaceState(null, '', `#search/${encodeURIComponent(q)}`);
+    $('#search-results').innerHTML = searchResultsHtml(q);
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => searchServer(q), 250);
+  });
 
   // ---------- Done: review completed items by timeframe and project ----------
   const RANGES = [['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This week'], ['lastweek', 'Last week'],
@@ -602,7 +668,7 @@
 
   function render() {
     const [view, ...args] = (location.hash.slice(1) || 'inbox').split('/');
-    const views = { inbox: viewInbox, today: viewToday, projects: viewProjects, project: viewProject, tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone };
+    const views = { search: viewSearch, inbox: viewInbox, today: viewToday, projects: viewProjects, project: viewProject, tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone };
     $('#view').innerHTML = (views[view] || viewInbox)(...args);
     const tab = { project: 'projects', tag: 'tags' }[view] || view;
     document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('active', a.dataset.view === tab));
@@ -634,10 +700,16 @@
         <label>Defer until<input type="date" name="defer_at" value="${toDateInput(t.defer_at)}"></label>
         <label>Due<input type="date" name="due_at" value="${toDateInput(t.due_at)}"></label>
       </div>
+      <label>Subtask of<select name="parent_id"></select></label>
       <label class="flag-toggle"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}> Flagged</label>
       <label class="notes-field">Notes<textarea name="notes" placeholder="Links, details…">${esc(t.notes)}</textarea></label>
-      ${t.completed_at ? `<div class="done-box"><b>✓ Completed ${esc(fmtDateTime(t.completed_at))}</b>
-        <label>Completion note<textarea name="completion_note" placeholder="Outcome, who you spoke to, what's next…">${esc(t.completion_note || '')}</textarea></label></div>` : ''}
+      ${task ? `<label>Status<select name="status">
+          <option value="open" ${!t.completed_at && !t.dropped_at ? 'selected' : ''}>Open</option>
+          <option value="completed" ${t.completed_at ? 'selected' : ''}>Completed</option>
+          <option value="dropped" ${t.dropped_at && !t.completed_at ? 'selected' : ''}>Dropped</option></select></label>
+        <div class="done-box" id="done-box" ${t.completed_at ? '' : 'hidden'}><b>✓ Completed ${t.completed_at ? esc(fmtDateTime(t.completed_at)) : 'when you save'}</b>
+          <label>Completion note<textarea name="completion_note" placeholder="Outcome, who you spoke to, what's next…">${esc(t.completion_note || '')}</textarea></label></div>
+        ${t.dropped_at ? `<p class="view-sub" style="margin:0">Dropped ${esc(fmtDateTime(t.dropped_at))}</p>` : ''}` : ''}
       <div class="actions">
         ${task ? '<button type="button" class="btn danger" data-del>Delete</button>' : ''}
         <div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div>
@@ -661,6 +733,21 @@
       const tag = await ensureTag(e.target.value);
       if (tag) { selected.add(tag.id); e.target.value = ''; drawTags(); }
     };
+    // "Subtask of": open top-level actions in the chosen project (not this item or its own subtasks).
+    const form = $('#editor', sheet);
+    const drawParents = () => {
+      const pid = form.elements.project_id.value;
+      const options = pid ? db.tasks.filter((x) => x.project_id === pid && !x.parent_id && (isOpen(x) || x.id === t.parent_id) && (!task || (x.id !== task.id && x.parent_id !== task.id))) : [];
+      const current = t.parent_id && options.some((x) => x.id === t.parent_id) ? t.parent_id : '';
+      form.elements.parent_id.innerHTML = `<option value="">${pid ? 'None (top-level action)' : 'Choose a project first'}</option>` +
+        options.sort(taskSort).map((x) => `<option value="${x.id}" ${x.id === current ? 'selected' : ''}>${esc(x.title)}</option>`).join('');
+      form.elements.parent_id.disabled = !pid;
+    };
+    drawParents();
+    form.elements.project_id.addEventListener('change', drawParents);
+    if (form.elements.status) {
+      form.elements.status.onchange = () => { $('#done-box', sheet).hidden = form.elements.status.value !== 'completed'; };
+    }
     $('[data-cancel]', sheet).onclick = () => sheet.close();
     const del = $('[data-del]', sheet);
     if (del) del.onclick = async () => { if (confirm('Delete this item?')) { sheet.close(); await deleteTask(task); } };
@@ -675,7 +762,13 @@
         defer_at: fromDateInput(f.get('defer_at'), 0),
         due_at: fromDateInput(f.get('due_at'), 17),
       };
-      if (f.has('completion_note')) fields.completion_note = f.get('completion_note').trim();
+      fields.parent_id = f.get('parent_id') || null;
+      if (f.has('status')) {
+        const status = f.get('status');
+        fields.completed_at = status === 'completed' ? (t.completed_at || new Date().toISOString()) : null;
+        fields.dropped_at = status === 'dropped' ? (t.dropped_at || new Date().toISOString()) : null;
+        fields.completion_note = status === 'completed' ? (f.get('completion_note') || '').trim() : (t.completion_note || '');
+      }
       if (!fields.title) return;
       doneCache = null;
       sheet.close();
@@ -748,7 +841,11 @@
       return;
     }
     const row = e.target.closest('[data-task]');
-    if (row) openEditor(byId(db.tasks, row.dataset.task));
+    if (row) {
+      const id = row.dataset.task;
+      const t = byId(db.tasks, id) || byId(searchExtra, id) || (doneCache && byId(doneCache.rows, id));
+      if (t) openEditor(t);
+    }
   });
   $('#view').addEventListener('submit', async (e) => {
     const senderForm = e.target.closest('[data-add-sender]');
@@ -785,6 +882,11 @@
   $('#fab').onclick = openQuickEntry;
   window.addEventListener('hashchange', render);
   document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && !e.metaKey && !e.ctrlKey && !$('#sheet').open && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+      e.preventDefault();
+      location.hash = '#search';
+      return;
+    }
     if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !$('#sheet').open && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
       e.preventDefault();
       openQuickEntry();
