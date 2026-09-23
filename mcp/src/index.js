@@ -12,7 +12,7 @@ const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = `Todo Tooling is the user's GTD system. Capture anything new with capture (it lands in the Inbox).
 Clarify inbox items with update_task: give each a project and/or tags (contexts like "Laptop", people like "Waiting : Hiro"); an item leaves the Inbox once it has a project or tag.
-Use due dates only for hard deadlines; use flagged for "today-ish". Dates are YYYY-MM-DD in the user's timezone.
+Use planned for when the user intends to work on something and due only for hard deadlines; flagged means "important now". Dates are YYYY-MM-DD in the user's timezone.
 Never complete, reschedule or re-file tasks the user did not ask you to change.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.`;
 
@@ -257,6 +257,7 @@ class Api {
       status: t.completed_at ? 'completed' : t.dropped_at ? 'dropped' : 'open',
       flagged: t.flagged,
       due: localDate(t.due_at, this.tz),
+      planned: localDate(t.planned_at, this.tz),
       defer: localDate(t.defer_at, this.tz),
       completed_at: t.completed_at,
       completion_note: t.completion_note || undefined,
@@ -332,7 +333,8 @@ const TOOLS = [
         parent: { type: 'string', description: 'Id of an open action in that project, to make this a subtask' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Labels like "Laptop" or "Waiting : Hiro"; missing tags are created' },
         flagged: { type: 'boolean' },
-        due: { type: 'string', description: 'YYYY-MM-DD (due 5pm local)' },
+        planned: { type: 'string', description: 'YYYY-MM-DD when the user intends to do it' },
+        due: { type: 'string', description: 'YYYY-MM-DD hard deadline only' },
         defer: { type: 'string', description: 'YYYY-MM-DD (hidden until then)' },
       },
       required: ['title'],
@@ -340,7 +342,7 @@ const TOOLS = [
     async run(api, { title, notes = '', ...rest }) {
       if (!title || !String(title).trim()) throw new Error('title is required');
       const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, title: String(title).trim(), notes, source: 'mcp' } });
-      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'defer'].includes(k) && v !== undefined));
+      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'planned', 'defer'].includes(k) && v !== undefined));
       if (!Object.keys(fields).length) return (await api.shape([row]))[0];
       return TOOLS.find((t) => t.name === 'update_task').run(api, { id: row.id, ...fields });
     },
@@ -356,16 +358,17 @@ const TOOLS = [
   },
   {
     name: 'today',
-    description: 'What needs attention today: overdue items, items due today, and flagged items. Deferred items are hidden.',
+    description: 'What needs attention today: overdue items, items due today, items planned for today or earlier, and flagged items. Deferred items are hidden.',
     inputSchema: { type: 'object', properties: {} },
     async run(api) {
       const today = localDate(new Date().toISOString(), api.tz);
       const endOfToday = zonedToIso(today, 24, api.tz);
       const now = new Date().toISOString();
       const notDeferred = `or=(defer_at.is.null,defer_at.lte.${now})`;
-      const [due, flagged] = await Promise.all([
+      const [due, flagged, planned] = await Promise.all([
         api.q(`tasks?${api.u}&${OPEN}&${notDeferred}&due_at=lt.${endOfToday}&order=due_at.asc&select=*`),
         api.q(`tasks?${api.u}&${OPEN}&${notDeferred}&flagged=is.true&order=created_at.asc&select=*`),
+        api.q(`tasks?${api.u}&${OPEN}&${notDeferred}&planned_at=lt.${endOfToday}&order=planned_at.asc&select=*`),
       ]);
       const startOfToday = zonedToIso(today, 0, api.tz);
       const shapedDue = await api.shape(due);
@@ -374,7 +377,8 @@ const TOOLS = [
         date: today,
         overdue: shapedDue.filter((_, i) => due[i].due_at < startOfToday),
         due_today: shapedDue.filter((_, i) => due[i].due_at >= startOfToday),
-        flagged: await api.shape(flagged.filter((t) => !dueIds.has(t.id))),
+        planned: await api.shape(planned.filter((t) => !dueIds.has(t.id))),
+        flagged: await api.shape(flagged.filter((t) => !dueIds.has(t.id) && !planned.some((p) => p.id === t.id))),
       };
     },
   },
@@ -452,7 +456,8 @@ const TOOLS = [
         add_tags: { type: 'array', items: { type: 'string' }, description: 'Tags to add, keeping existing ones' },
         remove_tags: { type: 'array', items: { type: 'string' }, description: 'Tags to remove' },
         flagged: { type: 'boolean' },
-        due: { type: ['string', 'null'], description: 'YYYY-MM-DD (due 5pm local) or null' },
+        planned: { type: ['string', 'null'], description: 'YYYY-MM-DD when the user intends to work on it (9am local), or null. Prefer this over due for intentions.' },
+        due: { type: ['string', 'null'], description: 'YYYY-MM-DD hard deadline only (due 5pm local), or null' },
         defer: { type: ['string', 'null'], description: 'YYYY-MM-DD (hidden until then) or null' },
         status: { type: 'string', enum: ['open', 'completed', 'dropped'], description: 'Only change when the user says so' },
         completion_note: { type: 'string' },
@@ -466,6 +471,7 @@ const TOOLS = [
       if (a.notes !== undefined) patch.notes = a.notes;
       if (a.flagged !== undefined) patch.flagged = !!a.flagged;
       if (a.due !== undefined) patch.due_at = zonedToIso(a.due, 17, api.tz);
+      if (a.planned !== undefined) patch.planned_at = zonedToIso(a.planned, 9, api.tz);
       if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, 0, api.tz);
       if (a.project !== undefined) patch.project_id = await api.resolveProject(a.project);
       if (a.completion_note !== undefined) patch.completion_note = String(a.completion_note).trim();

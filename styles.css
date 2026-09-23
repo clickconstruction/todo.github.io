@@ -241,3 +241,15 @@ input[type=search]:focus { border-color: var(--accent); }
   .search-fab { display: none; }
 }
 @media (max-width: 899px) { .view-head { padding-right: 52px; } }
+
+/* Date fields with one-tap buttons (defer / planned / due / estimate) */
+.date-field { display: grid; gap: 6px; }
+.sheet .date-field > label, .date-field > label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); }
+.date-field .hint { font-weight: 400; opacity: .75; margin-left: 6px; }
+.date-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.date-row input { flex: 1 1 150px; min-width: 0; width: auto; }
+.quick { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.qbtn { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
+.qbtn:hover { border-color: var(--accent); }
+.meta-planned { color: var(--accent); }
+.meta-planned.past { color: var(--flag); }

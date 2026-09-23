@@ -1,6 +1,7 @@
 // Task editor sheet and quick entry.
 import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, isOpen, taskSort, tagsFor, tagLabel, sortedTags } from '../state.js';
-import { fmtDateTime, toDateInput, fromDateInput } from '../dates.js';
+import { fmtDateTime, fromDateInput, HOURS } from '../dates.js';
+import { dateField, wireQuickButtons } from '../components.js';
 import { saveTask, ensureTag, capture } from '../data.js';
 
 const notesAreLong = (text) => text.length > 280 || text.split('\n').length > 8;
@@ -19,10 +20,9 @@ export function openEditor(task, defaults = {}) {
       </select></label>
     <label>Tags <div class="tag-picker" id="tag-picker"></div>
       <input type="text" id="new-tag" placeholder="New tag (Enter). e.g. Laptop, Waiting : Hiro" autocomplete="off"></label>
-    <div class="grid2">
-      <label>Defer until<input type="date" name="defer_at" value="${toDateInput(t.defer_at)}"></label>
-      <label>Due<input type="date" name="due_at" value="${toDateInput(t.due_at)}"></label>
-    </div>
+    ${dateField('defer_at', 'Defer until', t.defer_at)}
+    ${dateField('planned_at', 'Planned', t.planned_at)}
+    ${dateField('due_at', 'Due', t.due_at)}
     <label>Subtask of<select name="parent_id"></select></label>
     <label class="flag-toggle"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}> Flagged</label>
     <label class="notes-field">Notes<textarea name="notes" placeholder="Links, details…">${esc(t.notes)}</textarea></label>
@@ -39,6 +39,7 @@ export function openEditor(task, defaults = {}) {
     </div>
   </form>`);
   const form = $('#editor', sheet);
+  wireQuickButtons(form);
 
   const drawTags = () => {
     $('#tag-picker', sheet).innerHTML = sortedTags().map((tag) =>
@@ -86,8 +87,9 @@ export function openEditor(task, defaults = {}) {
       project_id: f.get('project_id') || null,
       parent_id: f.get('parent_id') || null,
       flagged: f.get('flagged') === 'on',
-      defer_at: fromDateInput(f.get('defer_at'), 0),
-      due_at: fromDateInput(f.get('due_at'), 17),
+      defer_at: fromDateInput(f.get('defer_at'), HOURS.defer_at),
+      planned_at: fromDateInput(f.get('planned_at'), HOURS.planned_at),
+      due_at: fromDateInput(f.get('due_at'), HOURS.due_at),
     };
     if (f.has('status')) {
       const status = f.get('status');
