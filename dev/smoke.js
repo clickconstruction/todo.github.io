@@ -19,6 +19,7 @@ async function reload() {
   const { app } = await import('/js/state.js');
   app.review = null; app.reviewStats = null; app.here = null; app.locationState = null;
   window.__noMaps = true; // never call Google from tests
+  window.__noRefresh = true; // no background reloads mid-suite (the pane's visibility flips)
   (await import('/js/alerts.js')).resetAlertState();
   window.__geo = { state: 'prompt', position: { lat: 29.7610, lng: -95.3705, accuracy: 20 } }; // ~400 ft from mock Home Depot
   try { ['todo.here', 'todo.nearby.within', 'todo.geo.alerts', 'todo.geo.key', 'todo.geo.done', 'todo.alerts.nudge', 'todo.alerts.seen'].forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ }
@@ -36,14 +37,14 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments };
+  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
     try { await fn(check); } catch (e) { check(`${name}: threw`, false, e.stack || e.message); }
     if ($('#sheet').open) $('#sheet').close();
   }
-  window.__forceSheet = false; window.__forceWide = false; window.__geo = undefined; window.__noMaps = false;
+  window.__forceSheet = false; window.__forceWide = false; window.__geo = undefined; window.__noMaps = false; window.__noRefresh = false;
   const failed = results.filter((r) => !r.ok);
   console.log(`smoke: ${results.length - failed.length}/${results.length} passed`, failed);
   return { passed: results.length - failed.length, total: results.length, failed, results };
@@ -753,7 +754,8 @@ async function parity(check) {
   f.elements.completed_at_edit.value = '2026-09-01T08:30';
   f.requestSubmit();
   await wait(200);
-  check('backdated completion saved', new Date(task('t9').completed_at).getTime() === new Date('2026-09-01T08:30').getTime(), task('t9').completed_at);
+  const t9 = T().tasks.find((t) => t.id === 't9'); // read the saved row: a background refresh drops old completions from db
+  check('backdated completion saved', new Date(t9.completed_at).getTime() === new Date('2026-09-01T08:30').getTime(), t9.completed_at);
 
   // Dropped time editable.
   openEditor(task('t5'));
@@ -883,7 +885,7 @@ async function repeat(check) {
   [...$$('#toast button')].find((b) => b.textContent === 'Undo').click();
   await wait(400);
   check('undo reopens it with its repeat', !task('t3').completed_at && task('t3').repeat_rule);
-  check('undo drops the extra occurrence (never deleted)', open('Get plans released').length === 1 && db.tasks.some((t) => t.title === 'Get plans released' && t.dropped_at));
+  check('undo drops the extra occurrence (never deleted)', open('Get plans released').length === 1 && T().tasks.some((t) => t.title === 'Get plans released' && t.dropped_at));
 
   // Skip.
   openEditor(task('t3'));
@@ -1062,4 +1064,63 @@ async function attachments(check) {
   await wait(300);
   const made = db.tasks.find((t) => t.title === 'Send drawings');
   check('saved item gets its attachment', made && db.attachments.some((a) => a.task_id === made.id && a.name === 'plans.pdf'));
+}
+
+// Settings → Notifications (devices, test now, test in 1 minute with countdown, delivery history)
+// and History on actions.
+async function history(check) {
+  const { db } = await import('/js/state.js');
+  const T2 = () => db.tasks.find((t) => t.id === 't2');
+  const { openEditor } = await import('/js/editors/task.js');
+
+  // Item history.
+  openEditor(T2());
+  let f = $('#editor');
+  $('[data-qd="due_at"][data-step="+1w"]', f).click();
+  f.elements.title.value = 'Order fittings for Jodi (rush)';
+  f.requestSubmit();
+  await wait(250);
+  openEditor(T2());
+  f = $('#editor');
+  const box = $('[data-history]', f);
+  check('editor has a History section', !!box);
+  box.open = true;
+  box.dispatchEvent(new Event('toggle'));
+  await wait(250);
+  check('history shows old → new with who', has('#editor .history-list', 'title', 'order fittings for jodi', '(rush)', 'by you') && has('#editor .history-list', 'due'));
+  const filter = $('[data-history-filter]', f);
+  filter.value = 'due_at';
+  filter.dispatchEvent(new Event('change'));
+  check('filter to one field', $$('#editor .history-list li').filter((li) => !li.hidden).every((li) => li.dataset.field === 'due_at'));
+  $('#sheet').close();
+
+  // Settings: devices + tests.
+  T().push_subscriptions.push({ id: 'ps1', user_id: 'u1', endpoint: 'https://web.push.apple.com/abc', p256dh: 'k', auth: 'a', device: 'iPhone', created_at: new Date().toISOString() });
+  window.__pushTest = async (delay) => {
+    if (!delay) {
+      const results = [{ device: 'iPhone', service: 'web.push.apple.com', status: 201, reason: '' }];
+      T().push_log.push({ id: 'l1', user_id: 'u1', kind: 'test', title: '🔔 Test notification', sent_at: new Date().toISOString(), devices: 1, delivered: 1, results, created_at: new Date().toISOString() });
+      return { devices: 1, delivered: 1, results };
+    }
+    T().push_log.push({ id: 'l2', user_id: 'u1', kind: 'test', title: '🔔 Scheduled test', scheduled_for: new Date(Date.now() + delay * 1000).toISOString(), sent_at: null, devices: 0, delivered: 0, results: [], created_at: new Date().toISOString() });
+    return { queued: 'l2', scheduled_for: new Date(Date.now() + delay * 1000).toISOString() };
+  };
+  window.__pollMs = 200;
+  const S = await import('/js/views/settings.js');
+  S.resetSettings();
+  await go('#settings');
+  for (let i = 0; i < 20 && !has(undefined, 'iphone'); i++) await wait(100);
+  check('settings lists the iPhone', has(undefined, 'notifications', 'iphone') && !!$('[data-act="push-test-now"]') && !!$('[data-act="push-test-later"]'));
+  $('[data-act="push-test-now"]').click();
+  await wait(400);
+  check('test now shows the push service result', has('[data-test-status]', 'iphone: accepted by apple'));
+  check('delivery history lists it', has('.delivery-log', 'test notification', 'accepted by apple'));
+  $('[data-act="push-test-later"]').click();
+  await wait(1300);
+  check('test in 1 minute shows a countdown', /⏳ 0:5\d/.test(text('[data-test-status]')) && has('[data-test-status]', 'lock your phone'), text('[data-test-status]'));
+  const row = T().push_log.find((x) => x.id === 'l2');
+  Object.assign(row, { sent_at: new Date().toISOString(), devices: 1, delivered: 0, results: [{ device: 'iPhone', service: 'web.push.apple.com', status: 403, reason: 'BadJwtToken' }] });
+  await wait(700);
+  check('when the queued test is sent, its result replaces the countdown (with the reason)', has('[data-test-status]', 'iphone: 403', 'badjwttoken'), text('[data-test-status]'));
+  window.__pushTest = undefined; window.__pollMs = undefined;
 }

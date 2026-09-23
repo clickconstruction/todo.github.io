@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -164,6 +164,21 @@
     n.fire_at = fire;
   }
 
+  // Mirrors the item_history triggers (fields the app edits).
+  const TRACK = ['title', 'name', 'notes', 'project_id', 'flagged', 'defer_at', 'planned_at', 'due_at', 'estimate_minutes', 'completed_at', 'dropped_at', 'status', 'place_id', 'repeat_rule'];
+  function history(row, field, oldV, newV) {
+    tables.item_history.push({ id: tables.item_history.length + 1, user_id: uid, task_id: row.task_id || null, project_id: row.task_id ? null : row.project_id || null,
+      field, old_value: oldV, new_value: newV, source: 'app', changed_at: now() });
+  }
+  function logChanges(table, before, r) {
+    TRACK.forEach((k) => {
+      if (k in r && JSON.stringify(before[k] ?? null) !== JSON.stringify(r[k] ?? null)) {
+        tables.item_history.push({ id: tables.item_history.length + 1, user_id: uid, task_id: table === 'tasks' ? r.id : null, project_id: table === 'projects' ? r.id : null,
+          field: k, old_value: before[k] ?? null, new_value: r[k] ?? null, source: 'app', changed_at: now() });
+      }
+    });
+  }
+
   function taskRules(t, before) {
     const wasOpen = !before || isOpen(before);
     if (wasOpen && t.completed_at && !t.dropped_at && t.repeat_rule) repeatTask(t); // runs first, like tasks_0_repeat
@@ -244,7 +259,7 @@
       if (st.op === 'insert') {
         const add = [].concat(st.payload).map((p) => ({ id: id(), user_id: uid, created_at: now(), updated_at: now(), sort: 0, ...(DEFAULTS[table] ? DEFAULTS[table]() : {}), ...p }));
         rows.push(...add);
-        add.forEach((r) => { if (table === 'projects') { reviewSchedule(r); projectStatusChange(r, null); } if (table === 'tasks') taskRules(r, null); if (table === 'notifications') fireAt(r); });
+        add.forEach((r) => { if (table === 'projects') { reviewSchedule(r); projectStatusChange(r, null); } if (table === 'tasks') taskRules(r, null); if (table === 'notifications') { fireAt(r); history(r, 'notification', null, { kind: r.kind, offset_minutes: r.offset_minutes, at: r.at }); } });
         return { data: add.map(copy), error: null };
       }
       if (st.op === 'update') {
@@ -255,12 +270,14 @@
           if (table === 'projects') { reviewSchedule(r, before); projectStatusChange(r, before.status); }
           if (table === 'tasks') taskRules(r, before);
           if (table === 'notifications') fireAt(r, before);
+          if (table === 'tasks' || table === 'projects') logChanges(table, before, r);
           if ((table === 'tasks' || table === 'projects') && ['due_at', 'planned_at', 'defer_at'].some((k) => r[k] !== before[k])) {
             tables.notifications.filter((n) => n[table === 'tasks' ? 'task_id' : 'project_id'] === r.id).forEach((n) => { const b = { ...n }; fireAt(n, b); });
           }
         });
         return { data: hit.map(copy), error: null };
       }
+      if (st.op === 'delete' && table === 'notifications') rows.filter(match).forEach((n) => history(n, 'notification', { kind: n.kind, offset_minutes: n.offset_minutes, at: n.at }, null));
       if (st.op === 'delete') {
         if (NO_DELETE[table] && rows.some(match)) return { data: null, error: { message: NO_DELETE[table] } };
         tables[table] = rows.filter((r) => !match(r));
@@ -330,6 +347,7 @@
       auth: {
         onAuthStateChange(cb) { setTimeout(() => cb('SIGNED_IN', { user }), 0); return { data: { subscription: { unsubscribe() {} } } }; },
         signOut() {}, signInWithPassword: async () => ({ error: null }), signUp: async () => ({ data: {}, error: null }),
+        async getSession() { return { data: { session: { access_token: 'mock-jwt', user } } }; },
       },
     }),
   };

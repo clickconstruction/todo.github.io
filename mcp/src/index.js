@@ -9,6 +9,7 @@
 import PostalMime from 'postal-mime';
 import { handleGeo, makePlaceResolver, loadPlaceData } from './geo.js';
 import { sendDueReminders } from './reminders.js';
+import { deliver, sendQueuedTests } from './deliver.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -35,6 +36,11 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (url.pathname === '/' && request.method === 'GET') {
       return text('Todo Tooling MCP server. Endpoint: POST /mcp with Authorization: Bearer <token from todotooling.com Settings>.');
+    }
+    if (url.pathname === '/push/test') {
+      if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+      if (!(env.SUPABASE_SECRET_KEY || '').trim() || !(env.VAPID_PRIVATE_JWK || '').trim()) return json({ error: 'Server not configured' }, 503);
+      return handlePushTest(request, env);
     }
     if (url.pathname === '/geo') {
       if (!(env.SUPABASE_SECRET_KEY || '').trim()) return json({ error: 'Server not configured' }, 503);
@@ -68,10 +74,14 @@ export default {
     return out ? json(out) : new Response(null, { status: 202, headers: CORS });
   },
 
-  // Cron (every minute): send custom notifications whose time has come.
+  // Cron (every minute): send custom notifications and queued tests whose time has come.
   async scheduled(event, env, ctx) {
     if (!(env.SUPABASE_SECRET_KEY || '').trim() || !(env.VAPID_PRIVATE_JWK || '').trim()) return;
-    ctx.waitUntil(sendDueReminders(env, (path, opts) => rest(env, path, opts)).then((r) => { if (r.due) console.log('reminders', r); }));
+    const r = (path, opts) => rest(env, path, opts);
+    ctx.waitUntil(Promise.all([
+      sendDueReminders(env, r).then((x) => { if (x.due) console.log('reminders', x); }),
+      sendQueuedTests(env, r).then((n) => { if (n) console.log('queued tests', n); }),
+    ]));
   },
 
   // Email Routing sends inbox@todotooling.com here; each accepted email becomes an Inbox task.
@@ -79,6 +89,30 @@ export default {
     return handleEmail(message, env);
   },
 };
+
+// ---------- test notifications from the app ----------
+// POST /push/test with the signed-in user's Supabase access token.
+//   { delay_seconds: 0 }  send now, respond with each device's result
+//   { delay_seconds: 60 } queue it; the cron sends it (lock your phone to see a real background push)
+export async function handlePushTest(request, env) {
+  const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!token) return json({ error: 'Sign in first' }, 401);
+  const who = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, { headers: { apikey: env.SUPABASE_SECRET_KEY, Authorization: `Bearer ${token}` } });
+  if (!who.ok) return json({ error: 'Your session expired. Reload the app.' }, 401);
+  const { id: userId } = await who.json();
+  let delay = 0;
+  try { delay = Math.round(Number((await request.json()).delay_seconds) || 0); } catch { /* no body */ }
+  delay = Math.min(3600, Math.max(0, delay));
+  const r = (path, opts) => rest(env, path, opts);
+  if (delay) {
+    const scheduled_for = new Date(Date.now() + delay * 1000).toISOString();
+    const [row] = await r('push_log', { method: 'POST', prefer: 'return=representation',
+      body: { user_id: userId, kind: 'test', title: '🔔 Scheduled test', body: `Sent ${delay >= 60 ? `${Math.round(delay / 60)} min` : `${delay} s`} after you asked. Background notifications work!`, scheduled_for } });
+    return json({ queued: row.id, scheduled_for });
+  }
+  const out = await deliver(env, r, userId, { title: '🔔 Test notification', body: 'Notifications from Todo Tooling work on this device.', tag: `test:${Date.now()}`, url: '#settings' }, { kind: 'test' });
+  return json(out);
+}
 
 // ---------- email capture ----------
 const MAX_NOTES = 6000;
@@ -1143,6 +1177,40 @@ const TOOLS = [
       const [row] = await api.q(`tags?${api.u}&id=eq.${tag.id}&select=*`);
       const place = row.place_id ? (await api.q(`places?${api.u}&id=eq.${row.place_id}&select=*`))[0] : null;
       return { id: row.id, label: tagLabel(row), place: place ? { name: place.name, alert: row.location_trigger, radius_m: row.location_radius_m || place.radius_m } : null };
+    },
+  },
+  {
+    name: 'get_history',
+    description: 'Change history of an action or project: every field change (old → new, when, and whether it was the app, an agent, or automatic) plus the notifications sent for it. Newest first.',
+    inputSchema: { type: 'object', properties: { task: { type: 'string', description: 'Action id' }, project: { type: 'string', description: 'Project name or id' }, limit: { type: 'integer', default: 100 } } },
+    async run(api, { task, project, limit = 100 }) {
+      const col = task ? 'task_id' : project ? 'project_id' : null;
+      if (!col) throw new Error('Give task (id) or project');
+      const id = task ? (await api.task(task)).id : await api.resolveProject(project);
+      const n = Math.min(500, Math.max(1, Math.round(Number(limit) || 100)));
+      const [changes, sends] = await Promise.all([
+        api.q(`item_history?${api.u}&${col}=eq.${id}&order=changed_at.desc&limit=${n}&select=field,old_value,new_value,source,changed_at`),
+        api.q(`push_log?${api.u}&${col}=eq.${id}&order=created_at.desc&limit=${n}&select=kind,title,body,sent_at,devices,delivered,results,created_at`),
+      ]);
+      return {
+        changes: changes.map((c) => ({ field: c.field, from: c.old_value, to: c.new_value, by: c.source, at: c.changed_at })),
+        notifications_sent: sends.map((d) => ({ kind: d.kind, title: d.title, at: d.sent_at || d.created_at, devices: d.devices, delivered: d.delivered, results: d.results })),
+      };
+    },
+  },
+  {
+    name: 'list_deliveries',
+    description: 'Recent push notification deliveries (tests, reminders, place alerts) with each device\'s result, to troubleshoot notifications that did not arrive. Also lists the registered devices.',
+    inputSchema: { type: 'object', properties: { limit: { type: 'integer', default: 20 } } },
+    async run(api, { limit = 20 }) {
+      const [devices, rows] = await Promise.all([
+        api.q(`push_subscriptions?${api.u}&order=created_at.desc&select=device,endpoint,created_at`),
+        api.q(`push_log?${api.u}&order=created_at.desc&limit=${Math.min(100, Math.max(1, Math.round(Number(limit) || 20)))}&select=kind,title,scheduled_for,sent_at,devices,delivered,results,task_id,project_id,created_at`),
+      ]);
+      return {
+        devices: devices.map((d) => ({ device: d.device, service: new URL(d.endpoint).host, since: d.created_at })),
+        deliveries: rows.map((d) => ({ kind: d.kind, title: d.title, queued_for: d.scheduled_for || undefined, sent_at: d.sent_at, devices: d.devices, delivered: d.delivered, results: d.results, task_id: d.task_id || undefined, project_id: d.project_id || undefined })),
+      };
     },
   },
   {

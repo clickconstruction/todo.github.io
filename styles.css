@@ -505,3 +505,20 @@ h1.review { color: #3b82f6; }
 .auto-guide details textarea { width: 100%; font-size: 12px; }
 .nudge { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 12px; margin: 0 0 12px; }
 .nudge a { color: var(--text); text-decoration: none; }
+
+/* Settings → Notifications */
+.test-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.test-status { background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 12px; margin: 0 0 10px; }
+.test-status[hidden] { display: none; }
+.delivery-log ul { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 10px; }
+.delivery-result { font-size: 13px; margin-top: 2px; }
+.ok { color: var(--ok); }
+.warn { color: var(--flag); }
+
+/* History */
+.history-field { border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; }
+.history-field summary { font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.history-field select { margin: 8px 0; width: auto; }
+.history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 14px; color: var(--text); }
+.history-list li[hidden] { display: none; }
+.history-list b { font-weight: 600; }

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -22,7 +22,11 @@ globalThis.fetch = async (url, init = {}) => {
     return new Response(JSON.stringify({ Key: key }), { status: 200 });
   }
   if (String(url).startsWith('https://files.example')) return new Response('drawing bytes', { status: 200, headers: { 'content-type': 'application/pdf' } });
-  if (String(url).startsWith('https://push.example')) { pushed.push({ url: String(url), init }); return new Response(null, { status: String(url).includes('gone') ? 410 : 201 }); }
+  if (String(url).includes('/auth/v1/user')) {
+    const auth = init.headers.Authorization || '';
+    return auth === 'Bearer user-jwt' ? new Response(JSON.stringify({ id: UID }), { status: 200 }) : new Response('{}', { status: 401 });
+  }
+  if (String(url).startsWith('https://push.example')) { pushed.push({ url: String(url), init }); return String(url).includes('gone') ? new Response(null, { status: 410 }) : String(url).includes('badjwt') ? new Response('{"reason":"BadJwtToken"}', { status: 403 }) : new Response(null, { status: 201 }); }
   const rpcCalls = globalThis.rpcCalls = globalThis.rpcCalls || [];
   if (String(url).includes('/rest/v1/rpc/')) { rpcCalls.push({ fn: String(url).split('/rpc/')[1], body: JSON.parse(init.body) }); return new Response('{}', { status: 200 }); }
   const u = new URL(url); const table = u.pathname.split('/').pop();
@@ -76,7 +80,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 27 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 27 tools, no internals leaked');
+assert(list.body.result.tools.length === 29 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 29 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -402,4 +406,25 @@ assert(rm.archived && db.attachments.find((x) => x.id === att3.id).archived_at, 
 assert((await tool('get_task', { id: oneShot.id })).attachments.length === 1, 'archived attachment hidden');
 await tool('remove_attachment', { id: att3.id, restore: true });
 assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'restore brings it back');
+
+// ---------- delivery log, /push/test, queued tests, history ----------
+db.push_log.length = 0;
+db.push_subscriptions.push({ id: 'psbad', user_id: UID, endpoint: 'https://push.example.com/badjwt', device: 'iPhone', ...keys });
+const pt = async (body, auth = 'Bearer user-jwt') => { const r = await worker.fetch(new Request('https://mcp.todotooling.com/push/test', { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), env, ctx); return { status: r.status, body: await r.json() }; };
+assert((await pt({}, 'Bearer nope')).status === 401, '/push/test needs a signed-in user');
+const now1 = await pt({ delay_seconds: 0 });
+assert(now1.status === 200 && now1.body.devices >= 2 && now1.body.results.some((x) => x.status === 403 && /BadJwtToken/.test(x.reason)), '/push/test sends now and reports each device, with the push service reason');
+const logged = db.push_log.find((x) => x.kind === 'test' && x.sent_at);
+assert(logged && logged.user_id === UID && logged.results.some((x) => x.device === 'iPhone' && x.status === 403), 'delivery logged with per-device results');
+const later = await pt({ delay_seconds: 60 });
+assert(later.body.queued && db.push_log.find((x) => x.id === later.body.queued && !x.sent_at), 'test queued for 1 minute');
+const { sendQueuedTests } = await import('./src/deliver.js');
+assert(await sendQueuedTests(env, restFn, new Date(Date.now() + 30e3)) === 0, 'queued test not sent early');
+assert(await sendQueuedTests(env, restFn, new Date(Date.now() + 61e3)) === 1 && db.push_log.find((x) => x.id === later.body.queued).sent_at, 'cron sends the queued test when due');
+db.item_history.push({ id: 1, user_id: UID, task_id: oneShot.id, project_id: null, field: 'due_at', old_value: null, new_value: '2026-10-01T22:00:00Z', source: 'app', changed_at: new Date().toISOString() });
+db.push_log.push({ id: 'pl-r', user_id: UID, kind: 'reminder', title: '⏰ Schedule backflow test', task_id: oneShot.id, project_id: null, sent_at: new Date().toISOString(), devices: 1, delivered: 1, results: [], created_at: new Date().toISOString() });
+const hist = await tool('get_history', { task: oneShot.id });
+assert(hist.changes[0].field === 'due_at' && hist.changes[0].by === 'app' && hist.notifications_sent[0].kind === 'reminder', 'get_history returns changes and notifications sent');
+const dl = await tool('list_deliveries', {});
+assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.example.com') && dl.deliveries.length >= 2, 'list_deliveries shows devices and recent sends');
 console.log('ALL PASSED');

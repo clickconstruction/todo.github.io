@@ -1,7 +1,7 @@
 // Custom notifications: every minute the Worker's cron sends reminders whose time has come
 // (fire_at in the last 6 hours, not yet sent) as Web Push, then marks them sent. Reminders
 // on items that were completed or dropped in the meantime are marked sent without a push.
-import { sendPush } from './push.js';
+import { deliver } from './deliver.js';
 
 const inIds = (ids) => `in.(${ids.join(',')})`;
 
@@ -27,28 +27,19 @@ export async function sendDueReminders(env, rest, now = new Date()) {
   if (!due.length) return { due: 0, sent: 0 };
   const taskIds = [...new Set(due.map((n) => n.task_id).filter(Boolean))];
   const projectIds = [...new Set(due.map((n) => n.project_id).filter(Boolean))];
-  const userIds = [...new Set(due.map((n) => n.user_id))];
-  const [tasks, projects, subs] = await Promise.all([
+  const [tasks, projects] = await Promise.all([
     taskIds.length ? rest(`tasks?id=${inIds(taskIds)}&select=id,title,completed_at,dropped_at,due_at,planned_at`) : [],
     projectIds.length ? rest(`projects?id=${inIds(projectIds)}&select=id,name,status,due_at,planned_at`) : [],
-    rest(`push_subscriptions?user_id=${inIds(userIds)}&select=id,user_id,endpoint,p256dh,auth`),
   ]);
+  // Mark them first so a slow push can never cause a second send on the next run.
+  await rest(`notifications?id=${inIds(due.map((n) => n.id))}`, { method: 'PATCH', body: { sent_at: now.toISOString() } });
   let sent = 0;
-  const gone = new Set();
-  await Promise.all(due.map(async (n) => {
+  for (const n of due) {
     const item = n.task_id ? tasks.find((t) => t.id === n.task_id) : projects.find((p) => p.id === n.project_id);
     const live = item && (n.task_id ? !item.completed_at && !item.dropped_at : ['active', 'on_hold'].includes(item.status));
-    if (!live) return;
-    const msg = reminderMessage(n, item, tz);
-    await Promise.all(subs.filter((s) => s.user_id === n.user_id).map(async (s) => {
-      try {
-        const status = await sendPush(s, msg, env);
-        if (status === 404 || status === 410) gone.add(s.id);
-        else if (status >= 200 && status < 300) sent++;
-      } catch { /* one bad device shouldn't stop the rest */ }
-    }));
-  }));
-  await rest(`notifications?id=${inIds(due.map((n) => n.id))}`, { method: 'PATCH', body: { sent_at: now.toISOString() } });
-  if (gone.size) await rest(`push_subscriptions?id=${inIds([...gone])}`, { method: 'DELETE' });
+    if (!live) continue;
+    const out = await deliver(env, rest, n.user_id, reminderMessage(n, item, tz), { kind: 'reminder', task_id: n.task_id, project_id: n.project_id });
+    sent += out.delivered;
+  }
   return { due: due.length, sent };
 }

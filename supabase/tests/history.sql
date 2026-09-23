@@ -1,0 +1,32 @@
+-- Item history + push log (migration 20260926000001). One rolled-back transaction; every row should be ok = true.
+begin;
+insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','h1@test.invalid');
+create temp table r (n int generated always as identity, test text, ok boolean, detail text); grant all on r to authenticated, service_role;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000d1","role":"authenticated"}', true);
+insert into public.projects (id, name) values ('00000000-0000-0000-0000-0000000d00a1', 'P');
+insert into r (test, ok, detail) select 'creating a project works and is recorded', count(*) = 1, '' from public.item_history where project_id = '00000000-0000-0000-0000-0000000d00a1' and field = 'created';
+insert into public.tasks (id, title, project_id) values ('00000000-0000-0000-0000-0000000d0001', 'Call GVEC', '00000000-0000-0000-0000-0000000d00a1');
+update public.tasks set due_at = '2026-10-01T22:00:00Z', title = 'Call GVEC now' where id = '00000000-0000-0000-0000-0000000d0001';
+insert into public.notifications (id, task_id, kind, offset_minutes) values ('00000000-0000-0000-0000-0000000d0b01', '00000000-0000-0000-0000-0000000d0001', 'before_due', 60);
+insert into public.tags (id, name) values ('00000000-0000-0000-0000-0000000d0c01', 'Phone');
+insert into public.task_tags (task_id, tag_id) values ('00000000-0000-0000-0000-0000000d0001', '00000000-0000-0000-0000-0000000d0c01');
+delete from public.notifications where id = '00000000-0000-0000-0000-0000000d0b01';
+insert into r (test, ok, detail) select 'history: created, title, due, notification added+removed, tag',
+  (select array_agg(field order by id) from public.item_history where task_id = '00000000-0000-0000-0000-0000000d0001') = array['created','title','due_at','notification','tag','notification'], '';
+insert into r (test, ok, detail) select 'history keeps old and new values', old_value = '"Call GVEC"' and new_value = '"Call GVEC now"' and source = 'app', '' from public.item_history where field = 'title';
+do $$ begin insert into public.item_history (user_id, task_id, field) values ('00000000-0000-0000-0000-0000000000d1', '00000000-0000-0000-0000-0000000d0001', 'fake'); insert into r (test, ok, detail) values ('users cannot write history', false, ''); exception when others then insert into r (test, ok, detail) values ('users cannot write history', true, ''); end $$;
+delete from public.item_history;
+insert into r (test, ok, detail) select 'users cannot delete history', count(*) > 0, '' from public.item_history;
+insert into public.push_log (kind, title, scheduled_for) values ('test', 'Test', now() + interval '60 seconds');
+insert into r (test, ok, detail) select 'user can queue a test for 1 minute from now', count(*) = 1, '' from public.push_log;
+do $$ begin insert into public.push_log (kind, title, scheduled_for, delivered) values ('reminder', 'fake', now(), 5); insert into r (test, ok, detail) values ('users cannot forge deliveries', false, ''); exception when others then insert into r (test, ok, detail) values ('users cannot forge deliveries', true, ''); end $$;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+set local role service_role;
+update public.tasks set flagged = true where id = '00000000-0000-0000-0000-0000000d0001';
+insert into r (test, ok, detail) select 'server (MCP) changes marked agent', source = 'agent', '' from public.item_history where field = 'flagged';
+reset role;
+delete from auth.users where id = '00000000-0000-0000-0000-0000000000d1';
+insert into r (test, ok, detail) select 'account deletion still works and cascades history', not exists (select 1 from public.item_history where user_id = '00000000-0000-0000-0000-0000000000d1'), '';
+select test, ok, detail from r order by n;
+rollback;

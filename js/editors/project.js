@@ -7,6 +7,7 @@ import { locationFieldHtml, wireLocationField } from './place.js';
 import { repeatFieldHtml, wireRepeatField } from './repeatField.js';
 import { notifyFieldHtml, wireNotifyField, remindersFor, saveReminders, refreshReminders } from './notifyField.js';
 import { attachFieldHtml, wireAttachField, uploadFiles } from './attachField.js';
+import { historyFieldHtml, wireHistoryField } from './historyField.js';
 import { PROJECT_KINDS } from '../availability.js';
 import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
 import { fromDateInput, fromDateTimeInput, toDateInput, fmtStamp, HOURS } from '../dates.js';
@@ -48,7 +49,8 @@ function projectFieldsHtml(p, project) {
     ${attachFieldHtml()}
     ${project && p.completed_at ? dateTimeField('completed_at_edit', p.status === 'dropped' ? 'Dropped' : 'Completed', p.completed_at) : ''}
     ${project ? '<p class="view-sub" style="margin:0">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>' : ''}
-    ${stampsHtml(project)}`;
+    ${stampsHtml(project)}
+    ${historyFieldHtml(project)}`;
 }
 
 // Shared wiring; returns collect() → Promise<{ fields, tagIds } | null> (creates a new folder if asked).
@@ -65,6 +67,7 @@ function wireProjectForm(form, project, onTagsChange) {
   const collectRepeat = wireRepeatField(form, project || {}, onTagsChange);
   const collectReminders = wireNotifyField(form, remindersFor('project_id', project && project.id), onTagsChange);
   const collectFiles = wireAttachField(form, 'project_id', project && project.id);
+  wireHistoryField(form, 'project_id', project && project.id);
   form.addEventListener('change', (e) => {
     if (e.target.name === 'kind') $('.kind-hint', form).textContent = PROJECT_KINDS.find(([v]) => v === e.target.value)[2];
   });

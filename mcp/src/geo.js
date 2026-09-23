@@ -2,7 +2,7 @@
 //   GET or POST https://mcp.todotooling.com/geo?t=<location key>&place=<place id>&event=arrive|leave|test
 // Finds open, non-deferred actions whose effective place is that place and whose alert matches,
 // then sends a Web Push notification to the user's subscribed devices.
-import { sendPush } from './push.js';
+import { deliver } from './deliver.js';
 
 // Effective place for a task, mirroring the app (js/places.js): own, tag, group, project, project tag.
 export function makePlaceResolver({ tasks, taskTags, tags, projects, projectTags, places }) {
@@ -107,13 +107,7 @@ export async function handleGeo(request, env, ctx, { rest, sha256Hex, json }) {
     message = eventMessage(place, event, actions);
   }
 
-  const subs = await rest(`push_subscriptions?user_id=eq.${userId}&select=id,endpoint,p256dh,auth`);
-  const results = await Promise.all(subs.map(async (s) => {
-    try { return { s, status: await sendPush(s, message, env) }; } catch (e) { return { s, status: 0, error: e.message }; }
-  }));
-  const gone = results.filter((r) => r.status === 404 || r.status === 410).map((r) => r.s.id);
-  if (gone.length) ctx.waitUntil(rest(`push_subscriptions?id=in.(${gone.join(',')})`, { method: 'DELETE' }).catch(() => {}));
-  const sent = results.filter((r) => r.status >= 200 && r.status < 300).length;
-  return json({ place: place && place.name, event, actions: actions.map((t) => t.title), devices: subs.length, sent,
-    ...(subs.length ? {} : { note: 'No devices have notifications turned on. Open Todo Tooling → Nearby → Alerts on your phone.' }) });
+  const out = await deliver(env, rest, userId, message, { kind: event === 'test' ? 'test' : 'place', task_id: actions.length === 1 ? actions[0].id : null });
+  return json({ place: place && place.name, event, actions: actions.map((t) => t.title), devices: out.devices, sent: out.delivered, results: out.results,
+    ...(out.devices ? {} : { note: 'No devices have notifications turned on. Open Todo Tooling → Alerts on your phone.' }) });
 }

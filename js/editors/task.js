@@ -10,6 +10,7 @@ import { placeFor } from '../places.js';
 import { repeatFieldHtml, wireRepeatField } from './repeatField.js';
 import { notifyFieldHtml, wireNotifyField, remindersFor } from './notifyField.js';
 import { attachFieldHtml, wireAttachField } from './attachField.js';
+import { historyFieldHtml, wireHistoryField } from './historyField.js';
 import { skipOccurrence } from '../data.js';
 
 const notesAreLong = (text) => text.length > 280 || text.split('\n').length > 8;
@@ -43,7 +44,8 @@ function taskFieldsHtml(t, task) {
         ${t.completed_at ? dateTimeField('completed_at_edit', '✓ Completed', t.completed_at) : '<b>✓ Completed when you save</b>'}
         <label>Completion note<textarea name="completion_note" placeholder="Outcome, who you spoke to, what's next…">${esc(t.completion_note || '')}</textarea></label></div>
       <div data-dropped-box ${t.dropped_at && !t.completed_at ? '' : 'hidden'}>${t.dropped_at ? dateTimeField('dropped_at_edit', 'Dropped', t.dropped_at) : ''}</div>
-      ${stampsHtml(task)}` : ''}`;
+      ${stampsHtml(task)}
+      ${historyFieldHtml(task)}` : ''}`;
 }
 
 const secondaryButtons = (task) => `
@@ -76,6 +78,7 @@ function wireTaskForm(form, t, task, onTagsChange) {
   const collectRepeat = wireRepeatField(form, t, onTagsChange);
   const collectReminders = wireNotifyField(form, remindersFor('task_id', task && task.id), onTagsChange);
   const collectFiles = wireAttachField(form, 'task_id', task && task.id);
+  wireHistoryField(form, 'task_id', task && task.id);
   const skip = $('[data-skip-occurrence]', form);
   if (skip && task) skip.onclick = () => skipOccurrence(task, () => { const sheet = form.closest('dialog'); if (sheet) sheet.close(); });
   if (form.elements.status) {

@@ -1,22 +1,27 @@
 // Settings: agent access tokens (MCP), email-capture senders, account.
 import { sb, app, esc, run, toast, openSheet, $ } from '../state.js';
-import { fmtDate } from '../dates.js';
+import { fmtDate, fmtStamp } from '../dates.js';
 
 const MCP_URL = 'https://mcp.todotooling.com/mcp';
 const CAPTURE_EMAIL = 'inbox@todotooling.com';
 let apiTokens = null;
 let emailSenders = [];
+let devices = [];
+let deliveries = [];
+let testState = null; // { phase: 'counting'|'waiting'|'done', until, id, text }
 let loading = false;
 
-export const resetSettings = () => { apiTokens = null; emailSenders = []; };
+export const resetSettings = () => { apiTokens = null; emailSenders = []; devices = []; deliveries = []; };
 
 async function loadSettings() {
   if (loading) return;
   loading = true;
   try {
-    [apiTokens, emailSenders] = await Promise.all([
+    [apiTokens, emailSenders, devices, deliveries] = await Promise.all([
       run(sb.from('api_tokens').select('id,name,token_hint,last_used_at,created_at,scope').order('created_at')),
       run(sb.from('email_senders').select('id,email').order('created_at')),
+      run(sb.from('push_subscriptions').select('id,device,created_at,endpoint').order('created_at', { ascending: false })),
+      run(sb.from('push_log').select('*').order('created_at', { ascending: false }).limit(25)),
     ]);
   } finally { loading = false; }
   app.render();
@@ -34,6 +39,7 @@ export function viewSettings() {
     <p class="view-sub">Tokens let AI agents like Claude read and update your todos through <code>${MCP_URL}</code>. Agent tokens have full access to your account; location keys (from Nearby → Alerts) can only trigger alerts. Revoke any you no longer use.</p>
     <button class="btn primary" data-act="new-token">Create token</button>
     ${apiTokens === null ? '<p class="empty">Loading…</p>' : rows ? `<ul class="list" style="margin-top:12px">${rows}</ul>` : '<p class="empty">No tokens yet.</p>'}
+    ${notificationsSection()}
     <h2 class="section-title">Email capture</h2>
     <p class="view-sub">Forward or send anything to <b>${CAPTURE_EMAIL}</b> and it lands in your Inbox (subject becomes the title, body the notes). Only mail from these addresses is accepted:</p>
     <ul class="list">${emailSenders.map((e) => `<li class="row" style="cursor:default"><div class="row-main"><div class="row-title">${esc(e.email)}</div></div>
@@ -80,5 +86,103 @@ export async function addSender(form) {
   const email = form.elements.email.value.trim().toLowerCase();
   if (!email) return;
   await run(sb.from('email_senders').insert({ email }));
+  await loadSettings();
+}
+
+// ---------- Notifications: devices, tests, delivery history ----------
+const PUSH_TEST_URL = 'https://mcp.todotooling.com/push/test';
+const KIND_ICON = { test: '🔔', reminder: '⏰', place: '📍' };
+
+function resultText(d) {
+  if (!d.sent_at) return `<span class="hint">Queued for ${esc(new Date(d.scheduled_for).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }))}</span>`;
+  if (!d.devices) return '<span class="warn">No devices to send to</span>';
+  return (d.results || []).map((r) => (r.status >= 200 && r.status < 300
+    ? `<span class="ok">✓ ${esc(r.device)}: accepted by ${esc(r.service.includes('apple') ? 'Apple' : r.service.includes('google') ? 'Google' : r.service.includes('mozilla') ? 'Mozilla' : r.service)}</span>`
+    : `<span class="warn">✕ ${esc(r.device)}: ${r.status || 'error'} ${esc(r.reason || '')}</span>`)).join('<br>');
+}
+
+function notificationsSection() {
+  const list = devices.map((d) => `<li class="row" style="cursor:default"><div class="row-main"><div class="row-title">${d.device === 'iPhone' ? '📱' : '💻'} ${esc(d.device)}</div>
+      <div class="row-meta"><span>Added ${esc(fmtDate(d.created_at))}</span></div></div>
+      <button class="btn small danger" data-remove-device="${d.id}">Remove</button></li>`).join('');
+  const status = testState ? `<div class="test-status" data-test-status>${testStatusHtml()}</div>` : '<div class="test-status" data-test-status hidden></div>';
+  const history = deliveries.map((d) => `<li><div><b>${KIND_ICON[d.kind] || '🔔'} ${esc(d.title || d.kind)}</b> <span class="hint">${esc(fmtStamp(d.sent_at || d.created_at))}</span></div>
+      <div class="delivery-result">${resultText(d)}</div></li>`).join('');
+  return `<h2 class="section-title">Notifications</h2>
+    <p class="view-sub">Devices that get reminders and place alerts. Set up a phone from <a href="#alerts">Alerts</a>.</p>
+    ${list ? `<ul class="list">${list}</ul>` : '<p class="empty small">No devices yet. Open Todo Tooling on your iPhone → Alerts → Turn on alerts.</p>'}
+    <div class="test-buttons"><button class="btn" data-act="push-test-now" ${devices.length ? '' : 'disabled'}>Send test now</button>
+      <button class="btn" data-act="push-test-later" ${devices.length ? '' : 'disabled'}>Send test in 1 minute</button></div>
+    ${status}
+    <p class="hint">Accepted by Apple but nothing on your phone? Check that no Focus (Sleep, Do Not Disturb) is on, and that iPhone Settings → Notifications → Todo allows notifications.</p>
+    <details class="delivery-log" ${history ? 'open' : ''}><summary>Delivery history</summary>${history ? `<ul>${history}</ul>` : '<p class="hint">Nothing sent yet.</p>'}</details>`;
+}
+
+function testStatusHtml() {
+  if (!testState) return '';
+  if (testState.phase === 'counting') {
+    const s = Math.max(0, Math.ceil((testState.until - Date.now()) / 1000));
+    return `<b>⏳ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}</b> Lock your phone now. The notification arrives in the background.`;
+  }
+  if (testState.phase === 'waiting') return '<b>📨 Sending…</b> (the server sends queued tests within a minute)';
+  return testState.text;
+}
+
+// Update just the status box every second, so a countdown survives other re-renders.
+let ticker = null;
+function tick() {
+  const el = document.querySelector('[data-test-status]');
+  if (el) { el.hidden = !testState; el.innerHTML = testStatusHtml(); }
+  if (testState && testState.phase === 'counting' && Date.now() >= testState.until) testState.phase = 'waiting';
+}
+function startTicker() { clearInterval(ticker); ticker = setInterval(() => { tick(); if (!testState || testState.phase === 'done') clearInterval(ticker); }, 1000); tick(); }
+
+async function callPushTest(delay) {
+  if (window.__pushTest) return window.__pushTest(delay); // tests
+  const { data } = await sb.auth.getSession();
+  const res = await fetch(PUSH_TEST_URL, { method: 'POST', headers: { Authorization: `Bearer ${data.session.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ delay_seconds: delay }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Server said ${res.status}`);
+  return body;
+}
+
+export async function pushTestNow() {
+  testState = { phase: 'waiting' };
+  startTicker();
+  try {
+    const out = await callPushTest(0);
+    testState = { phase: 'done', text: out.devices ? resultText({ sent_at: 1, devices: out.devices, results: out.results }) : 'No devices to send to.' };
+  } catch (e) { testState = { phase: 'done', text: `<span class="warn">${esc(e.message)}</span>` }; }
+  await loadSettings();
+}
+
+export async function pushTestLater() {
+  try {
+    const out = await callPushTest(60);
+    testState = { phase: 'counting', until: Date.now() + 60e3, id: out.queued };
+    startTicker();
+    // Watch for the queued row to be sent, then show its result.
+    const started = Date.now();
+    const poll = setInterval(async () => {
+      if (!testState || testState.id !== out.queued) { clearInterval(poll); return; }
+      const rows = await run(sb.from('push_log').select('*').eq('id', out.queued));
+      if (rows[0] && rows[0].sent_at) {
+        clearInterval(poll);
+        testState = { phase: 'done', text: resultText(rows[0]) };
+        tick();
+        await loadSettings();
+      } else if (Date.now() - started > 4 * 60e3) {
+        clearInterval(poll);
+        testState = { phase: 'done', text: '<span class="warn">Not sent after 3 minutes. The server may be busy; try Send test now.</span>' };
+        tick();
+      }
+    }, window.__pollMs || 5000);
+  } catch (e) { testState = { phase: 'done', text: `<span class="warn">${esc(e.message)}</span>` }; startTicker(); }
+  app.render();
+}
+
+export async function removeDevice(id) {
+  if (!confirm('Stop sending notifications to this device? You can turn them on again from Alerts on that device.')) return;
+  await run(sb.from('push_subscriptions').delete().eq('id', id));
   await loadSettings();
 }

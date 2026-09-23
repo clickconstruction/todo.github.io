@@ -13,7 +13,7 @@ import { onSearchInput } from './views/search.js';
 import { onDoneFilterChange } from './views/done.js';
 import { setFilter } from './filter.js';
 import { openSheet } from './state.js';
-import { createToken, revokeToken, removeSender, addSender, resetSettings } from './views/settings.js';
+import { createToken, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
 import { enableAlerts } from './alerts.js';
 import { subscribePush, testAlert, copyGeoUrl, resetAlerts, turnOnAlerts, replaceGeoKey, openAutomationGuide, hideNudge, primeAlerts, isIOS, isStandalone } from './views/alerts.js';
@@ -50,6 +50,8 @@ const ACTIONS = {
   'test-alert': testAlert,
   'toggle-archived-places': () => { app.showArchivedPlaces = !app.showArchivedPlaces; render(); },
   'new-token': createToken,
+  'push-test-now': pushTestNow,
+  'push-test-later': pushTestLater,
   'sign-out': () => sb.auth.signOut(),
 };
 
@@ -118,6 +120,7 @@ const CLICKS = [
   ['[data-edit-folder]', (el) => openFolderEditor(byId(db.folders, el.dataset.editFolder))],
   ['[data-add-project]', (el) => openProjectEditor(null, { folder_id: el.dataset.addProject })],
   ['[data-edit-project]', (el) => (isWide() ? select('project', el.dataset.editProject) : openProjectEditor(byId(db.projects, el.dataset.editProject)))],
+  ['[data-remove-device]', (el) => removeDevice(el.dataset.removeDevice)],
   ['[data-remove-sender]', (el) => removeSender(el.dataset.removeSender)],
   ['[data-revoke]', (el) => revokeToken(el.dataset.revoke)],
   ['[data-done-task]', (el) => inspectOrEdit(el.dataset.doneTask)],
@@ -196,7 +199,7 @@ document.addEventListener('keydown', (e) => {
 });
 // Pick up changes made on another device when the app comes back to the foreground.
 document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible' && app.user) { await flushOutbox(); await loadAll(); render(); }
+  if (document.visibilityState === 'visible' && app.user && !window.__noRefresh) { await flushOutbox(); await loadAll(); render(); } // tests pause this
 });
 window.addEventListener('online', async () => { if (app.user) { await flushOutbox(); render(); } });
 
