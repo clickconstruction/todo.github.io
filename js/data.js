@@ -65,24 +65,58 @@ export async function capture(title, extra = {}) {
   app.render();
 }
 
+// Rows the database created on its own since `since` (the next occurrence of a repeating
+// action or project, with its tags); merged into db. Returns the new tasks and projects.
+export async function pullNewSince(since) {
+  const [tasks, projects] = await Promise.all([
+    run(sb.from('tasks').select('*').gte('created_at', since)),
+    run(sb.from('projects').select('*').gte('created_at', since)),
+  ]);
+  const freshT = tasks.filter((t) => !byId(db.tasks, t.id));
+  const freshP = projects.filter((p) => !byId(db.projects, p.id));
+  db.tasks.push(...freshT);
+  db.projects.push(...freshP);
+  const [tt, pt] = await Promise.all([
+    freshT.length ? run(sb.from('task_tags').select('*').in('task_id', freshT.map((t) => t.id))) : [],
+    freshP.length ? run(sb.from('project_tags').select('*').in('project_id', freshP.map((p) => p.id))) : [],
+  ]);
+  db.taskTags.push(...tt);
+  db.projectTags.push(...pt);
+  return { tasks: freshT, projects: freshP };
+}
+
+const fmtNext = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
 export async function setCompleted(task, done) {
   const completed_at = done ? new Date().toISOString() : null;
+  const repeating = done && task.repeat_rule;
+  const since = new Date(Date.now() - 2000).toISOString();
   const project = task.project_id && byId(db.projects, task.project_id);
   const projectWasOpen = project && ['active', 'on_hold'].includes(project.status);
   const [row] = await run(sb.from('tasks').update({ completed_at }).eq('id', task.id).select());
   task = syncRow('tasks', task, row);
+  const next = repeating ? (await pullNewSince(since)).tasks.find((t) => t.title === task.title && !t.completed_at) : null;
   await afterTaskWrite(task);
   app.doneCache = null;
   app.render();
   if (!done) return;
   // The database may have completed the project too ("complete with last action").
   const projectDone = projectWasOpen && byId(db.projects, task.project_id).status === 'completed';
-  toast(projectDone ? `Completed · “${project.name}” is done too` : 'Completed',
-    [{ label: 'Add note', run: () => openCompletionNote(task) }, { label: 'Undo', run: () => undoComplete(task, projectDone && project) }]);
+  const nextAt = next && (next.due_at || next.planned_at || next.defer_at);
+  const msg = projectDone ? `Completed · “${project.name}” is done too` : next ? `Completed · next one ${nextAt ? fmtNext(nextAt) : 'is ready'}` : 'Completed';
+  toast(msg, [{ label: 'Add note', run: () => openCompletionNote(task) },
+    { label: 'Undo', run: () => undoComplete(task, projectDone && project, next, repeating) }]);
 }
 
-async function undoComplete(task, reopenProject) {
+// Undo also retires the next occurrence a repeat created (dropped, since nothing is deleted)
+// and gives the reopened action its repeat back.
+async function undoComplete(task, reopenProject, next, rule) {
+  if (next) {
+    const [r] = await run(sb.from('tasks').update({ dropped_at: new Date().toISOString() }).eq('id', next.id).select());
+    syncRow('tasks', next, r);
+  }
   await setCompleted(task, false);
+  if (rule) await updateTask(byId(db.tasks, task.id) || task, { repeat_rule: rule });
   if (reopenProject) await updateProject(byId(db.projects, reopenProject.id), { status: 'active' });
 }
 
@@ -148,9 +182,12 @@ export async function saveTask(task, fields, tagIds) {
   // Anything with no project, no tags and no parent action lives in the Inbox, so nothing falls out of every list.
   fields.in_inbox = !(fields.project_id || fields.parent_id || tagIds.length);
   let row;
+  const since = new Date(Date.now() - 2000).toISOString();
+  const completesRepeat = task && !task.completed_at && fields.completed_at && (fields.repeat_rule || task.repeat_rule);
   if (task) {
     [row] = await run(sb.from('tasks').update(fields).eq('id', task.id).select());
     syncRow('tasks', task, row);
+    if (completesRepeat) await pullNewSince(since); // the database made the next occurrence
   } else {
     [row] = await run(sb.from('tasks').insert(fields).select());
     db.tasks.push(row);
@@ -199,6 +236,20 @@ export async function createTag() {
   app.render();
 }
 
+// Move a repeating action to its next occurrence without completing it (database function).
+export async function skipOccurrence(task, after = () => {}) {
+  const before = { defer_at: task.defer_at, planned_at: task.planned_at, due_at: task.due_at, repeat_rule: task.repeat_rule };
+  const row = await run(sb.rpc('repeat_skip', { task_id: task.id }));
+  const saved = syncRow('tasks', task, Array.isArray(row) ? row[0] : row);
+  after();
+  app.render();
+  toast('Skipped to the next occurrence', { label: 'Undo', run: async () => {
+    const [r] = await run(sb.from('tasks').update(before).eq('id', saved.id).select());
+    syncRow('tasks', saved, r);
+    app.render();
+  } });
+}
+
 export async function updateTag(tag, fields) {
   const [row] = await run(sb.from('tags').update(fields).eq('id', tag.id).select());
   syncRow('tags', tag, row);
@@ -217,8 +268,15 @@ export async function insertFolder(name) {
 }
 
 export async function updateProject(project, fields) {
+  const since = new Date(Date.now() - 2000).toISOString();
+  const repeating = project.repeat_rule && fields.status === 'completed' && project.status !== 'completed';
   const [row] = await run(sb.from('projects').update(fields).eq('id', project.id).select());
   syncRow('projects', project, row);
+  if (repeating) {
+    const { projects } = await pullNewSince(since);
+    const copy = projects[0];
+    if (copy) toast(`Completed · “${copy.name}” starts again${copy.due_at || copy.defer_at ? ` ${fmtNext(copy.due_at || copy.defer_at)}` : ''}`);
+  }
   app.render();
   return row;
 }

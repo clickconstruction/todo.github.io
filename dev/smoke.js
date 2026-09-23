@@ -36,7 +36,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity };
+  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -803,4 +803,100 @@ async function parity(check) {
   f.requestSubmit();
   await wait(200);
   check('backdated project completion saved', new Date(proj('p5').completed_at).getTime() === new Date('2026-07-04T10:00').getTime(), proj('p5').completed_at);
+}
+
+// Repeat: presets and custom rules in the editor, completing makes the next occurrence,
+// skip, undo, groups, repeating projects.
+async function repeat(check) {
+  const { db } = await import('/js/state.js');
+  const task = (id) => db.tasks.find((t) => t.id === id);
+  const open = (title) => db.tasks.filter((t) => t.title === title && !t.completed_at && !t.dropped_at);
+  const { openEditor } = await import('/js/editors/task.js');
+  const { describe, nextOccurrence } = await import('/js/repeat.js');
+
+  // Custom: every 2 weeks on Mon + Thu.
+  openEditor(task('t2')); // planned today 9am
+  let f = $('#editor');
+  check('repeat field defaults to Never', f.elements.repeat_preset.value === '' && $('.repeat-custom', f).hidden);
+  f.elements.repeat_preset.value = 'custom';
+  f.elements.repeat_preset.dispatchEvent(new Event('change', { bubbles: true }));
+  check('custom panel opens', !$('.repeat-custom', f).hidden);
+  f.elements.repeat_every.value = '2';
+  f.elements.repeat_unit.value = 'week';
+  f.elements.repeat_unit.dispatchEvent(new Event('change', { bubbles: true }));
+  $$('input[name=repeat_wd]', f).forEach((x) => { x.checked = ['1', '4'].includes(x.value); });
+  $('input[name=repeat_wd]', f).dispatchEvent(new Event('change', { bubbles: true }));
+  check('summary reads naturally', has('#editor [data-repeat-summary]', 'every 2 weeks on mon, thu', 'next one'), text('#editor [data-repeat-summary]'));
+  f.requestSubmit();
+  await wait(200);
+  const rule = task('t2').repeat_rule;
+  check('custom rule saved', rule && rule.every === 2 && rule.unit === 'week' && rule.weekdays.join() === '1,4' && rule.from === 'assigned' && rule.tz, JSON.stringify(rule));
+  await go('#project/p1');
+  check('row shows 🔁 with the rule as its tooltip', !!$('[data-task="t2"] .meta-repeat') && /every 2 weeks/i.test($('[data-task="t2"] .meta-repeat').title));
+
+  // Preset: every day, then complete → next occurrence tomorrow.
+  openEditor(task('t3')); // due today
+  f = $('#editor');
+  f.elements.repeat_preset.value = 'daily';
+  f.elements.repeat_preset.dispatchEvent(new Event('change', { bubbles: true }));
+  f.requestSubmit();
+  await wait(200);
+  check('preset saved', task('t3').repeat_rule && task('t3').repeat_rule.unit === 'day');
+  const dueBefore = new Date(task('t3').due_at);
+  await go('#project/p1');
+  $('[data-check="t3"]').click();
+  await wait(300);
+  const nexts = open('Get plans released');
+  check('completing makes one next occurrence', nexts.length === 1 && nexts[0].id !== 't3', nexts.length);
+  check('next occurrence is a day later, same time', nexts[0] && new Date(nexts[0].due_at) - dueBefore === 86400000);
+  check('completed one stops repeating', task('t3').completed_at && !task('t3').repeat_rule);
+  check('toast says when the next one is', has('#toast', 'next one'));
+  check('next occurrence keeps flag and repeat', nexts[0] && nexts[0].flagged && nexts[0].repeat_rule && nexts[0].repeat_rule.n === 2);
+
+  // Undo retires the new occurrence and restores the repeat.
+  [...$$('#toast button')].find((b) => b.textContent === 'Undo').click();
+  await wait(400);
+  check('undo reopens it with its repeat', !task('t3').completed_at && task('t3').repeat_rule);
+  check('undo drops the extra occurrence (never deleted)', open('Get plans released').length === 1 && db.tasks.some((t) => t.title === 'Get plans released' && t.dropped_at));
+
+  // Skip.
+  openEditor(task('t3'));
+  f = $('#editor');
+  check('skip button on repeating actions', !!$('[data-skip-occurrence]', f));
+  $('[data-skip-occurrence]', f).click();
+  await wait(300);
+  check('skip moves it to the next occurrence, still open', !task('t3').completed_at && new Date(task('t3').due_at) - dueBefore >= 86400000 && task('t3').repeat_rule.n === 2);
+
+  // Repeating group returns with its sub-actions.
+  openEditor(task('t6'));
+  f = $('#editor');
+  f.elements.repeat_preset.value = 'monthly';
+  f.elements.repeat_preset.dispatchEvent(new Event('change', { bubbles: true }));
+  f.requestSubmit();
+  await wait(200);
+  window.confirm = () => true;
+  await go('#project/p2');
+  $('[data-check="t6"]').click();
+  await wait(300);
+  const g = open('Inside deadmans switch')[0];
+  check('repeating group comes back with its sub-actions open', g && db.tasks.filter((c) => c.parent_id === g.id && !c.completed_at).length === 2);
+
+  // Repeating project.
+  const { openProjectEditor } = await import('/js/editors/project.js');
+  openProjectEditor(db.projects.find((p) => p.id === 'p3'));
+  f = $('#project-form');
+  check('projects have a repeat field', !!f.elements.repeat_preset);
+  f.elements.repeat_preset.value = 'yearly';
+  f.elements.repeat_preset.dispatchEvent(new Event('change', { bubbles: true }));
+  f.requestSubmit();
+  await wait(200);
+  const { updateProject } = await import('/js/data.js');
+  await updateProject(db.projects.find((p) => p.id === 'p3'), { status: 'completed' });
+  await wait(200);
+  const copies = db.projects.filter((p) => p.name === 'Driveway Trailer');
+  check('repeating project starts a fresh copy with its actions', copies.length === 2 && copies.some((p) => p.status === 'active' && db.tasks.some((t) => t.project_id === p.id && !t.completed_at)));
+
+  // Library: summaries and end conditions.
+  check('describe: weekdays', describe({ every: 1, unit: 'week', weekdays: [1, 2, 3, 4, 5] }) === 'Every week on weekdays');
+  check('end after N: last occurrence has no next', nextOccurrence({ due_at: new Date().toISOString(), repeat_rule: { every: 1, unit: 'day', end_count: 3, n: 3 } }) === null);
 }

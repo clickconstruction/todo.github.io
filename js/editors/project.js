@@ -4,6 +4,7 @@ import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, bySort, PROJ
 import { insertFolder, updateProject, setLinks } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { locationFieldHtml, wireLocationField } from './place.js';
+import { repeatFieldHtml, wireRepeatField } from './repeatField.js';
 import { PROJECT_KINDS } from '../availability.js';
 import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
 import { fromDateInput, fromDateTimeInput, toDateInput, fmtStamp, HOURS } from '../dates.js';
@@ -31,9 +32,10 @@ function projectFieldsHtml(p, project) {
     ${dateField('planned_at', 'Planned', p.planned_at)}
     ${dateField('due_at', 'Due', p.due_at)}
     ${estimateField(p.estimate_minutes)}
+    ${repeatFieldHtml(p)}
     <fieldset class="review-block"><legend>Review</legend>
       ${project ? dateField('next_review_at', 'Next review', p.next_review_at) : ''}
-      <label>Review every<span class="review-every">
+      <label class="review-every">Review every<span class="review-every">
         <input type="number" name="review_every" min="1" max="999" inputmode="numeric" value="${p.review_every || 1}" aria-label="Review every">
         <select name="review_unit" aria-label="Unit">${REVIEW_UNITS.map(([v, l]) => `<option value="${v}" ${(p.review_unit || 'week') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></span></label>
       ${project ? `<p class="hint" style="margin:0">Last reviewed: ${p.last_reviewed_at ? esc(fmtStamp(p.last_reviewed_at)) : 'never'}</p>` : ''}
@@ -56,6 +58,7 @@ function wireProjectForm(form, project, onTagsChange) {
   const selectedTags = wireTagPicker(form, project ? db.projectTags.filter((x) => x.project_id === project.id).map((x) => x.tag_id) : [], onTagsChange);
   const collectLocation = wireLocationField(form, onTagsChange);
   wireQuickButtons(form);
+  const collectRepeat = wireRepeatField(form, project || {}, onTagsChange);
   form.addEventListener('change', (e) => {
     if (e.target.name === 'kind') $('.kind-hint', form).textContent = PROJECT_KINDS.find(([v]) => v === e.target.value)[2];
   });
@@ -76,6 +79,7 @@ function wireProjectForm(form, project, onTagsChange) {
       estimate_minutes: f.get('estimate_minutes') === '' ? null : Math.max(0, Math.round(Number(f.get('estimate_minutes')))),
       review_every: Math.min(999, Math.max(1, Math.round(Number(f.get('review_every')) || 1))),
       review_unit: f.get('review_unit') || 'week',
+      repeat_rule: collectRepeat(),
     });
     // Send the review date only when it was changed here, so an untouched date keeps following the cadence.
     if (project && f.has('next_review_at') && f.get('next_review_at') !== toDateInput(project.next_review_at)) {

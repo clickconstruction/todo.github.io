@@ -450,3 +450,19 @@ h1.review { color: #3b82f6; }
 .review-every { display: flex; gap: 8px; align-items: center; }
 .review-every input { width: 5.5em; }
 .review-every select { width: auto; flex: 1; }
+
+/* Repeat */
+.repeat-field { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 12px; margin: 0; display: grid; gap: 10px; min-width: 0; }
+.repeat-field legend { font-size: 13px; font-weight: 600; color: var(--muted); padding: 0 4px; }
+.repeat-custom { display: grid; gap: 10px; }
+.repeat-custom[hidden], .weekday-picker[hidden] { display: none; }
+.weekday-picker { display: flex; gap: 4px; }
+.weekday-picker label { flex: 1; }
+.weekday-picker input { position: absolute; opacity: 0; pointer-events: none; }
+.weekday-picker span { display: block; text-align: center; padding: 7px 0; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text); }
+.weekday-picker input:checked + span { background: var(--accent); border-color: var(--accent); color: #fff; }
+.repeat-summary { margin: 0; }
+.review-every input[hidden] { display: none; }
+.meta-repeat { opacity: .85; }
+.sheet label.review-every, .inspector-form label.review-every { display: flex; align-items: center; gap: 8px; }
+.sheet .review-every > .review-every { display: flex; gap: 8px; flex: 1; }

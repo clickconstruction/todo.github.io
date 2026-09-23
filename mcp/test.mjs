@@ -14,6 +14,8 @@ globalThis.fetch = async (url, init = {}) => {
     return new Response(JSON.stringify({ places: [{ id: 'gp1', displayName: { text: 'The Home Depot' }, formattedAddress: '5445 W Alabama St, Houston, TX', location: { latitude: 29.7351, longitude: -95.4710 } }] }), { status: 200 });
   }
   if (String(url).startsWith('https://push.example')) { pushed.push({ url: String(url), init }); return new Response(null, { status: String(url).includes('gone') ? 410 : 201 }); }
+  const rpcCalls = globalThis.rpcCalls = globalThis.rpcCalls || [];
+  if (String(url).includes('/rest/v1/rpc/')) { rpcCalls.push({ fn: String(url).split('/rpc/')[1], body: JSON.parse(init.body) }); return new Response('{}', { status: 200 }); }
   const u = new URL(url); const table = u.pathname.split('/').pop();
   const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','or'].includes(k));
   const ors = [...u.searchParams].filter(([k]) => k === 'or').map(([, v]) => v.slice(1, -1).match(/[a-z_]+\.(?:ilike\.\*[^*]*\*|in\.\([^)]*\)|not\.is\.null|is\.null|(?:lt|lte|gte|gt|eq)\.[^,)]+)/g) || []);
@@ -316,4 +318,21 @@ assert(backT.status === 'completed' && backT.completed_at.startsWith('2026-08-30
 const droppedT = await tool('update_task', { id: kitchenTask.id, dropped_at: '2026-08-31T15:00:00Z' });
 assert(droppedT.status === 'dropped' && droppedT.dropped_at === '2026-08-31T15:00:00.000Z' && !droppedT.completed_at, 'update_task dropped_at backdates a drop');
 assert(backT.changed_at !== undefined && backT.created_at, 'tasks report created_at / changed_at');
+
+// ---------- repeat via MCP ----------
+const rep = await tool('capture', { title: 'Water the lawn', repeat: { every: 2, unit: 'week', weekdays: [4, 1, 1] }, due: inWeek(1) });
+assert(rep.repeat && rep.repeat.every === 2 && rep.repeat.weekdays.join() === '1,4' && rep.repeat.from === 'assigned' && rep.repeat.tz === 'America/Chicago', 'capture with a repeat rule (weekdays cleaned, tz set)');
+assert(rep.repeat.summary === 'Every 2 weeks on Mon, Thu', `repeat summary: ${rep.repeat.summary}`);
+let repErr = null; try { await tool('update_task', { id: rep.id, repeat: { every: 1, unit: 'fortnight' } }); } catch (x) { repErr = x.message; }
+assert(/repeat.unit/.test(repErr || ''), 'bad repeat unit rejected');
+const repC = await tool('update_task', { id: rep.id, repeat: { every: 3, unit: 'month', from: 'completion', end_count: 4 } });
+assert(repC.repeat.summary === 'Every 3 months, after completion (1 of 4)', `edit repeat: ${repC.repeat.summary}`);
+await tool('update_task', { id: rep.id, skip_occurrence: true });
+const skipCall = globalThis.rpcCalls.find((c) => c.fn === 'repeat_skip');
+assert(skipCall && skipCall.body.task_id === rep.id && skipCall.body.owner === UID, 'skip_occurrence calls repeat_skip scoped to the owner');
+let skipErr = null; try { await tool('update_task', { id: kitchenTask.id, skip_occurrence: true }); } catch (x) { skipErr = x.message; }
+assert(/repeating/.test(skipErr || ''), 'skip on a non-repeating action is refused');
+assert(!(await tool('update_task', { id: rep.id, repeat: null })).repeat, 'repeat: null stops repeating');
+const repP = await tool('create_project', { name: 'Monthly close', repeat: { every: 1, unit: 'month' }, due: inWeek(5) });
+assert(repP.repeat && repP.repeat.summary === 'Every month', 'projects take a repeat rule');
 console.log('ALL PASSED');

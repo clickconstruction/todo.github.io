@@ -15,6 +15,7 @@ const INSTRUCTIONS = `Todo Tooling is the user's GTD system. Capture anything ne
 Clarify inbox items with update_task: give each a project and/or tags (contexts like "Laptop", people like "Waiting : Hiro"); an item leaves the Inbox once it has a project or tag.
 Use planned for when the user intends to work on something and due only for hard deadlines; flagged means "important now". Dates are YYYY-MM-DD in the user's timezone.
 Never complete, reschedule or re-file tasks the user did not ask you to change.
+Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 For a weekly review: call list_review, go through each project with the user (use its hints), make the changes they want, then mark_reviewed.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
 Places: an action, tag or project can have a place (a saved location) plus an optional location_alert (arrive, leave or nearby) and radius. Actions inherit a place from their tags, group, project or project tags. Pass place as a saved place's name or id, or as an address/business to look up (it is saved as a new place). Use list_nearby with the user's coordinates to find what can be done nearby. Places are archived, never deleted.`;
@@ -269,6 +270,7 @@ class Api {
       project_tags: pLinks.filter((l) => l.project_id === t.project_id).map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel),
       estimate_minutes: t.estimate_minutes ?? undefined,
       place: placeSummary(placeOf(t)),
+      repeat: t.repeat_rule ? { ...t.repeat_rule, summary: describeRepeat(t.repeat_rule) } : undefined,
       in_inbox: t.in_inbox,
       status: t.completed_at ? 'completed' : t.dropped_at ? 'dropped' : 'open',
       flagged: t.flagged,
@@ -414,6 +416,11 @@ const TOOLS = [
         due: { type: 'string', description: 'YYYY-MM-DD hard deadline only' },
         defer: { type: 'string', description: 'YYYY-MM-DD (hidden until then)' },
         estimate_minutes: { type: 'integer', description: 'How long it takes, in minutes' },
+        repeat: {
+          type: ['object', 'null'],
+          description: 'Repeat rule, or null to stop repeating. {every, unit: day|week|month|year, weekdays?: [0-6] (Sun=0, with unit week), from?: assigned|completion (default assigned = fixed schedule), end_count?, end_until?: YYYY-MM-DD}. Completing it creates the next occurrence.',
+          properties: { every: { type: 'integer' }, unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] }, weekdays: { type: 'array', items: { type: 'integer' } }, from: { type: 'string', enum: ['assigned', 'completion'] }, end_count: { type: 'integer' }, end_until: { type: 'string' } },
+        },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
@@ -430,7 +437,7 @@ const TOOLS = [
         body.sort = sib.length ? (sib[0].sort || 0) + 1 : 0;
       }
       const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body });
-      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m'].includes(k) && v !== undefined));
+      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m', 'repeat'].includes(k) && v !== undefined));
       if (!Object.keys(fields).length) return (await api.shape([row]))[0];
       return TOOLS.find((t) => t.name === 'update_task').run(api, { id: row.id, ...fields });
     },
@@ -682,6 +689,12 @@ const TOOLS = [
         completed_at: { type: 'string', description: 'When it was completed (ISO time or YYYY-MM-DD), to backdate; implies status completed' },
         dropped_at: { type: 'string', description: 'When it was dropped (ISO time or YYYY-MM-DD), to backdate; implies status dropped' },
         estimate_minutes: { type: ['integer', 'null'], description: 'How long it takes, in minutes; null to clear' },
+        repeat: {
+          type: ['object', 'null'],
+          description: 'Repeat rule, or null to stop repeating. {every, unit: day|week|month|year, weekdays?: [0-6] (Sun=0, with unit week), from?: assigned|completion (default assigned = fixed schedule), end_count?, end_until?: YYYY-MM-DD}. Completing it creates the next occurrence.',
+          properties: { every: { type: 'integer' }, unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] }, weekdays: { type: 'array', items: { type: 'integer' } }, from: { type: 'string', enum: ['assigned', 'completion'] }, end_count: { type: 'integer' }, end_until: { type: 'string' } },
+        },
+        skip_occurrence: { type: 'boolean', description: 'Move a repeating action to its next occurrence without completing it' },
         move: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'Reorder among its siblings (same project and parent). Order decides the next action in sequential projects.' },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
@@ -702,6 +715,7 @@ const TOOLS = [
       if (a.completion_note !== undefined) patch.completion_note = String(a.completion_note).trim();
       if (a.estimate_minutes !== undefined) patch.estimate_minutes = a.estimate_minutes === null ? null : Math.max(0, Math.round(Number(a.estimate_minutes)));
       Object.assign(patch, await api.locationPatch(a));
+      if (a.repeat !== undefined) patch.repeat_rule = repeatRule(a.repeat, api.tz, task.repeat_rule);
       if (a.completed_at && a.status === undefined) a.status = 'completed';
       if (a.dropped_at && a.status === undefined) a.status = 'dropped';
       if (a.status !== undefined) {
@@ -738,6 +752,10 @@ const TOOLS = [
       const parentId = patch.parent_id !== undefined ? patch.parent_id : task.parent_id;
       patch.in_inbox = !(projectId || parentId || tagCount);
       await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: patch });
+      if (a.skip_occurrence) {
+        if (!(patch.repeat_rule || task.repeat_rule)) throw new Error('skip_occurrence needs a repeating action');
+        await api.q('rpc/repeat_skip', { method: 'POST', body: { task_id: task.id, owner: api.userId } });
+      }
       if (a.move) {
         const sibs = await api.q(`tasks?${api.u}&${OPEN}&project_id=${projectId ? `eq.${projectId}` : 'is.null'}&parent_id=${parentId ? `eq.${parentId}` : 'is.null'}&select=id,sort,created_at`);
         sibs.sort((x, y) => (x.sort - y.sort) || (x.created_at < y.created_at ? -1 : 1));
@@ -765,7 +783,12 @@ const TOOLS = [
       const patch = { completed_at: completed ? (task.completed_at || new Date().toISOString()) : null };
       if (note !== undefined) patch.completion_note = String(note).trim();
       await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: patch });
-      return (await api.shape([await api.task(task.id)]))[0];
+      const [done] = await api.shape([await api.task(task.id)]);
+      if (completed && task.repeat_rule && !task.completed_at) {
+        const [next] = await api.q(`tasks?${api.u}&${OPEN}&title=eq.${encodeURIComponent(task.title)}&source=eq.repeat&order=created_at.desc&limit=1&select=*`);
+        if (next) done.next_occurrence = (await api.shape([next]))[0];
+      }
+      return done;
     },
   },
   {
@@ -839,6 +862,11 @@ const TOOLS = [
         review_unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
         next_review: { type: ['string', 'null'], description: 'YYYY-MM-DD next review date; null to recompute from the cadence' },
         completed_at: { type: 'string', description: 'When it was completed/dropped (ISO time or YYYY-MM-DD), to backdate a closed project' },
+        repeat: {
+          type: ['object', 'null'],
+          description: 'Repeat rule, or null to stop repeating. {every, unit: day|week|month|year, weekdays?: [0-6] (Sun=0, with unit week), from?: assigned|completion (default assigned = fixed schedule), end_count?, end_until?: YYYY-MM-DD}. Completing the project starts a fresh copy with all its actions.',
+          properties: { every: { type: 'integer' }, unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] }, weekdays: { type: 'array', items: { type: 'integer' } }, from: { type: 'string', enum: ['assigned', 'completion'] }, end_count: { type: 'integer' }, end_until: { type: 'string' } },
+        },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
@@ -1135,6 +1163,36 @@ const TOOLS = [
   },
 ];
 
+// ---------- repeat ----------
+const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// Validate a repeat argument into a stored rule (keeps the occurrence counter when editing).
+function repeatRule(r, tz, previous) {
+  if (r === null) return null;
+  if (typeof r !== 'object') throw new Error('repeat must be an object or null');
+  const unit = r.unit || 'day';
+  if (!['day', 'week', 'month', 'year'].includes(unit)) throw new Error('repeat.unit must be day, week, month or year');
+  const rule = { every: Math.min(999, Math.max(1, Math.round(Number(r.every) || 1))), unit, from: r.from === 'completion' ? 'completion' : 'assigned', tz, n: (previous && previous.n) || 1 };
+  if (unit === 'week' && Array.isArray(r.weekdays) && r.weekdays.length) {
+    const wd = [...new Set(r.weekdays.map(Number))].filter((d) => d >= 0 && d <= 6).sort();
+    if (wd.length) rule.weekdays = wd;
+  }
+  if (r.end_count) rule.end_count = Math.max(1, Math.round(Number(r.end_count)));
+  if (r.end_until) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(r.end_until)) throw new Error('repeat.end_until must be YYYY-MM-DD');
+    rule.end_until = r.end_until;
+  }
+  return rule;
+}
+function describeRepeat(rule) {
+  const n = rule.every || 1;
+  let s = `Every ${n === 1 ? rule.unit : `${n} ${rule.unit}s`}`;
+  if (rule.weekdays && rule.weekdays.length) s += rule.weekdays.join() === '1,2,3,4,5' ? ' on weekdays' : ` on ${rule.weekdays.map((d) => WD[d]).join(', ')}`;
+  if (rule.from === 'completion') s += ', after completion';
+  if (rule.end_count) s += ` (${Math.min(rule.n || 1, rule.end_count)} of ${rule.end_count})`;
+  if (rule.end_until) s += ` until ${rule.end_until}`;
+  return s;
+}
+
 // ---------- projects ----------
 // Date/duration/review/completion arguments shared by create_project and update_project.
 function projectPatch(api, a) {
@@ -1150,6 +1208,7 @@ function projectPatch(api, a) {
   }
   if (a.next_review !== undefined) patch.next_review_at = a.next_review === null ? null : zonedToIso(a.next_review, 0, api.tz);
   if (a.completed_at !== undefined) patch.completed_at = zonedToIso(a.completed_at, 12, api.tz);
+  if (a.repeat !== undefined) patch.repeat_rule = repeatRule(a.repeat, api.tz);
   return patch;
 }
 function projectOut(api, p, folders = []) {
@@ -1162,6 +1221,7 @@ function projectOut(api, p, folders = []) {
     review: { every: p.review_every, unit: p.review_unit, last_reviewed: localDate(p.last_reviewed_at, api.tz), next_review: localDate(p.next_review_at, api.tz) },
     review_every_days: p.review_every_days, last_reviewed: localDate(p.last_reviewed_at, api.tz), next_review: localDate(p.next_review_at, api.tz),
     completed_at: p.completed_at || undefined,
+    repeat: p.repeat_rule ? { ...p.repeat_rule, summary: describeRepeat(p.repeat_rule) } : undefined,
     created_at: p.created_at, changed_at: p.updated_at,
   };
 }

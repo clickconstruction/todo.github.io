@@ -69,6 +69,8 @@
   }
 
   let tables;
+  let R = null; // js/repeat.js, for mirroring the repeat trigger
+  import('/js/repeat.js').then((m) => { R = m; });
   const reset = () => { n = 0; tables = seed(); tables.projects.forEach(reviewSchedule); window.__mock.tables = tables; };
 
   // ----- mirrored database rules -----
@@ -102,9 +104,56 @@
     const closed = (s) => s === 'completed' || s === 'dropped';
     if (closed(p.status) && !closed(oldStatus)) p.completed_at = p.completed_at || now();
     else if (!closed(p.status)) p.completed_at = null;
+    if (p.status === 'completed' && oldStatus !== 'completed' && p.repeat_rule) repeatProject(p);
   }
+  // Mirrors tasks_repeat(): completing a repeating task clones the next occurrence (tags,
+  // sub-actions, dates moved together); the completed one stops repeating.
+  function cloneTask(t, shiftMs, parentId, projectId, rule, deferOverride) {
+    const move = (iso) => (iso ? new Date(new Date(iso).getTime() + shiftMs).toISOString() : null);
+    const c = { ...t, id: id(), parent_id: parentId, project_id: projectId, completed_at: null, dropped_at: null, completion_note: '',
+      defer_at: deferOverride || move(t.defer_at), planned_at: move(t.planned_at), due_at: move(t.due_at), source: 'repeat', repeat_rule: rule,
+      created_at: now(), updated_at: now() };
+    tables.tasks.push(c);
+    tables.task_tags.filter((x) => x.task_id === t.id).forEach((x) => tables.task_tags.push({ ...x, task_id: c.id }));
+    return c;
+  }
+  function repeatTask(t) {
+    const parent = t.parent_id && tables.tasks.find((x) => x.id === t.parent_id);
+    if (!(parent && parent.completed_at) && R) {
+      const next = R.nextOccurrence(t, t.completed_at);
+      if (next) {
+        const rule = { ...t.repeat_rule, n: (t.repeat_rule.n || 1) + 1 };
+        const anchor = t.due_at || t.planned_at || t.defer_at;
+        const shift = anchor ? next.next - new Date(anchor) : 0;
+        const c = cloneTask(t, shift, t.parent_id, t.project_id, rule, anchor ? null : next.defer_at);
+        tables.tasks.filter((x) => x.parent_id === t.id && !x.dropped_at && x.id !== c.id).forEach((k) => cloneTask(k, shift, c.id, k.project_id, k.repeat_rule || null));
+      }
+    }
+    t.repeat_rule = null;
+  }
+  function repeatProject(p) {
+    if (!R) return;
+    const next = R.nextOccurrence(p, p.completed_at || now());
+    const rule = p.repeat_rule;
+    p.repeat_rule = null;
+    if (!next) return;
+    const anchor = p.due_at || p.planned_at || p.defer_at || p.created_at;
+    const shift = next.next - new Date(anchor);
+    const move = (iso) => (iso ? new Date(new Date(iso).getTime() + shift).toISOString() : null);
+    const np = { ...p, id: id(), status: 'active', completed_at: null, last_reviewed_at: null, created_at: now(), updated_at: now(),
+      defer_at: p.due_at || p.planned_at || p.defer_at ? move(p.defer_at) : next.defer_at, planned_at: move(p.planned_at), due_at: move(p.due_at),
+      repeat_rule: { ...rule, n: (rule.n || 1) + 1 } };
+    reviewSchedule(np);
+    tables.projects.push(np);
+    tables.project_tags.filter((x) => x.project_id === p.id).forEach((x) => tables.project_tags.push({ ...x, project_id: np.id }));
+    const map = {};
+    tables.tasks.filter((t) => t.project_id === p.id && !t.parent_id && !t.dropped_at).forEach((t) => { map[t.id] = cloneTask(t, shift, null, np.id, t.repeat_rule || null).id; });
+    tables.tasks.filter((t) => t.project_id === p.id && t.parent_id && map[t.parent_id] && !t.dropped_at).forEach((t) => cloneTask(t, shift, map[t.parent_id], np.id, t.repeat_rule || null));
+  }
+
   function taskRules(t, before) {
     const wasOpen = !before || isOpen(before);
+    if (wasOpen && t.completed_at && !t.dropped_at && t.repeat_rule) repeatTask(t); // runs first, like tasks_0_repeat
     if (wasOpen && !isOpen(t)) {
       tables.tasks.filter((c) => c.parent_id === t.id && isOpen(c)).forEach((c) => {
         if (t.completed_at) c.completed_at = t.completed_at; else c.dropped_at = t.dropped_at;
@@ -130,10 +179,10 @@
   // Column defaults the real database fills in (and returns) on insert.
   const DEFAULTS = {
     tasks: () => ({ project_id: null, parent_id: null, in_inbox: true, notes: '', completion_note: '', flagged: false, defer_at: null, planned_at: null,
-      due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null }),
+      due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null, repeat_rule: null }),
     projects: () => ({ folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
       review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null, defer_at: null, planned_at: null, due_at: null, estimate_minutes: null,
-      place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null }),
+      place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null, repeat_rule: null }),
     folders: () => ({ archived_at: null }),
     tags: () => ({ parent_id: null, place_id: null, location_trigger: null, location_radius_m: null }),
     places: () => ({ address: '', google_place_id: null, radius_m: 402, notes: '', archived_at: null }),
@@ -229,6 +278,21 @@
   window.supabase = {
     createClient: () => ({
       from: builder,
+      // Database functions the app calls.
+      async rpc(name, args) {
+        if (name === 'repeat_skip') {
+          const t = tables.tasks.find((x) => x.id === args.task_id);
+          if (!t || !t.repeat_rule || !R) return { data: null, error: { message: 'Not a repeating action you own.' } };
+          const anchor = t.due_at || t.planned_at || t.defer_at;
+          const next = R.nextAnchor({ ...t.repeat_rule, from: 'assigned' }, anchor ? new Date(anchor) : new Date(), new Date());
+          const shift = next - new Date(anchor || now());
+          const move = (iso) => (iso ? new Date(new Date(iso).getTime() + shift).toISOString() : null);
+          Object.assign(t, { defer_at: anchor ? move(t.defer_at) : next.toISOString(), planned_at: move(t.planned_at), due_at: move(t.due_at),
+            repeat_rule: { ...t.repeat_rule, n: (t.repeat_rule.n || 1) + 1 }, updated_at: now() });
+          return { data: JSON.parse(JSON.stringify(t)), error: null };
+        }
+        return { data: null, error: { message: `function ${name} does not exist` } };
+      },
       auth: {
         onAuthStateChange(cb) { setTimeout(() => cb('SIGNED_IN', { user }), 0); return { data: { subscription: { unsubscribe() {} } } }; },
         signOut() {}, signInWithPassword: async () => ({ error: null }), signUp: async () => ({ data: {}, error: null }),

@@ -7,6 +7,8 @@ import { saveTask, capture, addSubAction } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { locationFieldHtml, wireLocationField } from './place.js';
 import { placeFor } from '../places.js';
+import { repeatFieldHtml, wireRepeatField } from './repeatField.js';
+import { skipOccurrence } from '../data.js';
 
 const notesAreLong = (text) => text.length > 280 || text.split('\n').length > 8;
 
@@ -24,6 +26,7 @@ function taskFieldsHtml(t, task) {
     ${dateField('planned_at', 'Planned', t.planned_at)}
     ${dateField('due_at', 'Due', t.due_at)}
     ${estimateField(t.estimate_minutes)}
+    ${repeatFieldHtml(t, { skippable: !!task && isOpen(task) })}
     ${locationFieldHtml(t, { inherited: task ? placeFor({ ...task, place_id: null }) : null })}
     <label>Subtask of<select name="parent_id"></select></label>
     <label class="flag-toggle"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}> Flagged</label>
@@ -66,6 +69,9 @@ function wireTaskForm(form, t, task, onTagsChange) {
   drawParents();
   form.elements.project_id.addEventListener('change', drawParents);
   const collectLocation = wireLocationField(form, onTagsChange);
+  const collectRepeat = wireRepeatField(form, t, onTagsChange);
+  const skip = $('[data-skip-occurrence]', form);
+  if (skip && task) skip.onclick = () => skipOccurrence(task, () => { const sheet = form.closest('dialog'); if (sheet) sheet.close(); });
   if (form.elements.status) {
     form.elements.status.addEventListener('change', () => {
       $('[data-done-box]', form).hidden = form.elements.status.value !== 'completed';
@@ -86,6 +92,7 @@ function wireTaskForm(form, t, task, onTagsChange) {
       due_at: fromDateInput(f.get('due_at'), HOURS.due_at),
       estimate_minutes: f.get('estimate_minutes') === '' ? null : Math.max(0, Math.round(Number(f.get('estimate_minutes')))),
       ...collectLocation(),
+      repeat_rule: collectRepeat(),
     };
     if (f.has('status')) {
       const status = f.get('status');

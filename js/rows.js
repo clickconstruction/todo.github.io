@@ -4,6 +4,7 @@ import { fmtMinutes } from './components.js';
 import { fmtDate, isOverdue, isDeferred, isPlannedPast } from './dates.js';
 import { isSequenceBlocked, nextAction } from './availability.js';
 import { placeFor, isInside } from './places.js';
+import { describe } from './repeat.js';
 import { distanceM, fmtDistance } from './geo.js';
 import { app } from './state.js';
 
@@ -22,6 +23,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
     const d = app.here ? fmtDistance(distanceM(app.here, loc.place)) : '';
     meta.push(`<span class="meta-place ${isInside(loc) ? 'here' : ''}" title="${esc(loc.via ? `${loc.place.name} (via ${loc.via.kind} ${loc.via.label})` : loc.place.name)}">📍 ${esc(loc.place.name)}${d ? ` · ${d}` : ''}</span>`);
   }
+  if (t.repeat_rule && isOpen(t)) meta.push(`<span class="meta-repeat" title="${esc(describe(t.repeat_rule))}">🔁</span>`);
   if (t.estimate_minutes) meta.push(`<span class="meta-estimate" title="Estimate">⏱ ${fmtMinutes(t.estimate_minutes)}</span>`);
   if (t.dropped_at && !t.completed_at) meta.push('<span class="chip">Dropped</span>');
   if (markNext && markNext.id === t.id) meta.unshift('<span class="chip next">Next</span>');
@@ -63,6 +65,7 @@ export function projectRow(p) {
     p.planned_at && p.status === 'active' ? `<span class="meta-planned ${isPlannedPast(p) ? 'past' : ''}">🗓 ${esc(fmtDate(p.planned_at))}</span>` : '',
     p.due_at && ['active', 'on_hold'].includes(p.status) ? `<span class="meta-due ${isOverdue(p) ? 'overdue' : ''}">📅 ${esc(fmtDate(p.due_at))}</span>` : '',
     p.estimate_minutes ? `<span class="meta-estimate">⏱ ${fmtMinutes(p.estimate_minutes)}</span>` : '',
+    p.repeat_rule ? `<span class="meta-repeat" title="${esc(describe(p.repeat_rule))}">🔁</span>` : '',
   ].filter(Boolean).join('');
   return `<a class="group-row ${muted ? 'muted' : ''}" href="#project/${p.id}"><span class="dot"></span>
     <span class="group-main"><span>${p.flagged ? '<span class="meta-flag" title="Flagged">⚑</span> ' : ''}${esc(p.name)}${kindIcon ? ` <span class="kind-icon" title="${p.kind.replace('_', ' ')}">${kindIcon}</span>` : ''}${p.status === 'active' ? '' : ` (${PROJECT_STATUSES.find(([v]) => v === p.status)[1].toLowerCase()})`}</span>
