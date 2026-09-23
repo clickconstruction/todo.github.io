@@ -488,3 +488,20 @@ h1.review { color: #3b82f6; }
 .attach-open { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: none; color: var(--accent); font: inherit; cursor: pointer; padding: 0; }
 .attach-add { justify-self: start; cursor: pointer; }
 .sheet .attach-add, .inspector-form .attach-add { display: inline-flex; color: var(--text); font-weight: 600; }
+
+/* Alerts setup */
+.step.current { border-color: var(--accent); }
+.step.waiting { opacity: .6; }
+.btn.big { padding: 14px 18px; font-size: 17px; width: 100%; text-align: center; text-decoration: none; display: block; }
+.mini-steps, .guide { margin: 6px 0 4px; padding-left: 20px; display: grid; gap: 8px; color: var(--text); }
+.guide li { line-height: 1.45; }
+.ios-share { vertical-align: -4px; color: #0a84ff; }
+.progress { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 4px; color: var(--text); }
+.alert-jobs { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 8px; }
+.alert-jobs li { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text); }
+.alert-jobs li.done span { opacity: .7; }
+.copyable { background: var(--surface-2); border: 1px dashed var(--line); border-radius: 6px; padding: 1px 6px; cursor: pointer; }
+.alerts-advanced { margin-top: 16px; }
+.auto-guide details textarea { width: 100%; font-size: 12px; }
+.nudge { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 12px; margin: 0 0 12px; }
+.nudge a { color: var(--text); text-decoration: none; }

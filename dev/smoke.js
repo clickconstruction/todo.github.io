@@ -21,7 +21,7 @@ async function reload() {
   window.__noMaps = true; // never call Google from tests
   (await import('/js/alerts.js')).resetAlertState();
   window.__geo = { state: 'prompt', position: { lat: 29.7610, lng: -95.3705, accuracy: 20 } }; // ~400 ft from mock Home Depot
-  try { ['todo.here', 'todo.nearby.within', 'todo.geo.alerts', 'todo.geo.key'].forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ }
+  try { ['todo.here', 'todo.nearby.within', 'todo.geo.alerts', 'todo.geo.key', 'todo.geo.done', 'todo.alerts.nudge', 'todo.alerts.seen'].forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ }
   const { setFilter } = await import('/js/filter.js');
   setFilter({ show: 'remaining', fits: 0 });
   const [{ loadAll }, { render }] = await Promise.all([import('/js/data.js'), import('/js/router.js')]);
@@ -651,17 +651,43 @@ async function alerts(check) {
   check('completed actions never alert', !evaluate(at(60), Date.now() + 10 * 3600e3).some((o) => o.tasks.some((t) => t.id === 't11')));
   window.__notify = undefined;
 
-  // Setup screen.
+  // Setup screen, as an iPhone user sees it.
+  const A = await import('/js/views/alerts.js');
+  A.resetAlerts();
+  window.__forceIOS = true; window.__forceStandalone = false;
   await go('#alerts');
-  check('alerts screen explains both modes', has(undefined, 'while the app is open', 'in the background (iphone)', 'shortcuts'));
-  check('no key yet: URLs hidden, test disabled', !$('[data-copy-geo]') && $('[data-act="test-alert"]').disabled);
-  $('[data-act="create-geo-key"]').click();
-  await wait(250);
+  await wait(100);
+  check('Safari on iPhone: step 1 shows Add to Home Screen with the Share icon', has(undefined, 'add todo tooling to your home screen', 'add to home screen') && !!$('.ios-share'));
+  check('turn-on button waits for install', !$('[data-act="alerts-on"]') && has(undefined, 'available after step 1'));
+
+  window.__forceStandalone = true;
+  window.__pushState = 'off'; window.__notifyPerm = 'granted';
+  window.__fakePush = { endpoint: 'https://push.example/iphone', p256dh: 'k', auth: 'a', device: 'iPhone' };
+  window.__fakeTest = async () => 1;
+  A.resetAlerts();
+  await go('#nearby'); await go('#alerts');
+  await wait(100);
+  check('installed: one big Turn on alerts button', !!$('[data-act="alerts-on"]') && has(undefined, 'installed'));
+  await A.turnOnAlerts();
+  await wait(100);
   const key = T().api_tokens.find((t) => t.scope === 'geo');
-  check('location key stored hashed with geo scope', key && key.token_hash.length === 64 && !JSON.stringify(key).includes(localStorage.getItem('todo.geo.key')));
-  const urls = $$('[data-copy-geo]').map((b) => b.dataset.copyGeo);
-  check('per-place Arrive/Leave URLs use the key', urls.length >= 2 && urls.every((u) => u.startsWith('https://mcp.todotooling.com/geo?t=tt_') && /&place=pl\d&event=(arrive|leave)$/.test(u)), urls[0]);
-  check('Home Depot marked as needing Leave (t2)', has('.alert-place', 'home depot', 'leave'));
+  check('one tap: device registered, key created (hashed), test sent', T().push_subscriptions.some((x) => x.device === 'iPhone') && key && key.token_hash.length === 64 && !JSON.stringify(key).includes(localStorage.getItem('todo.geo.key')));
+  check('alerts show as on', has(undefined, 'alerts are on') && !!$('[data-act="test-alert"]'));
+  check('Home Depot listed to set up (Leave, from t2)', has('.alert-jobs', 'leave', 'home depot') && has(undefined, '0 of'));
+
+  const jobBtn = $$('[data-setup-auto]').find((b) => b.dataset.setupAuto.startsWith('pl1:'));
+  await A.openAutomationGuide(jobBtn.dataset.setupAuto);
+  await wait(50);
+  const link = $('#sheet textarea').value;
+  check('guide: link uses the key, place and event', /^https:\/\/mcp\.todotooling\.com\/geo\?t=tt_.+&place=pl1&event=(arrive|leave)$/.test(link), link);
+  check('guide: steps, the address to search, and Open Shortcuts', has('#sheet', 'automation', 'run immediately', 'get contents of url', '1000 main st') && $('#sheet [data-open-shortcuts]').getAttribute('href') === 'shortcuts://');
+  $('#sheet [data-auto-done]').click();
+  await wait(100);
+  check('ticked off: counts progress', has(undefined, '1 of') && !!$('.alert-jobs li.done'));
+
+  window.__forceIOS = undefined; window.__forceStandalone = undefined; window.__pushState = undefined; window.__notifyPerm = undefined;
+  window.__fakePush = undefined; window.__fakeTest = undefined;
+  A.resetAlerts();
   await go('#settings');
   for (let i = 0; i < 20 && !has(undefined, 'location alerts only'); i++) await wait(100); // tokens load async
   check('settings labels location keys', has(undefined, 'location alerts only'));

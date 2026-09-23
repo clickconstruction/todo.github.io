@@ -4,11 +4,12 @@ import { taskList } from '../rows.js';
 import { filterBar, applyFilter, closedFor, withClosed, filterNote, sortTasks } from '../filter.js';
 import { isAvailable } from '../availability.js';
 import { activePlace } from '../places.js';
+import { alertsNudge } from './alerts.js';
 
 export function viewInbox() {
   const items = db.tasks.filter((t) => t.in_inbox && !t.parent_id && visible(t)).sort(taskSort);
   const open = items.filter(isOpen).length;
-  return `<div class="view-head"><h1 class="inbox">Inbox</h1></div>
+  return `${alertsNudge()}<div class="view-head"><h1 class="inbox">Inbox</h1></div>
     <p class="view-sub">${open} item${open === 1 ? '' : 's'} to clarify</p>
     <form class="capture" data-capture><input type="text" name="title" placeholder="Capture anything…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
     ${taskList(items) || '<p class="empty">Inbox zero. Nice.</p>'}`;

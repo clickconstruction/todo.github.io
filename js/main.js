@@ -16,7 +16,7 @@ import { openSheet } from './state.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
 import { enableAlerts } from './alerts.js';
-import { subscribePush, createGeoKey, testAlert, copyGeoUrl, resetAlerts } from './views/alerts.js';
+import { subscribePush, testAlert, copyGeoUrl, resetAlerts, turnOnAlerts, replaceGeoKey, openAutomationGuide, hideNudge, primeAlerts, isIOS, isStandalone } from './views/alerts.js';
 import { openPlaceEditor, openTagEditor } from './editors/place.js';
 import { setWithin } from './views/nearby.js';
 import { openErrandPlanner } from './views/errands.js';
@@ -44,7 +44,9 @@ const ACTIONS = {
   'enable-alerts': () => enableAlerts().then(render),
   'subscribe-push': subscribePush,
   'errand-run': openErrandPlanner,
-  'create-geo-key': createGeoKey,
+  'alerts-on': turnOnAlerts,
+  'replace-geo-key': replaceGeoKey,
+  'hide-nudge': hideNudge,
   'test-alert': testAlert,
   'toggle-archived-places': () => { app.showArchivedPlaces = !app.showArchivedPlaces; render(); },
   'new-token': createToken,
@@ -111,6 +113,7 @@ const CLICKS = [
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
   ['[data-copy-geo]', (el) => copyGeoUrl(el)],
+  ['[data-setup-auto]', (el) => openAutomationGuide(el.dataset.setupAuto)],
   ['[data-edit-tag]', (el) => openTagEditor(byId(db.tags, el.dataset.editTag))],
   ['[data-edit-folder]', (el) => openFolderEditor(byId(db.folders, el.dataset.editFolder))],
   ['[data-add-project]', (el) => openProjectEditor(null, { folder_id: el.dataset.addProject })],
@@ -171,7 +174,7 @@ const $$review = (i) => document.querySelectorAll('[data-review-go]')[i];
 $('#more-tab').onclick = () => {
   const due = reviewDueCount();
   const here = hereNowCount();
-  const links = [['#review', '🔁', `Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
+  const links = [['#review', '🔁', `Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
   const sheet = openSheet(`<form method="dialog" class="more-sheet"><h2>More</h2>
     <nav class="more-links">${links.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}</nav>
     <div class="actions"><div class="right"><button class="btn">Close</button></div></div></form>`);
@@ -228,6 +231,14 @@ async function showApp(session) {
   await flushOutbox();
   render();
   startWatching(); // only if location was already allowed; never prompts on launch
+  primeAlerts();
+  // First launch from the iPhone Home Screen: take people straight to finishing alert setup.
+  try {
+    if (isIOS() && isStandalone() && !localStorage.getItem('todo.alerts.seen')) {
+      localStorage.setItem('todo.alerts.seen', '1');
+      location.hash = '#alerts';
+    }
+  } catch { /* private mode */ }
 }
 
 // Moving refreshes distances and the Nearby badge, but never re-renders under someone typing.

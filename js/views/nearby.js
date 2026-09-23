@@ -8,6 +8,7 @@ import { fmtDistance, fmtRadius, deniedHelp } from '../geo.js';
 import { activePlaces, activePlace, placeFor, placeDistance, isInside, actionsAt } from '../places.js';
 import { loadMaps, makeMap, pinEl, youEl, circle, fitTo } from '../maps.js';
 import { errandCandidates } from './errands.js';
+import { alertsNudge } from './alerts.js';
 
 const WITHIN_KEY = 'todo.nearby.within';
 const WITHIN = [[0, 'Any distance'], [1609, 'Within 1 mi'], [8047, 'Within 5 mi'], [40234, 'Within 25 mi']];
@@ -60,7 +61,7 @@ export function viewNearby(focusId) {
 
   const noPlace = db.tasks.filter((t) => isOpen(t) && !placeFor(t)).length;
   const hasMap = !!window.GOOGLE_MAPS_KEY && !window.__noMaps && places.length > 0;
-  return `${focus ? '<a class="back" href="#nearby">‹ All nearby</a>' : ''}
+  return `${focus ? '<a class="back" href="#nearby">‹ All nearby</a>' : alertsNudge()}
     <div class="view-head"><h1 class="nearby">${focus ? esc(focus.name) : 'Nearby'}</h1>
       <span class="head-actions"><a class="btn small" href="#alerts">🔔 Alerts</a><a class="btn small" href="#places">Places</a><button class="btn small primary" data-act="new-place">+ Place</button></span></div>
     ${focus && focus.address ? `<p class="view-sub">${esc(focus.address)} · radius ${fmtRadius(focus.radius_m)}</p>` : ''}
