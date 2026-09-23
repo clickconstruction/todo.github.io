@@ -14,6 +14,8 @@ export const app = {
   searchExtra: [], // completed/dropped search matches fetched from the server
   showInactive: false, // Projects view: show completed/dropped projects and archived folders
   reorder: null, // project id currently in reorder mode
+  review: null, // { ids, reviewed, current } for the current review session
+  reviewStats: null, // projectId -> last completed_at (lazy)
 };
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

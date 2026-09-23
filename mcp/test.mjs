@@ -49,6 +49,7 @@ const call = async (method, params, token = TOKEN) => {
   return { status: r.status, body: r.status === 202 ? null : await r.json() };
 };
 const tool = async (name, args) => { const r = await call('tools/call', { name, arguments: args }); const c = r.body.result; if (c.isError) throw new Error(c.content[0].text); return JSON.parse(c.content[0].text); };
+const localToday = () => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
 const assert = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('ok -', m); };
 
 assert((await call('initialize', { protocolVersion: '2025-06-18' }, 'tt_wrongwrongwrongwrongwrong')).status === 401, 'bad token -> 401');
@@ -57,7 +58,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 17 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 17 tools, no internals leaked');
+assert(list.body.result.tools.length === 19 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 19 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -94,6 +95,14 @@ const viaTag = await tool('list_tasks', { tag: 'Errands' });
 assert(viaTag.count === 2 && viaTag.items[0].project_tags.includes('Errands'), 'tag filter includes actions inherited from project tags');
 const fc = await tool('forecast', { days: 30 });
 assert(fc.days['2026-09-28'] && fc.days['2026-09-28'].planned.some((x) => x.title === 'Schedule backflow test') && fc.days['2026-10-01'].due.some((x) => x.title === 'Schedule backflow test'), 'forecast: planned and due land on their days');
+db.projects.forEach((x) => { if (!x.next_review_at) x.next_review_at = '2020-01-01T00:00:00Z'; });
+const lr = await tool('list_review', {});
+const seqReview = lr.projects.find((x) => x.name === 'Seq');
+assert(lr.due_count >= 1 && seqReview && Array.isArray(seqReview.hints) && seqReview.next_action, 'list_review: due projects with next action + hints');
+const mr = await tool('mark_reviewed', { project: 'Seq' });
+assert(mr.last_reviewed === localToday(), 'mark_reviewed stamps today');
+const ri = await tool('update_project', { project: 'Seq', review_every_days: 30 });
+assert(db.projects.find((x) => x.name === 'Seq').review_every_days === 30, 'update_project: review interval');
 const fl = await tool('list_flagged', {});
 assert(fl.count >= 2 && fl.by_project.Seq && fl.by_project.Seq.length === 2, 'list_flagged includes actions of flagged projects');
 const kindChange = await tool('update_project', { project: 'Seq', kind: 'parallel', complete_with_last: false });

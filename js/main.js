@@ -1,7 +1,9 @@
 // Todo Tooling entry point: event wiring, auth, service worker.
 import { sb, db, app, $, byId, isOpen, toggleCollapsed } from './state.js';
 import { render } from './router.js';
-import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, addSubAction, bulkUpdate } from './data.js';
+import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, addSubAction, bulkUpdate, markReviewed } from './data.js';
+import { reviewQueue, remainingIds, reviewDueCount } from './views/review.js';
+import { startOfToday } from './dates.js';
 import { forecastData } from './views/forecast.js';
 import { HOURS } from './dates.js';
 import { openEditor, openQuickEntry } from './editors/task.js';
@@ -49,6 +51,32 @@ const CLICKS = [
       bulkUpdate(plannedPast, () => ({ planned_at: at9.toISOString() }), `${plannedPast.length} planned for today`);
     }
   }],
+  ['[data-review-go]', (el) => { if (el.dataset.reviewGo) location.hash = `#review/${el.dataset.reviewGo}`; }],
+  ['[data-mark-reviewed]', async (el) => {
+    const p = byId(db.projects, el.dataset.markReviewed);
+    const q = reviewQueue();
+    const due = remainingIds();
+    const next = due[due.indexOf(p.id) + 1] || due.find((id) => id !== p.id) || '';
+    await markReviewed(p);
+    q.reviewed.push(p.id);
+    q.current = next || null;
+    location.hash = next ? `#review/${next}` : '#review';
+    render();
+  }],
+  ['[data-review-fix]', async (el) => {
+    const p = byId(db.projects, el.dataset.project);
+    const fix = el.dataset.reviewFix;
+    if (fix === 'add') { const input = $('#review-capture'); input.focus(); input.scrollIntoView({ block: 'center' }); return; }
+    if (fix === 'forecast') { location.hash = '#forecast/past'; return; }
+    if (fix === 'replan') {
+      const at9 = startOfToday(); at9.setHours(HOURS.planned_at);
+      const stale = db.tasks.filter((t) => t.project_id === p.id && isOpen(t) && t.planned_at && new Date(t.planned_at) < startOfToday());
+      bulkUpdate(stale, () => ({ planned_at: at9.toISOString() }), `${stale.length} planned for today`);
+      return;
+    }
+    const status = { complete: 'completed', drop: 'dropped', hold: 'on_hold', activate: 'active' }[fix];
+    if (status && (status === 'active' || status === 'on_hold' || confirm(`Mark “${p.name}” ${status}?`))) updateProject(p, { status });
+  }],
   ['[data-toggle-group]', (el, e) => { e.stopPropagation(); toggleCollapsed(el.dataset.toggleGroup); render(); }],
   ['[data-add-sub]', (el, e) => {
     e.stopPropagation();
@@ -94,6 +122,12 @@ view.addEventListener('change', (e) => {
   if (doneCtl) { onDoneFilterChange(doneCtl); return; }
   const filterCtl = e.target.closest('[data-filter]');
   if (filterCtl) { setFilter({ [filterCtl.dataset.filter]: filterCtl.dataset.filter === 'fits' ? Number(filterCtl.value) : filterCtl.value }); render(); return; }
+  const kind = e.target.closest('[data-review-kind]');
+  if (kind) { updateProject(byId(db.projects, kind.dataset.reviewKind), { kind: kind.value }); return; }
+  const interval = e.target.closest('[data-review-interval]');
+  if (interval) { updateProject(byId(db.projects, interval.dataset.reviewInterval), { review_every_days: Number(interval.value) }); return; }
+  const notes = e.target.closest('[data-review-notes]');
+  if (notes) { updateProject(byId(db.projects, notes.dataset.reviewNotes), { notes: notes.value }); return; }
   const sel = e.target.closest('[data-project-status]');
   if (sel) updateProject(byId(db.projects, sel.dataset.projectStatus), { status: sel.value });
 });
@@ -103,9 +137,12 @@ view.addEventListener('input', (e) => {
 });
 
 $('#fab').onclick = openQuickEntry;
+const $$review = (i) => document.querySelectorAll('[data-review-go]')[i];
+
 // Phones: views that don't fit the tab bar live in a "More" sheet.
 $('#more-tab').onclick = () => {
-  const links = [['#review', '🔁', 'Review'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
+  const due = reviewDueCount();
+  const links = [['#review', '🔁', `Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
   const sheet = openSheet(`<form method="dialog" class="more-sheet"><h2>More</h2>
     <nav class="more-links">${links.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}</nav>
     <div class="actions"><div class="right"><button class="btn">Close</button></div></div></form>`);
@@ -115,6 +152,11 @@ $('#more-tab').onclick = () => {
 window.addEventListener('hashchange', render);
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || $('#sheet').open || typing()) return;
+  if (location.hash.startsWith('#review') && ['j', 'k', 'm'].includes(e.key)) {
+    const btn = e.key === 'm' ? $('[data-mark-reviewed]') : $$review(e.key === 'j' ? 1 : 0);
+    if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+    return;
+  }
   if (e.key === '/') { e.preventDefault(); location.hash = '#search'; }
   else if (e.key === 'n') { e.preventDefault(); openQuickEntry(); }
 });

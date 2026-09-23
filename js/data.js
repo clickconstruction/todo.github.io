@@ -97,6 +97,9 @@ export async function addSubAction(parent, title) {
   return row;
 }
 
+// Review: stamp the project as reviewed now; the database derives next_review_at.
+export const markReviewed = (project) => updateProject(project, { last_reviewed_at: new Date().toISOString() });
+
 // Apply the same change to many tasks at once, with one Undo that restores each task's old values.
 export async function bulkUpdate(tasks, fieldsFor, label) {
   if (!tasks.length) return;

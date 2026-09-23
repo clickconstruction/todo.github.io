@@ -2,6 +2,7 @@
 import { db, app, $, isOpen } from './state.js';
 import { viewInbox, viewTags, viewTag, viewFlagged, flaggedBadgeCount } from './views/basic.js';
 import { viewForecast, forecastBadgeCount } from './views/forecast.js';
+import { viewReview, reviewDueCount } from './views/review.js';
 import { viewProjects, viewProject } from './views/projects.js';
 import { viewSearch } from './views/search.js';
 import { viewDone } from './views/done.js';
@@ -9,7 +10,7 @@ import { viewSettings } from './views/settings.js';
 
 const VIEWS = {
   search: viewSearch, inbox: viewInbox, forecast: viewForecast, projects: viewProjects, project: viewProject,
-  tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone, flagged: viewFlagged,
+  tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone, flagged: viewFlagged, review: viewReview,
 };
 // Detail views highlight their parent tab.
 const TAB_FOR = { project: 'projects', tag: 'tags' };
@@ -25,6 +26,7 @@ export function render() {
   $('#badge-inbox').textContent = inboxCount || '';
   $('#badge-forecast').textContent = dueCount || '';
   $('#badge-flagged').textContent = flaggedBadgeCount() || '';
+  $('#badge-review').textContent = reviewDueCount() || '';
   // Views that live under "More" on phones light up the More tab.
   $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review'].includes(view));
   if ('setAppBadge' in navigator) (inboxCount + dueCount ? navigator.setAppBadge(inboxCount + dueCount) : navigator.clearAppBadge()).catch(() => {});

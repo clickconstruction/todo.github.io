@@ -14,6 +14,8 @@ const T = () => window.__mock.tables;
 async function reload() {
   window.__mock.reset();
   try { localStorage.removeItem('todo.filter'); localStorage.removeItem('todo.collapsed'); } catch { /* ignore */ }
+  const { app } = await import('/js/state.js');
+  app.review = null; app.reviewStats = null;
   const { setFilter } = await import('/js/filter.js');
   setFilter({ show: 'remaining', fits: 0 });
   const [{ loadAll }, { render }] = await Promise.all([import('/js/data.js'), import('/js/router.js')]);
@@ -28,7 +30,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters, forecast };
+  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -382,4 +384,61 @@ async function forecast(check) {
   $('[data-check="t3"]').click();
   await wait(200);
   check('completed item stays visible (struck) for Undo', $('[data-task="t3"]') && $('[data-task="t3"]').classList.contains('completed'));
+}
+
+// P7: Review.
+async function review(check) {
+  const { db } = await import('/js/state.js');
+  const proj = (id) => db.projects.find((p) => p.id === id);
+  check('review badge counts due projects', $('#badge-review').textContent === '4', $('#badge-review').textContent);
+  await go('#review');
+  check('queue header', has(undefined, 'Project 1 of 4'), text().slice(0, 120));
+  check('oldest-due first (on-hold project)', has('.review-title', 'Doctor integration'), text('.review-title'));
+
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }));
+  await wait(150);
+  check('j moves to next project', has(undefined, 'Project 2 of 4'), text().slice(0, 80));
+  $$('[data-review-go]')[0].click();
+  await wait(150);
+  check('‹ goes back', has(undefined, 'Project 1 of 4'));
+
+  $('[data-mark-reviewed]').click();
+  await wait(250);
+  const p5 = proj('p5');
+  check('mark reviewed stamps last_reviewed', !!p5.last_reviewed_at && new Date(p5.next_review_at) > new Date(), `${p5.last_reviewed_at} ${p5.next_review_at}`);
+  check('advances and shrinks the queue', has(undefined, 'of 3') && !has('.review-title', 'Doctor integration'), text().slice(0, 120));
+
+  // Find Click Plumbing (has an overdue action) in the queue.
+  location.hash = '#review/p1';
+  await wait(200);
+  check('hint: overdue with Forecast fix', has('.hints', '1 overdue') && $('[data-review-fix="forecast"]') !== null, text('.hints'));
+  check('next action marked in review list', $('[data-task="t1"] .chip.next') !== null);
+  const sel = $('[data-review-interval="p1"]');
+  sel.value = '30';
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(200);
+  check('interval change saves + reschedules', proj('p1').review_every_days === 30, proj('p1').review_every_days);
+  const notes = $('[data-review-notes="p1"]');
+  notes.value = 'Reviewed in smoke';
+  notes.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(200);
+  check('inline notes save', proj('p1').notes === 'Reviewed in smoke');
+
+  location.hash = '#review/p4';
+  await wait(400); // lazy last-completion lookup re-renders
+  check('hint: nothing ever completed (lazy history)', has('.hints', 'Nothing has ever been completed'), text('.hints'));
+  check('stale hint offers hold/drop', $('[data-review-fix="hold"]') !== null && $('[data-review-fix="drop"]') !== null);
+  // Defer Errands' only available action: nothing can be done now.
+  const { updateTask } = await import('/js/data.js');
+  const future = new Date(); future.setDate(future.getDate() + 5);
+  await updateTask(db.tasks.find((t) => t.id === 't11'), { defer_at: future.toISOString() });
+  await wait(150);
+  check('hint: every action deferred', has('.hints', 'Every action is deferred'), text('.hints'));
+  $('[data-review-fix="add"]').click();
+  await wait(50);
+  check('Add-action fix focuses capture', document.activeElement && document.activeElement.id === 'review-capture');
+
+  for (let i = 0; i < 5 && $('[data-mark-reviewed]'); i++) { $('[data-mark-reviewed]').click(); await wait(250); }
+  check('all caught up screen', has(undefined, 'All caught up', 'You reviewed 4 projects'), text());
+  check('badge clears', $('#badge-review').textContent === '');
 }

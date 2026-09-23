@@ -14,6 +14,7 @@ const INSTRUCTIONS = `Todo Tooling is the user's GTD system. Capture anything ne
 Clarify inbox items with update_task: give each a project and/or tags (contexts like "Laptop", people like "Waiting : Hiro"); an item leaves the Inbox once it has a project or tag.
 Use planned for when the user intends to work on something and due only for hard deadlines; flagged means "important now". Dates are YYYY-MM-DD in the user's timezone.
 Never complete, reschedule or re-file tasks the user did not ask you to change.
+For a weekly review: call list_review, go through each project with the user (use its hints), make the changes they want, then mark_reviewed.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.`;
 
 const CORS = {
@@ -525,6 +526,59 @@ const TOOLS = [
     },
   },
   {
+    name: 'list_review',
+    description: 'Projects due for review (the GTD Weekly Review), oldest first, each with its next action and health hints (no next action, overdue, slipped plans, nothing completed in 30+ days, on hold 3+ months). Walk the user through them, suggest fixes, and call mark_reviewed when they are done with one.',
+    inputSchema: { type: 'object', properties: { include_not_due: { type: 'boolean', default: false } } },
+    async run(api, { include_not_due = false }) {
+      const nowIso = new Date().toISOString();
+      const [projects, open, folders] = await Promise.all([
+        api.q(`projects?${api.u}&status=in.(active,on_hold)&order=next_review_at.asc&select=*`),
+        api.q(`tasks?${api.u}&${OPEN}&select=id,title,project_id,parent_id,sort,created_at,defer_at,due_at,planned_at,completed_at,dropped_at`),
+        api.q(`folders?${api.u}&select=id,name`),
+      ]);
+      const due = projects.filter((p) => include_not_due || (p.next_review_at && p.next_review_at <= nowIso));
+      const { nextFor } = availabilityOf(open, projects, nowIso);
+      const todayStart = zonedToIso(localDate(nowIso, api.tz), 0, api.tz);
+      const out = [];
+      for (const p of due.slice(0, 50)) {
+        const mine = open.filter((t) => t.project_id === p.id);
+        const next = p.status === 'active' ? nextFor(p.id) : null;
+        const hints = [];
+        if (p.status === 'active' && !mine.length) hints.push('No actions left: complete or drop it?');
+        else if (p.status === 'active' && !next) hints.push(mine.every((t) => t.defer_at && t.defer_at > nowIso) ? 'Every action is deferred.' : 'No available next action.');
+        const overdue = mine.filter((t) => t.due_at && t.due_at < todayStart).length;
+        if (overdue) hints.push(`${overdue} overdue`);
+        const slipped = mine.filter((t) => t.planned_at && t.planned_at < todayStart).length;
+        if (slipped) hints.push(`${slipped} planned date(s) slipped`);
+        if (p.status === 'active' && mine.length) {
+          const [last] = await api.q(`tasks?${api.u}&project_id=eq.${p.id}&completed_at=not.is.null&order=completed_at.desc&limit=1&select=completed_at`);
+          const days = last ? Math.floor((Date.now() - Date.parse(last.completed_at)) / 86400000) : null;
+          if (days === null || days >= 30) hints.push(days === null ? 'Nothing ever completed.' : `Nothing completed in ${days} days.`);
+        }
+        if (p.status === 'on_hold' && p.updated_at && Date.now() - Date.parse(p.updated_at) > 90 * 86400000) hints.push('On hold 3+ months.');
+        out.push({
+          id: p.id, name: p.name, status: p.status, kind: p.kind, flagged: p.flagged,
+          folder: (folders.find((f) => f.id === p.folder_id) || {}).name || null,
+          open_actions: mine.length, next_action: next ? { id: next.id, title: next.title } : null,
+          review_every_days: p.review_every_days, last_reviewed: localDate(p.last_reviewed_at, api.tz), review_due: localDate(p.next_review_at, api.tz),
+          hints,
+        });
+      }
+      return { due_count: due.length, projects: out };
+    },
+  },
+  {
+    name: 'mark_reviewed',
+    description: 'Mark a project as reviewed now (after going over it with the user). Its next review date moves forward by its review interval.',
+    inputSchema: { type: 'object', properties: { project: { type: 'string', description: 'Project name or id' } }, required: ['project'] },
+    async run(api, { project }) {
+      const id = await api.resolveProject(project);
+      await api.q(`projects?${api.u}&id=eq.${id}`, { method: 'PATCH', body: { last_reviewed_at: new Date().toISOString() } });
+      const [p] = await api.q(`projects?${api.u}&id=eq.${id}&select=id,name,last_reviewed_at,next_review_at,review_every_days`);
+      return { id: p.id, name: p.name, last_reviewed: localDate(p.last_reviewed_at, api.tz), next_review: localDate(p.next_review_at, api.tz), review_every_days: p.review_every_days };
+    },
+  },
+  {
     name: 'list_flagged',
     description: 'The Flagged list: flagged actions plus every open action in a flagged project, grouped by project. Pass available_only to hide deferred/queued items.',
     inputSchema: { type: 'object', properties: { available_only: { type: 'boolean', default: false } } },
@@ -732,6 +786,7 @@ const TOOLS = [
         complete_with_last: { type: 'boolean' },
         flagged: { type: 'boolean', description: 'Flagged projects put all their actions in the Flagged list' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Replaces the project tags; its actions inherit them' },
+        review_every_days: { type: 'integer', description: 'Review interval in days (7 = weekly, 30 = monthly)' },
       },
       required: ['project'],
     },
@@ -745,6 +800,7 @@ const TOOLS = [
       if (a.kind !== undefined) patch.kind = a.kind;
       if (a.complete_with_last !== undefined) patch.complete_with_last = !!a.complete_with_last;
       if (a.flagged !== undefined) patch.flagged = !!a.flagged;
+      if (a.review_every_days !== undefined) patch.review_every_days = Math.min(3650, Math.max(1, Math.round(Number(a.review_every_days))));
       if (Array.isArray(a.tags)) {
         const tagIds = [];
         for (const l of a.tags) tagIds.push(await api.ensureTag(l));

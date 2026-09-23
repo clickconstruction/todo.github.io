@@ -328,3 +328,31 @@ a.chip:hover { color: var(--text); }
   .fc-strip { grid-template-columns: repeat(9, 46px); overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
   .fc-day { scroll-snap-align: start; }
 }
+
+/* Review */
+.review-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; padding-right: 52px; }
+.review-bar h1 { margin: 0; font-size: 34px; letter-spacing: -.5px; }
+h1.review { color: #3b82f6; }
+.review-count { color: var(--muted); font-weight: 600; }
+.review-nav { display: flex; gap: 2px; }
+.review-nav .icon-btn { font-size: 22px; }
+.review-nav .icon-btn:disabled { opacity: .3; cursor: default; }
+.review-bar .btn.primary { margin-left: auto; }
+.review-title { margin: 6px 0 0; font-size: 24px; }
+.review-title a { color: var(--text); text-decoration: none; }
+.hints { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 6px; }
+.hints li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border-left: 4px solid var(--flag); font-size: 14px; }
+.hints li.hint-bad { border-left-color: var(--due); }
+.hint-fixes { display: flex; gap: 6px; flex-wrap: wrap; }
+.hints-ok { color: var(--ok); font-size: 14px; margin: 12px 0; }
+.review-props { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 8px 0 12px; }
+.review-props label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.review-props select { width: auto; padding: 8px 10px; }
+.review-notes { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 12px; }
+.review-notes textarea { min-height: 60px; font-weight: 400; color: var(--text); }
+.review-done { text-align: center; padding: 48px 0; }
+.review-big { font-size: 28px; font-weight: 700; color: var(--ok); margin: 0 0 8px; }
+.badge.review { background: #3b82f6; }
+.badge.inline { position: static; display: inline-block; margin-left: 8px; }
+/* Keep Mark Reviewed within reach while scrolling a long project. */
+.review-bar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding-top: calc(env(safe-area-inset-top) + 6px); padding-bottom: 6px; margin-top: calc(-1 * env(safe-area-inset-top) - 6px); }
