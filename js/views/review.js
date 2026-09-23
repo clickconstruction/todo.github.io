@@ -1,7 +1,7 @@
 // Review: step through projects that are due for review (the GTD Weekly Review).
 // Each project shows its properties inline, health hints with one-tap fixes, and its
 // actions. "Mark Reviewed" sets last_reviewed_at; the database derives next_review_at.
-import { sb, db, app, esc, byId, run, isOpen, taskSort, projectTagsFor, tagLabel, PROJECT_STATUSES } from '../state.js';
+import { sb, db, app, esc, byId, run, isOpen, taskSort, projectTagsFor, tagLabel, PROJECT_STATUSES, onHoldTagFor } from '../state.js';
 import { fmtDate, startOfToday, addDays, isDeferred } from '../dates.js';
 import { treeList } from '../rows.js';
 import { flattenTree } from '../tree.js';
@@ -54,7 +54,9 @@ export function healthHints(p) {
   if (p.status === 'active' && !open.length) {
     hints.push({ level: 'warn', text: 'No actions left. Is this project done?', fixes: [['complete', 'Complete project'], ['add', 'Add an action'], ['drop', 'Drop']] });
   } else if (p.status === 'active' && !nextAction(p)) {
-    hints.push({ level: 'warn', text: open.every(isDeferred) ? 'Every action is deferred, so nothing is available now.' : 'No available next action.', fixes: [['add', 'Add a next action']] });
+    const held = open.filter((t) => onHoldTagFor(t));
+    const heldTag = held.length === open.length && held.length ? onHoldTagFor(held[0]) : null;
+    hints.push({ level: 'warn', text: heldTag ? `Every action is on hold (tag “${heldTag.name}”), so nothing is available now.` : open.every(isDeferred) ? 'Every action is deferred, so nothing is available now.' : 'No available next action.', fixes: heldTag ? [['hold', 'Put project on hold'], ['add', 'Add a next action']] : [['add', 'Add a next action']] });
   }
   const overdue = open.filter((t) => t.due_at && new Date(t.due_at) < today).length;
   if (overdue) hints.push({ level: 'bad', text: `${overdue} overdue`, fixes: [['forecast', 'Triage in Forecast']] });

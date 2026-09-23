@@ -27,6 +27,7 @@ Folders and projects are never deleted: archive a folder with update_folder (onl
 Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); undo_import takes an import back.
 Perspectives are the user's saved views (e.g. Calls, Today): list_perspectives, then run_perspective to see what's in one; to answer "what should I do now" questions, prefer the user's own perspectives. create_perspective/update_perspective build them (preview rules with run_perspective first).
 Big tasks: break_down splits a task into steps (in_order for one at a time); steps can have steps, up to 4 levels. get_task shows the steps tree and progress. Move a task under another with update_task parent. If a task grows into a real project, offer convert_to_project.
+Tags can be put on hold (update_tag status on_hold): their actions are parked, not available, until the tag is active again. A task's on_hold field says why it isn't available.
 Places: an action, tag or project can have a place (a saved location) plus an optional location_alert (arrive, leave or nearby) and radius. Actions inherit a place from their tags, group, project or project tags. Pass place as a saved place's name or id, or as an address/business to look up (it is saved as a new place). Use list_nearby with the user's coordinates to find what can be done nearby. Places are archived, never deleted.`;
 
 const CORS = {
@@ -287,7 +288,7 @@ class Api {
   async lookups() {
     const [projects, tags] = await Promise.all([
       this.q(`projects?${this.u}&select=id,name,status,folder_id`),
-      this.q(`tags?${this.u}&select=id,name,parent_id`),
+      this.q(`tags?${this.u}&select=id,name,parent_id,status`),
     ]);
     const tagLabel = (t) => {
       const p = t.parent_id && tags.find((x) => x.id === t.parent_id);
@@ -317,6 +318,9 @@ class Api {
       project: (projects.find((p) => p.id === t.project_id) || {}).name || null,
       project_id: t.project_id,
       tags: links.filter((l) => l.task_id === t.id).map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel),
+      on_hold: (() => { const own = [...links.filter((l) => l.task_id === t.id), ...pLinks.filter((l) => l.project_id === t.project_id)].map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean);
+        const held = own.find((g) => { let h = false; for (let x = g, i = 0; x && i < 8; i++) { if (x.status === 'dropped') return false; if (x.status === 'on_hold') h = true; x = tags.find((y) => y.id === x.parent_id); } return h; });
+        return !t.completed_at && !t.dropped_at && held ? `Not available: tag “${tagLabel(held)}” is on hold` : undefined; })(),
       project_tags: pLinks.filter((l) => l.project_id === t.project_id).map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel),
       estimate_minutes: t.estimate_minutes ?? undefined,
       place: placeSummary(placeOf(t)),
@@ -478,7 +482,7 @@ const OPEN = 'completed_at=is.null&dropped_at=is.null';
 // Mirror of the app's js/availability.js. available = open, not deferred (nor any ancestor),
 // project active and not deferred, no open steps of its own, and not waiting its turn in an
 // ordered container (a sequential project, or a task with steps_in_order) at any level up the tree.
-function availabilityOf(tasks, projects, nowIso = new Date().toISOString()) {
+function availabilityOf(tasks, projects, nowIso = new Date().toISOString(), onHold = () => false) {
   const isOpenT = (t) => !t.completed_at && !t.dropped_at;
   const byIdT = new Map(tasks.map((t) => [t.id, t]));
   const projectById = new Map(projects.map((p) => [p.id, p]));
@@ -509,6 +513,7 @@ function availabilityOf(tasks, projects, nowIso = new Date().toISOString()) {
     const p = t.project_id && projectById.get(t.project_id);
     if (p && (p.status !== 'active' || (p.defer_at && p.defer_at > nowIso))) return false; // deferred project hides its actions
     if ((kidsOf.get(t.id) || []).length) return false; // has open steps: do the steps
+    if (onHold(t)) return false; // parked by an on-hold tag
     return !waiting(t);
   };
   const nextFor = (projectId) => {
@@ -523,6 +528,16 @@ function availabilityOf(tasks, projects, nowIso = new Date().toISOString()) {
     return walk((kidsOf.get(`p:${projectId}`) || []).filter((t) => !t.parent_id));
   };
   return { available, nextFor };
+}
+
+// Parked by an on-hold tag? (shared rule: js/perspective-engine.js makeOnHold)
+async function holdFor(api, tasks) {
+  const [tags, taskTags, projectTags] = await Promise.all([
+    api.q(`tags?${api.u}&select=id,name,parent_id,status`),
+    api.q(`task_tags?${api.u}&select=task_id,tag_id`),
+    api.q(`project_tags?${api.u}&select=project_id,tag_id`),
+  ]);
+  return P.makeOnHold({ tasks, tags, taskTags, projectTags });
 }
 
 // A task's steps as a nested tree, with progress counted over the smallest steps (leaves).
@@ -553,7 +568,7 @@ async function perspectiveData(api, needClosed) {
     needClosed ? api.q(`tasks?${api.u}&or=(completed_at.not.is.null,dropped_at.not.is.null)&order=updated_at.desc&limit=500&select=*`) : [],
     api.q(`projects?${api.u}&select=*`),
     api.q(`folders?${api.u}&select=*`),
-    api.q(`tags?${api.u}&select=id,name,parent_id`),
+    api.q(`tags?${api.u}&select=id,name,parent_id,status`),
     api.q(`task_tags?${api.u}&select=task_id,tag_id`),
     api.q(`project_tags?${api.u}&select=project_id,tag_id`),
   ]);
@@ -747,7 +762,7 @@ const TOOLS = [
           api.q(`tasks?${api.u}&${OPEN}&select=id,project_id,parent_id,steps_in_order,sort,created_at,defer_at,completed_at,dropped_at`),
           api.q(`projects?${api.u}&select=id,kind,status,defer_at`),
         ]);
-        const { available } = availabilityOf(allOpen, projects);
+        const { available } = availabilityOf(allOpen, projects, undefined, await holdFor(api, allOpen));
         const ok = new Set(allOpen.filter(available).map((t) => t.id));
         rows = rows.filter((t) => ok.has(t.id));
       }
@@ -800,7 +815,7 @@ const TOOLS = [
         api.q(`folders?${api.u}&select=id,name`),
       ]);
       const due = projects.filter((p) => include_not_due || (p.next_review_at && p.next_review_at <= nowIso));
-      const { nextFor } = availabilityOf(open, projects, nowIso);
+      const { nextFor } = availabilityOf(open, projects, nowIso, await holdFor(api, open));
       const todayStart = zonedToIso(localDate(nowIso, api.tz), 0, api.tz);
       const out = [];
       for (const p of due.slice(0, 50)) {
@@ -851,7 +866,7 @@ const TOOLS = [
         api.q(`projects?${api.u}&select=id,name,kind,status,flagged,defer_at`),
       ]);
       const flaggedProjects = new Set(projects.filter((p) => p.flagged).map((p) => p.id));
-      const { available } = availabilityOf(open, projects);
+      const { available } = availabilityOf(open, projects, undefined, await holdFor(api, open));
       const rows = open.filter((t) => (t.flagged || flaggedProjects.has(t.project_id)) && (!available_only || available(t)));
       const items = await api.shape(rows);
       const byProject = {};
@@ -1057,7 +1072,7 @@ const TOOLS = [
     async run(api, { include_archived = false }) {
       const all = (await api.q(`perspectives?${api.u}&order=sort.asc&select=*`)).filter((p) => include_archived || !p.archived_at).sort((x, y) => (x.sort - y.sort) || x.name.localeCompare(y.name));
       const data = await perspectiveData(api, all.some(needsClosed));
-      const { available } = availabilityOf(data.open, data.projects);
+      const { available } = availabilityOf(data.open, data.projects, undefined, P.makeOnHold(data));
       return all.map((p) => ({ ...perspectiveOut(p, data), open_count: P.evaluate(p, data, { tz: api.tz, available }).tasks.filter((t) => !t.completed_at && !t.dropped_at).length }));
     },
   },
@@ -1084,7 +1099,7 @@ const TOOLS = [
         const errors = P.validate({ rules: p.rules, options: p.options });
         if (errors.length) throw new Error(errors.join('; '));
       }
-      const { available } = availabilityOf(data.open, data.projects);
+      const { available } = availabilityOf(data.open, data.projects, undefined, P.makeOnHold(data));
       const r = P.evaluate(p, data, { tz: api.tz, available });
       const limit = Math.min(Math.max(1, +a.limit || 100), 500);
       const picked = new Set(r.tasks.slice(0, limit).map((t) => t.id));
@@ -1257,7 +1272,7 @@ const TOOLS = [
         api.q(`folders?${api.u}&select=id,name`),
         api.q(`tasks?${api.u}&${OPEN}&select=id,title,project_id,parent_id,steps_in_order,sort,created_at,defer_at,completed_at,dropped_at`),
       ]);
-      const { nextFor } = availabilityOf(open, projects);
+      const { nextFor } = availabilityOf(open, projects, undefined, await holdFor(api, open));
       return projects.map((p) => {
         const next = p.status === 'active' ? nextFor(p.id) : null;
         return {
@@ -1446,27 +1461,30 @@ const TOOLS = [
   },
   {
     name: 'list_tags',
-    description: 'List all tags (contexts, people, waiting-fors) with open task counts. Nested tags show as "Parent : Child".',
-    inputSchema: { type: 'object', properties: {} },
-    async run(api) {
+    description: 'List tags (contexts, people, waiting-fors) with open task counts and status (active; on_hold = its actions are parked, not available; dropped = retired, hidden unless include_dropped). Nested tags show as "Parent : Child".',
+    inputSchema: { type: 'object', properties: { include_dropped: { type: 'boolean', default: false } } },
+    async run(api, { include_dropped = false } = {}) {
       const [{ tags, tagLabel }, links, open] = await Promise.all([
         api.lookups(),
         api.q(`task_tags?${api.u}&select=task_id,tag_id`),
         api.q(`tasks?${api.u}&${OPEN}&select=id`),
       ]);
       const openIds = new Set(open.map((t) => t.id));
-      return tags.map((t) => ({ id: t.id, label: tagLabel(t), open_tasks: links.filter((l) => l.tag_id === t.id && openIds.has(l.task_id)).length }))
+      const statusOf = (t) => { let st = 'active'; for (let g = t, i = 0; g && i < 8; i++) { if (g.status === 'dropped') return 'dropped'; if (g.status === 'on_hold') st = 'on_hold'; g = tags.find((x) => x.id === g.parent_id); } return st; };
+      return tags.map((t) => ({ id: t.id, label: tagLabel(t), status: statusOf(t), open_tasks: links.filter((l) => l.tag_id === t.id && openIds.has(l.task_id)).length }))
+        .filter((t) => include_dropped || t.status !== 'dropped')
         .sort((a, b) => a.label.localeCompare(b.label));
     },
   },
   {
     name: 'update_tag',
-    description: 'Rename a tag, or give it a place: every action with the tag inherits that place (and its alert) unless the action has its own.',
+    description: 'Rename a tag, set its status, or give it a place (every action with the tag inherits that place and its alert unless the action has its own). status: on_hold parks every action with the tag (or a sub-tag): not available anywhere until active again, like a Someday list; dropped retires the tag (hidden from pickers, doesn\'t hold actions). Ask the user before putting a tag on hold.',
     inputSchema: {
       type: 'object',
       properties: {
         tag: { type: 'string', description: 'Tag label ("Errands" or "Waiting : Hiro") or id' },
         name: { type: 'string', description: 'New name (just this level, not the parent)' },
+        status: { type: 'string', enum: ['active', 'on_hold', 'dropped'] },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
@@ -1480,10 +1498,14 @@ const TOOLS = [
       if (!tag) throw new Error(`No tag "${a.tag}". Use list_tags or create_tag.`);
       const patch = await api.locationPatch(a);
       if (a.name !== undefined) patch.name = String(a.name).trim();
+      if (a.status !== undefined) {
+        if (!['active', 'on_hold', 'dropped'].includes(a.status)) throw new Error('status: active, on_hold or dropped');
+        patch.status = a.status;
+      }
       if (Object.keys(patch).length) await api.q(`tags?${api.u}&id=eq.${tag.id}`, { method: 'PATCH', body: patch });
       const [row] = await api.q(`tags?${api.u}&id=eq.${tag.id}&select=*`);
       const place = row.place_id ? (await api.q(`places?${api.u}&id=eq.${row.place_id}&select=*`))[0] : null;
-      return { id: row.id, label: tagLabel(row), place: place ? { name: place.name, alert: row.location_trigger, radius_m: row.location_radius_m || place.radius_m } : null };
+      return { id: row.id, label: tagLabel(row), status: row.status || 'active', place: place ? { name: place.name, alert: row.location_trigger, radius_m: row.location_radius_m || place.radius_m } : null };
     },
   },
   {
@@ -1663,7 +1685,7 @@ const TOOLS = [
       const data = await loadPlaceData((path) => api.q(path), api.userId);
       const resolve = makePlaceResolver(data);
       const full = await api.q(`tasks?${api.u}&${OPEN}&select=*`);
-      const { available } = availabilityOf(full, await api.q(`projects?${api.u}&select=id,status,kind,defer_at`));
+      const { available } = availabilityOf(full, await api.q(`projects?${api.u}&select=id,status,kind,defer_at`), undefined, await holdFor(api, full));
       const byPlace = new Map();
       full.forEach((t) => {
         if (available_only && !available(t)) return;

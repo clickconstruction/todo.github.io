@@ -1,7 +1,7 @@
 // View filter (the "eye"): which actions a list shows, remembered per viewer.
 //   show: available (can do now) | remaining (all open) | all (open, completed, dropped)
 //   fits: 0 (any) or a number of minutes; only actions estimated at or under it
-import { sb, app, run, isOpen, visible } from './state.js';
+import { sb, app, run, isOpen, visible, onHoldTagFor } from './state.js';
 import { isAvailable } from './availability.js';
 import { byDistance } from './places.js';
 
@@ -60,7 +60,9 @@ export function hiddenForNoEstimate(tasks) {
 
 export const filterNote = (tasks) => {
   const n = hiddenForNoEstimate(tasks);
-  return n ? `<p class="view-sub filter-note">${n} without an estimate hidden by “fits in”.</p>` : '';
+  const held = filter.show === 'available' ? tasks.filter((t) => isOpen(t) && onHoldTagFor(t)).length : 0;
+  return [n ? `${n} without an estimate hidden by “fits in”.` : '', held ? `⏸ ${held} on hold hidden · <button class="link-btn" data-act="show-remaining">Show</button>` : '']
+    .filter(Boolean).map((x) => `<p class="view-sub filter-note">${x}</p>`).join('');
 };
 
 // "All" includes completed and dropped items, which aren't all loaded locally.

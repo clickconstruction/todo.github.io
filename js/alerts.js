@@ -5,7 +5,7 @@
 // Guards against GPS noise: a fix worse than 1 km is ignored; you're "inside" within the
 // radius and only "outside" once past radius + a margin (no flapping at the edge); the first
 // fix after launch never counts as arriving; "nearby" repeats at most every 4 hours.
-import { db, app, isOpen, toast } from './state.js';
+import { db, app, isOpen, toast, onHoldTagFor } from './state.js';
 import { distanceM, onLocation } from './geo.js';
 import { placeFor } from './places.js';
 import { isDeferred } from './dates.js';
@@ -37,7 +37,7 @@ export function evaluate(here, now = Date.now()) {
   };
   const seen = new Set();
   db.tasks.forEach((t) => {
-    if (!isOpen(t) || isDeferred(t)) return;
+    if (!isOpen(t) || isDeferred(t) || onHoldTagFor(t)) return; // parked by an on-hold tag
     const loc = placeFor(t);
     if (!loc || !loc.trigger) return;
     const key = `${t.id}:${loc.place.id}:${loc.radius}`;

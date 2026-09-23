@@ -2,10 +2,11 @@
 //   available = open, not deferred (nor any ancestor), its project is active and not
 //               deferred, it has no open steps of its own, and nothing ahead of it in an
 //               ordered container blocks it.
+//               No on-hold tag parks it (its own, its project's or a parent task's).
 //   ordered containers: a sequential project (only its first open top-level item goes) and a
 //               task with "do steps in order" (only its first open step goes). Blocking is
 //               checked at every level up the tree.
-import { db, byId, isOpen, taskSort } from './state.js';
+import { db, byId, isOpen, taskSort, onHoldTagFor } from './state.js';
 import { isDeferred } from './dates.js';
 
 export const PROJECT_KINDS = [
@@ -65,6 +66,7 @@ export function isAvailable(t) {
   if (!isOpen(t) || isDeferred(t) || ancestorDeferred(t)) return false;
   const p = projectOf(t);
   if (p && (p.status !== 'active' || isDeferred(p))) return false; // a deferred project hides its actions
+  if (onHoldTagFor(t)) return false; // parked by an on-hold tag
   return !isBlocked(t);
 }
 

@@ -231,7 +231,7 @@
       review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null, defer_at: null, planned_at: null, due_at: null, estimate_minutes: null,
       place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null, repeat_rule: null }),
     folders: () => ({ archived_at: null }),
-    tags: () => ({ parent_id: null, place_id: null, location_trigger: null, location_radius_m: null }),
+    tags: () => ({ parent_id: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null }),
     places: () => ({ address: '', google_place_id: null, radius_m: 402, notes: '', archived_at: null }),
     perspectives: () => ({ icon: '🔭', rules: { v: 1, match: 'all', rules: [] }, options: { show: 'available', group_by: 'project', sort_by: 'project', layout: 'tree' }, badge: false, sort: 0, archived_at: null }),
     notifications: () => ({ task_id: null, project_id: null, offset_minutes: 0, at: null, sent_at: null }),
@@ -404,7 +404,7 @@
             const parent = g.parent_ref ? (byRef(tables.tags, g.parent_ref) || {}).id || null : null;
             const same = tables.tags.find((x) => !x.external_ref && x.name.toLowerCase() === g.name.toLowerCase() && (x.parent_id || null) === parent);
             if (same) { same.external_ref = g.ref; c.tags_merged++; return; }
-            tables.tags.push({ id: id(), user_id: uid, name: g.name, parent_id: parent, sort: 1000 + (g.sort || 0), place_id: null, location_trigger: null, location_radius_m: null, external_ref: g.ref, import_id: imp });
+            tables.tags.push({ id: id(), user_id: uid, name: g.name, parent_id: parent, status: g.status || 'active', sort: 1000 + (g.sort || 0), place_id: null, location_trigger: null, location_radius_m: null, external_ref: g.ref, import_id: imp });
             c.tags++;
           });
           (P.projects || []).forEach((x) => {

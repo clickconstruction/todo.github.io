@@ -14,6 +14,7 @@ import { isWide, select, clearSelection, moveSelection } from './inspector.js';
 import { onSearchInput } from './views/search.js';
 import { onDoneFilterChange } from './views/done.js';
 import { setFilter } from './filter.js';
+import { setTagStatus } from './data.js';
 import { openSheet, esc } from './state.js';
 import { openNewPerspective, openPerspectiveEditor, openPerspectiveMenu, saveCurrentViewAsPerspective } from './editors/perspective.js';
 import { livePerspectives, movePerspective, archivePerspective, badgeCount } from './perspectives.js';
@@ -58,6 +59,7 @@ const ACTIONS = {
   'push-test-later': pushTestLater,
   'sign-out': () => sb.auth.signOut(),
   'new-perspective': openNewPerspective,
+  'show-remaining': () => { setFilter({ show: 'remaining' }); render(); },
   'save-perspective': saveCurrentViewAsPerspective,
 };
 
@@ -162,6 +164,8 @@ view.addEventListener('change', (e) => {
   const withinCtl = e.target.closest('[data-within]');
   if (withinCtl) { setWithin(Number(withinCtl.value)); render(); return; }
   const filterCtl = e.target.closest('[data-filter]');
+  const tagSt = e.target.closest('[data-tag-status]');
+  if (tagSt) { setTagStatus(byId(db.tags, tagSt.dataset.tagStatus), tagSt.value); return; }
   if (filterCtl) { setFilter({ [filterCtl.dataset.filter]: filterCtl.dataset.filter === 'fits' ? Number(filterCtl.value) : filterCtl.value }); render(); return; }
   const kind = e.target.closest('[data-review-kind]');
   if (kind) { updateProject(byId(db.projects, kind.dataset.reviewKind), { kind: kind.value }); return; }

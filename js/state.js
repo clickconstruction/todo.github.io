@@ -48,10 +48,34 @@ export const tagLabel = (tag) => {
   const parent = tag.parent_id && byId(db.tags, tag.parent_id);
   return parent ? `${parent.name} : ${tag.name}` : tag.name;
 };
-export const sortedTags = () => {
-  const roots = db.tags.filter((t) => !t.parent_id).sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name));
-  return roots.flatMap((r) => [r, ...db.tags.filter((t) => t.parent_id === r.id).sort((a, b) => a.name.localeCompare(b.name))]);
+// Tags in display order. Dropped tags are retired: left out unless asked for.
+export const sortedTags = ({ dropped = false } = {}) => {
+  const keep = (t) => dropped || tagStatus(t) !== 'dropped';
+  const roots = db.tags.filter((t) => !t.parent_id && keep(t)).sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name));
+  return roots.flatMap((r) => [r, ...db.tags.filter((t) => t.parent_id === r.id && keep(t)).sort((a, b) => a.name.localeCompare(b.name))]);
 };
+
+// Tag status: active | on_hold | dropped. A sub-tag of an on-hold (or dropped) tag is too.
+export function tagStatus(tag) {
+  let status = 'active';
+  for (let g = tag, i = 0; g && i < 8; i++) {
+    if (g.status === 'dropped') return 'dropped';
+    if (g.status === 'on_hold') status = 'on_hold';
+    g = g.parent_id && byId(db.tags, g.parent_id);
+  }
+  return status;
+}
+
+// The on-hold tag that parks this action (its own tags, its project's, or those of the task it's
+// a step of), or null. On hold means not available anywhere.
+export function onHoldTagFor(t) {
+  if (!db.tags.some((g) => g.status === 'on_hold')) return null; // fast path: nothing on hold
+  for (let n = t, i = 0; n && i < 8; i++) {
+    for (const id of effectiveTagIds(n)) { const g = byId(db.tags, id); if (g && tagStatus(g) === 'on_hold') return g; }
+    n = n.parent_id && byId(db.tasks, n.parent_id);
+  }
+  return null;
+}
 
 export function toast(msg, actions) {
   const el = $('#toast');

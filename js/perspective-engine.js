@@ -5,7 +5,8 @@
 // rules   = { v: 1, match: 'all' | 'any' | 'none', rules: [rule | group, …] }
 // group   = { match: 'all' | 'any' | 'none', rules: [...] }
 // rule    = { type: 'flagged' | 'inbox' | 'available' | 'overdue' | 'repeating' | 'has_notes'
-//                  | 'has_steps' | 'is_step' | 'untagged' | 'no_project' | 'has_place' | 'has_estimate' }
+//                  | 'has_steps' | 'is_step' | 'untagged' | 'no_project' | 'has_place' | 'has_estimate'
+//                  | 'on_hold' (parked by an on-hold tag: its own, its project's or a parent task's) }
 //         | { type: 'tag', tags: [id], sub: true }            any of these tags (sub-tags and project tags count)
 //         | { type: 'project', projects: [id] }
 //         | { type: 'folder', folders: [id] }
@@ -25,6 +26,7 @@ export const FLAG_RULES = [
   ['flagged', 'Flagged'], ['available', 'Available now'], ['overdue', 'Overdue'], ['inbox', 'In the Inbox'],
   ['repeating', 'Repeating'], ['has_notes', 'Has notes'], ['has_steps', 'Has steps'], ['is_step', 'Is a step'],
   ['untagged', 'Has no tags'], ['no_project', 'Not in a project'], ['has_place', 'Has a place'], ['has_estimate', 'Has a duration'],
+  ['on_hold', 'On hold (tag)'],
 ];
 export const DATE_FIELDS = [['due', 'Due'], ['planned', 'Planned'], ['defer', 'Defer'], ['completed', 'Completed'], ['added', 'Added'], ['changed', 'Changed']];
 export const DATE_WHEN = [['overdue', 'is past'], ['today', 'is today'], ['next', 'is within the next'], ['past', 'was in the last'], ['before', 'is before'], ['after', 'is after'], ['any', 'is set'], ['none', 'is not set']];
@@ -41,6 +43,33 @@ function dayKey(value, tz) {
   return `${p.year}-${p.month}-${p.day}`;
 }
 const addDays = (key, n) => { const d = new Date(`${key}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+// Is a task parked by an on-hold tag? (its own tags, its project's, or those of the task it's a step
+// of; a sub-tag of an on-hold tag is on hold too; dropped tags never hold anything). Shared with the MCP server.
+export function makeOnHold(data) {
+  const tags = data.tags || [];
+  if (!tags.some((g) => g.status === 'on_hold')) return () => false;
+  const tagById = new Map(tags.map((g) => [g.id, g]));
+  const taskById = new Map((data.tasks || []).map((t) => [t.id, t]));
+  const tagsOf = new Map();
+  (data.taskTags || []).forEach((l) => { const k = `t:${l.task_id}`; if (!tagsOf.has(k)) tagsOf.set(k, []); tagsOf.get(k).push(l.tag_id); });
+  (data.projectTags || []).forEach((l) => { const k = `p:${l.project_id}`; if (!tagsOf.has(k)) tagsOf.set(k, []); tagsOf.get(k).push(l.tag_id); });
+  const held = new Map();
+  const heldTag = (id) => {
+    if (held.has(id)) return held.get(id);
+    let h = false;
+    for (let g = tagById.get(id), i = 0; g && i < 8; i++) { if (g.status === 'dropped') { h = false; break; } if (g.status === 'on_hold') h = true; g = tagById.get(g.parent_id); }
+    held.set(id, h);
+    return h;
+  };
+  return (t) => {
+    for (let n = t, i = 0; n && i < 8; i++) {
+      if ((tagsOf.get(`t:${n.id}`) || []).some(heldTag) || (n.project_id && (tagsOf.get(`p:${n.project_id}`) || []).some(heldTag))) return true;
+      n = n.parent_id && taskById.get(n.parent_id);
+    }
+    return false;
+  };
+}
 
 // ---------- context ----------
 // data: { tasks, projects, folders, tags, taskTags, projectTags }
@@ -65,7 +94,8 @@ function prepare(data, ctx) {
     });
     return out;
   };
-  return { now, tz, today, taskById, projectById, tagsOfTask, tagSet, hasKids, available: ctx.available || (() => true), keep: ctx.keep || (() => false), warnings: new Set(), data };
+  const onHold = makeOnHold(data);
+  return { now, tz, today, taskById, projectById, tagsOfTask, tagSet, hasKids, onHold, available: ctx.available || (() => true), keep: ctx.keep || (() => false), warnings: new Set(), data };
 }
 
 // ---------- matching ----------
@@ -106,6 +136,7 @@ function matchRule(rule, t, c) {
     case 'no_project': return !t.project_id;
     case 'has_place': return !!t.place_id;
     case 'has_estimate': return !!t.estimate_minutes;
+    case 'on_hold': return isOpen(t) && c.onHold(t);
     case 'tag': {
       const want = rule.tags || [];
       if (!want.length) { c.warnings.add('Choose a tag for the “Tagged” rule.'); return false; }

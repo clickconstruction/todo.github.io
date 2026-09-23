@@ -1,6 +1,6 @@
 // Tag picker used by the task and project editors: toggle existing tags, or type
 // "Laptop" / "Waiting : Hiro" + Enter to create one. Returns a getter for the selection.
-import { $, esc, sortedTags, tagLabel } from '../state.js';
+import { $, esc, sortedTags, tagLabel, tagStatus } from '../state.js';
 import { ensureTag } from '../data.js';
 
 export const tagPickerHtml = (hint = '') => `<label>Tags${hint ? ` <span class="hint">${esc(hint)}</span>` : ''} <div class="tag-picker" data-tag-picker></div>
@@ -10,8 +10,11 @@ export function wireTagPicker(root, initialIds, onChange = () => {}) {
   const selected = new Set(initialIds);
   const box = $('[data-tag-picker]', root);
   const draw = () => {
-    box.innerHTML = sortedTags().map((tag) =>
-      `<button type="button" class="tag-toggle ${selected.has(tag.id) ? 'on' : ''}" data-tag="${tag.id}" aria-pressed="${selected.has(tag.id)}">${esc(tagLabel(tag))}</button>`).join('');
+    // Dropped tags only show when this item already has them (so they can be removed).
+    box.innerHTML = sortedTags({ dropped: true }).filter((tag) => tagStatus(tag) !== 'dropped' || selected.has(tag.id)).map((tag) => {
+      const st = tagStatus(tag);
+      return `<button type="button" class="tag-toggle ${selected.has(tag.id) ? 'on' : ''} ${st !== 'active' ? `is-${st}` : ''}" data-tag="${tag.id}" aria-pressed="${selected.has(tag.id)}" ${st === 'on_hold' ? 'title="On hold: actions with it are parked"' : ''}>${st === 'on_hold' ? '⏸ ' : ''}${esc(tagLabel(tag))}</button>`;
+    }).join('');
   };
   draw();
   box.onclick = (e) => {

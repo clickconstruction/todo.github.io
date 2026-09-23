@@ -1,3 +1,4 @@
+import { makeOnHold } from '../../js/perspective-engine.js';
 // Location events from outside the app (an iPhone Shortcuts "Arrive"/"Leave" automation):
 //   GET or POST https://mcp.todotooling.com/geo?t=<location key>&place=<place id>&event=arrive|leave|test
 // Finds open, non-deferred actions whose effective place is that place and whose alert matches,
@@ -45,7 +46,7 @@ export async function loadPlaceData(rest, userId) {
   const [tasks, taskTags, tags, projects, projectTags, places] = await Promise.all([
     rest(`tasks?${u}&completed_at=is.null&dropped_at=is.null&select=id,title,parent_id,project_id,place_id,location_trigger,location_radius_m,defer_at,flagged,due_at,planned_at`),
     rest(`task_tags?${u}&select=task_id,tag_id`),
-    rest(`tags?${u}&select=id,name,parent_id,place_id,location_trigger,location_radius_m`),
+    rest(`tags?${u}&select=id,name,parent_id,status,place_id,location_trigger,location_radius_m`),
     rest(`projects?${u}&select=id,name,status,place_id,location_trigger,location_radius_m`),
     rest(`project_tags?${u}&select=project_id,tag_id`),
     rest(`places?${u}&select=*`),
@@ -60,8 +61,10 @@ const VERB = { arrive: 'You’re at', leave: 'You left' };
 export function actionsForEvent(data, placeId, event, now = new Date()) {
   const resolve = makePlaceResolver(data);
   const blockedProjects = new Set(data.projects.filter((p) => p.status !== 'active').map((p) => p.id));
+  const onHold = makeOnHold(data); // parked by an on-hold tag: no alert
   return data.tasks.filter((t) => {
     if (t.defer_at && new Date(t.defer_at) > now) return false;
+    if (onHold(t)) return false;
     if (t.project_id && blockedProjects.has(t.project_id)) return false;
     const loc = resolve(t);
     return loc && loc.place.id === placeId && MATCHES[event].includes(loc.trigger);

@@ -723,3 +723,13 @@ form label.prop-inline.review-every select { width: auto; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .import-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 2px; }
 .import-row > span { display: grid; gap: 2px; min-width: 0; }
+
+/* On-hold tags */
+.chip.hold { background: color-mix(in srgb, var(--due) 14%, transparent); color: var(--text); border-color: transparent; }
+.hold-note { margin: 0; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--due) 12%, transparent); font-size: 14px; }
+.tag-toggle.is-on_hold { border-style: dashed; }
+.tag-toggle.is-dropped { opacity: .6; text-decoration: line-through; }
+.tag-status { display: grid; gap: 6px; margin: 0 0 12px; }
+.tag-status .hint { margin: 0; }
+.group-row.muted { opacity: .75; }
+.dropped-tags summary { cursor: pointer; list-style: none; }

@@ -539,6 +539,34 @@ assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'r
   assert((await tool('list_perspectives', {})).length === 1 && (await tool('list_perspectives', { include_archived: true })).length === 2, 'archive hides it (never deleted)');
 }
 
+// ---------- on-hold tags ----------
+{
+  await tool('create_project', { name: 'Home' });
+  const a = await tool('capture', { title: 'Fix gate latch', project: 'Home' });
+  const b = await tool('capture', { title: 'Learn Spanish', project: 'Home', tags: ['Someday'] });
+  const c = await tool('capture', { title: 'Build a boat', project: 'Home', tags: ['Someday : Big'] });
+  const avail = async () => (await tool('list_tasks', { project: 'Home', available_only: true })).items.map((x) => x.title).sort().join('|');
+  assert(await avail() === 'Build a boat|Fix gate latch|Learn Spanish', 'before: everything available');
+  const held = await tool('update_tag', { tag: 'Someday', status: 'on_hold' });
+  assert(held.status === 'on_hold', 'update_tag puts a tag on hold');
+  assert(await avail() === 'Fix gate latch', 'on-hold tag (and its sub-tags) park their actions');
+  assert((await tool('get_task', { id: b.id })).on_hold === 'Not available: tag “Someday” is on hold', 'get_task says why it isn’t available');
+  assert(!(await tool('get_task', { id: a.id })).on_hold, 'others unaffected');
+  const tagsNow = await tool('list_tags', {});
+  assert(tagsNow.find((t) => t.label === 'Someday').status === 'on_hold' && tagsNow.find((t) => t.label === 'Someday : Big').status === 'on_hold', 'list_tags shows status (sub-tags inherit)');
+  const home = (await tool('list_projects', {})).find((x) => x.name === 'Home');
+  assert(home.next_action.title === 'Fix gate latch', 'next action skips parked items');
+  const pv = await tool('run_perspective', { rules: { match: 'all', rules: [{ type: 'on_hold' }] }, options: { show: 'remaining', group_by: 'none' } });
+  assert(pv.count === 2, 'perspective rule on_hold');
+  await tool('update_tag', { tag: 'Someday', status: 'dropped' });
+  assert(await avail() === 'Build a boat|Fix gate latch|Learn Spanish' && !(await tool('list_tags', {})).some((t) => t.label === 'Someday') && (await tool('list_tags', { include_dropped: true })).some((t) => t.label === 'Someday'), 'dropped: retired, hidden, holds nothing');
+  await tool('update_tag', { tag: 'Someday', status: 'active' });
+  let bad = '';
+  try { await tool('update_tag', { tag: 'Someday', status: 'paused' }); } catch (e) { bad = e.message; }
+  assert(/on_hold/.test(bad), 'bad status refused');
+  void c;
+}
+
 // ---------- OmniFocus import ----------
 {
   const { readFileSync } = await import('node:fs');

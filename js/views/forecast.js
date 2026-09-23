@@ -1,7 +1,7 @@
 // Forecast: a day strip (Past · Today · next 6 days · Future) of what's due, planned,
 // or becoming available. Replaces the old Today view. Past has one-tap triage for the
 // classic "everything is overdue" problem: turn fake deadlines into plans.
-import { db, esc, isOpen, visible, taskSort } from '../state.js';
+import { db, esc, isOpen, visible, taskSort, onHoldTagFor } from '../state.js';
 import { startOfToday, addDays, sameDay, dayStart, isDeferred } from '../dates.js';
 import { taskList, projectRow } from '../rows.js';
 import { filterBar, passes, sortTasks } from '../filter.js';
@@ -42,7 +42,7 @@ const projectSection = (title, list) => (list.length ? `<h2 class="section-title
 
 export const forecastBadgeCount = () => {
   const end = addDays(startOfToday(), 1);
-  return db.tasks.filter((t) => isOpen(t) && t.due_at && new Date(t.due_at) < end).length
+  return db.tasks.filter((t) => isOpen(t) && t.due_at && new Date(t.due_at) < end && !onHoldTagFor(t)).length // parked items don't nag
     + db.projects.filter((p) => ['active', 'on_hold'].includes(p.status) && p.due_at && new Date(p.due_at) < end).length;
 };
 

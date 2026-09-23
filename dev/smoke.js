@@ -37,7 +37,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -572,6 +572,72 @@ async function omnifocusImport(check) {
   } finally {
     if (realClip) delete navigator.clipboard; // back to the prototype's
   }
+}
+
+// On-hold tags park their actions; dropped tags are retired.
+async function onHoldTags(check) {
+  const { db } = await import('/js/state.js');
+  const task = (id) => db.tasks.find((t) => t.id === id);
+  const { isAvailable, nextAction } = await import('/js/availability.js');
+  const { forecastBadgeCount } = await import('/js/views/forecast.js');
+  const { flaggedBadgeCount } = await import('/js/views/basic.js');
+  const badgeBefore = forecastBadgeCount();
+  const flagBefore = flaggedBadgeCount();
+  await go('#tags');
+  check('tags list suggests on hold', has(undefined, 'put a tag like someday on hold') && !$('.chip.hold'));
+  await go('#tag/g1'); // Laptop: on task t6 and on project Click Plumbing (p1)
+  check('tag page has a status control', !!$('[data-tag-status="g1"][value="on_hold"]') && has('.tag-status', 'available as usual'));
+  const hold = $('[data-tag-status="g1"][value="on_hold"]');
+  hold.checked = true; hold.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(250);
+  check('put on hold: saved, told how many are parked, with Undo', T().tags.find((g) => g.id === 'g1').status === 'on_hold' && has('#toast', 'is on hold', 'parked', 'undo'), text('#toast'));
+  check('its actions (direct and via the project) are not available', !isAvailable(task('t6')) && !isAvailable(task('t1')) && !isAvailable(task('t2')) && !nextAction(db.projects.find((p) => p.id === 'p1')));
+  check('badges ignore parked items', forecastBadgeCount() < badgeBefore && flaggedBadgeCount() < flagBefore, `${badgeBefore}→${forecastBadgeCount()} ${flagBefore}→${flaggedBadgeCount()}`);
+  const { setFilter } = await import('/js/filter.js');
+  setFilter({ show: 'available' });
+  await go('#project/p1');
+  check('available list hides them and says so', !$('[data-task="t1"]') && has(undefined, 'on hold hidden'));
+  $('[data-act="show-remaining"]').click();
+  await wait(100);
+  check('Show reveals them, dimmed, with the on-hold tag', $('[data-task="t1"]').classList.contains('blocked') && has('[data-task="t1"]', '⏸ laptop'));
+  const { openEditor } = await import('/js/editors/task.js');
+  openEditor(task('t2'));
+  await wait(80);
+  check('the editor says why it isn’t available', has('#editor .hold-note', 'not available', 'laptop', 'on hold'));
+  $('#sheet').close();
+  const { healthHints } = await import('/js/views/review.js');
+  check('review notices a project that is all on hold', healthHints(db.projects.find((p) => p.id === 'p1')).some((h) => /on hold \(tag “Laptop”\)/.test(h.text)));
+  const { evaluate } = await import('/js/perspective-engine.js');
+  const { perspectiveData } = await import('/js/perspectives.js');
+  const held = evaluate({ rules: { match: 'all', rules: [{ type: 'on_hold' }] }, options: { show: 'remaining' } }, perspectiveData(), { available: isAvailable }).tasks.map((t) => t.id);
+  check('perspectives can find on-hold items', held.includes('t1') && held.includes('t6') && !held.includes('t9'), held.join());
+  await go('#tags');
+  check('tags list marks it', has('.group-row.muted', 'laptop', 'on hold'));
+  // Undo from the toast.
+  await go('#tag/g1');
+  const back = $('[data-tag-status="g1"][value="active"]');
+  back.checked = true; back.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(250);
+  check('active again: available again', T().tags.find((g) => g.id === 'g1').status === 'active' && isAvailable(task('t1')));
+  // A parent tag on hold holds its sub-tags.
+  const { setTagStatus } = await import('/js/data.js');
+  await setTagStatus(db.tags.find((g) => g.id === 'g3'), 'on_hold'); // Waiting (Hiro is its child)
+  await go('#tag/g4');
+  check('a sub-tag of an on-hold tag is on hold too, and says why', has('.tag-status', 'its parent “waiting” is on hold'));
+  // Dropped: retired, hidden from pickers, doesn't hold actions.
+  await setTagStatus(db.tags.find((g) => g.id === 'g3'), 'dropped');
+  await go('#tags');
+  check('dropped tags move to their own (collapsed) section', /Dropped · 2/.test($('.dropped-tags').textContent) && /Waiting/.test($('.dropped-tags').textContent) && /Hiro/.test($('.dropped-tags').textContent) && !$('.dropped-tags').open);
+  openEditor(task('t11'));
+  await wait(80);
+  check('dropped tags are left out of the tag picker', !$$('#editor .tag-toggle').some((b) => /Waiting|Hiro/.test(b.textContent)));
+  $('#sheet').close();
+  openEditor(task('t10')); // has Hiro
+  await wait(80);
+  check('…unless the item has one (so it can be removed)', $$('#editor .tag-toggle.on').some((b) => /Hiro/.test(b.textContent)) && !has('#editor', 'not available: tag'));
+  $('#sheet').close();
+  await setTagStatus(db.tags.find((g) => g.id === 'g3'), 'active');
+  setFilter({ show: 'remaining' });
 }
 
 // P4: estimates, row signals, project flags and tags.

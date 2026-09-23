@@ -1,6 +1,6 @@
 // Task editor: one form builder used by the pop-up sheet (phones, new items) and by the
 // desktop inspector panel (edits in place, saving as you go). Plus quick entry.
-import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, isOpen, taskSort, tagsFor } from '../state.js';
+import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, isOpen, taskSort, tagsFor, onHoldTagFor, tagLabel } from '../state.js';
 import { fromDateInput, fromDateTimeInput, HOURS } from '../dates.js';
 import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
 import { saveTask, capture } from '../data.js';
@@ -30,6 +30,7 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
       <input type="text" name="title" value="${esc(t.title)}" placeholder="What is it?" required autocomplete="off" aria-label="Title">
       <label class="flag-pill" title="Flag"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}><span aria-hidden="true">⚑</span><span class="sr-only">Flagged</span></label>
     </div>
+    ${task && isOpen(task) && onHoldTagFor(task) ? `<p class="hold-note">⏸ Not available: tag <a href="#tag/${onHoldTagFor(task).id}">“${esc(tagLabel(onHoldTagFor(task)))}”</a> is on hold.</p>` : ''}
     <label class="notes-field"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes" rows="2">${esc(t.notes)}</textarea></label>
     ${stepsFieldHtml(task)}
     ${section('organize', 'Organize', `

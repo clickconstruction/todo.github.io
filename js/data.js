@@ -1,5 +1,5 @@
 // Reads and writes. Every write goes to Supabase first, then updates `db`.
-import { sb, db, app, run, syncRow, toast, byId, isOpen, taskSort } from './state.js';
+import { sb, db, app, run, syncRow, toast, byId, isOpen, taskSort, onHoldTagFor } from './state.js';
 import { openCompletionNote } from './editors/completion.js';
 import { saveReminders, refreshReminders } from './editors/notifyField.js';
 import { uploadFiles } from './editors/attachField.js';
@@ -325,6 +325,17 @@ export async function updateTag(tag, fields) {
   syncRow('tags', tag, row);
   app.render();
   return row;
+}
+
+// Put a tag on hold (parks its actions), drop it (retire it) or make it active again; with Undo.
+export async function setTagStatus(tag, status) {
+  const before = tag.status || 'active';
+  if (!tag || before === status) return;
+  await updateTag(tag, { status });
+  const parked = status === 'on_hold' ? db.tasks.filter((t) => isOpen(t) && onHoldTagFor(t)).length : 0;
+  const msg = status === 'on_hold' ? `⏸ “${tag.name}” is on hold${parked ? ` · ${parked} action${parked === 1 ? '' : 's'} parked` : ''}`
+    : status === 'dropped' ? `“${tag.name}” dropped: hidden from tag pickers` : `“${tag.name}” is active again`;
+  toast(msg, [{ label: 'Undo', run: () => updateTag(byId(db.tags, tag.id), { status: before }) }]);
 }
 
 export async function insertFolder(name) {

@@ -4,7 +4,7 @@
 //
 // Payload (every item carries a stable ref, so importing twice never duplicates):
 //   folders:  [{ ref, name, sort, created_at }]
-//   tags:     [{ ref, name, parent_ref, depth, sort, created_at }]
+//   tags:     [{ ref, name, parent_ref, depth, sort, created_at, status }]
 //   projects: [{ ref, name, folder_ref, notes, status, kind, complete_with_last, flagged, defer_at, planned_at,
 //                due_at, estimate_minutes, repeat_rule, review_every, review_unit, last_reviewed_at, next_review_at,
 //                completed_at, created_at, updated_at, tag_refs, sort }]
@@ -145,7 +145,7 @@ function fromOmniJSON(data, tz) {
   const tDepth = (g) => { let d = 1; for (let x = tById.get(g.parent), i = 0; x && i < 8; i++) { d++; x = tById.get(x.parent); } return d; };
   (data.tags || []).forEach((g, i) => {
     if (g.status === 'on_hold') out.stats.onHoldTags++;
-    out.tags.push({ ref: ref(g.id), name: clean(g.name) || 'Tag', parent_ref: ref(g.parent), depth: tDepth(g), sort: i, created_at: g.added || null });
+    out.tags.push({ ref: ref(g.id), name: clean(g.name) || 'Tag', parent_ref: ref(g.parent), depth: tDepth(g), sort: i, created_at: g.added || null, status: ['on_hold', 'dropped'].includes(g.status) ? g.status : 'active' });
   });
   const rep = (r) => (r ? repeatFrom(r.rule, r.method || r.schedule, tz) : { rule: null, exact: true });
   (data.projects || []).forEach((p, i) => {
@@ -388,7 +388,7 @@ export function prepare(parsed, { completed = 'none', now = new Date() } = {}) {
   if (inexact) warnings.push(`${inexact} repeat rule${inexact === 1 ? '' : 's'} couldn’t be matched exactly; the closest match is set and the original is kept in the notes.`);
   if (parsed.stats.attachments) warnings.push(`${parsed.stats.attachments} attachment${parsed.stats.attachments === 1 ? ' stays' : 's stay'} in OmniFocus (add them here with 📎 if you need them).`);
   if (parsed.stats.notifications) warnings.push(`${parsed.stats.notifications} custom OmniFocus notification${parsed.stats.notifications === 1 ? ' isn’t' : 's aren’t'} copied; set reminders here with 🔔.`);
-  if (parsed.stats.onHoldTags) warnings.push(`${parsed.stats.onHoldTags} on-hold tag${parsed.stats.onHoldTags === 1 ? ' comes' : 's come'} in as a normal tag${parsed.stats.onHoldTags === 1 ? '' : 's'} (they don’t hide actions here).`);
+  if (parsed.stats.onHoldTags) warnings.push(`${parsed.stats.onHoldTags} tag${parsed.stats.onHoldTags === 1 ? ' is' : 's are'} on hold in OmniFocus and stay${parsed.stats.onHoldTags === 1 ? 's' : ''} on hold here (their actions are parked).`);
   const usedTags = new Set([...projectsOut, ...tasks].flatMap((x) => x.tag_refs || []));
   const tagByRef = new Map(parsed.tags.map((g) => [g.ref, g]));
   [...usedTags].forEach((r) => { for (let g = tagByRef.get(r), i = 0; g && i < 8; i++) { usedTags.add(g.ref); g = g.parent_ref && tagByRef.get(g.parent_ref); } });

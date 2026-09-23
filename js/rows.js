@@ -1,5 +1,5 @@
 // List row renderers shared by the views.
-import { db, esc, byId, tagsFor, tagLabel, projectTagsFor, isOpen, isCollapsed, PROJECT_STATUSES } from './state.js';
+import { db, esc, byId, tagsFor, tagLabel, projectTagsFor, isOpen, isCollapsed, PROJECT_STATUSES, tagStatus, onHoldTagFor } from './state.js';
 import { fmtMinutes } from './components.js';
 import { fmtDate, isOverdue, isDeferred, isPlannedPast } from './dates.js';
 import { isSequenceBlocked, nextAction } from './availability.js';
@@ -20,7 +20,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
     const up = ancestors(t);
     if (up.length) meta.unshift(`<span class="meta-parent" title="${esc(up.map((a) => a.title).reverse().join(' › '))}">↳ ${esc(up[0].title)}</span>`);
   }
-  tags.forEach((tag) => meta.push(`<span class="chip">${esc(tagLabel(tag))}</span>`));
+  tags.forEach((tag) => meta.push(tagStatus(tag) === 'on_hold' ? `<span class="chip hold" title="On hold: not available">⏸ ${esc(tagLabel(tag))}</span>` : `<span class="chip">${esc(tagLabel(tag))}</span>`));
   if (t.defer_at && isDeferred(t)) meta.push(`<span>⏸ ${esc(fmtDate(t.defer_at))}</span>`);
   if (t.planned_at && isOpen(t)) meta.push(`<span class="meta-planned ${isPlannedPast(t) ? 'past' : ''}" title="Planned">🗓 ${esc(fmtDate(t.planned_at))}</span>`);
   if (t.due_at) meta.push(`<span class="meta-due ${isOverdue(t) ? 'overdue' : ''}">📅 ${esc(fmtDate(t.due_at))}</span>`);
@@ -52,7 +52,9 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
       ${next ? `<div class="step-next"><span>Next:</span> ${esc(next.title)}</div>` : ''}`;
   }
   const checkCls = ['check', done && 'done', t.flagged && 'flagged', isOverdue(t) && 'overdue'].filter(Boolean).join(' ');
-  const blocked = isOpen(t) && isSequenceBlocked(t);
+  const held = isOpen(t) && onHoldTagFor(t);
+  if (held && !tags.some((g) => g.id === held.id)) meta.push(`<span class="chip hold" title="On hold via ${esc(tagLabel(held))}">⏸ ${esc(tagLabel(held))}</span>`);
+  const blocked = isOpen(t) && (isSequenceBlocked(t) || !!held);
   const cls = [done || t.dropped_at ? 'completed' : '', hierarchy && depth ? 'row-sub' : '', blocked ? 'blocked' : ''].filter(Boolean).join(' ');
   // Reorder mode: ▲▼ move among siblings; ⇥ makes it a step of the item above, ⇤ moves it up a level.
   const handles = reorder && isOpen(t) ? `<span class="reorder">
