@@ -4,7 +4,7 @@
 import { db, esc, isOpen, visible, taskSort } from '../state.js';
 import { startOfToday, addDays, sameDay, dayStart, isDeferred } from '../dates.js';
 import { taskList } from '../rows.js';
-import { filterBar, passes } from '../filter.js';
+import { filterBar, passes, sortTasks } from '../filter.js';
 import { isFlaggedTask } from './basic.js';
 
 const DAYS_AHEAD = 6;
@@ -57,7 +57,7 @@ export function viewForecast(selected = 'today') {
   let body = '';
   const section = (title, list, extra = '') => {
     const shown = list.filter(passes);
-    return shown.length ? `<h2 class="section-title">${title} · ${shown.length}${extra}</h2>${taskList(shown.sort(taskSort))}` : '';
+    return shown.length ? `<h2 class="section-title">${title} · ${shown.length}${extra}</h2>${taskList(sortTasks(shown, taskSort))}` : '';
   };
 
   if (selected === 'past') {

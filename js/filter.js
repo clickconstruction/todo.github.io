@@ -3,9 +3,10 @@
 //   fits: 0 (any) or a number of minutes; only actions estimated at or under it
 import { sb, app, run, isOpen, visible } from './state.js';
 import { isAvailable } from './availability.js';
+import { byDistance } from './places.js';
 
 const KEY = 'todo.filter';
-const DEFAULT = { show: 'remaining', fits: 0 };
+const DEFAULT = { show: 'remaining', fits: 0, sort: 'default' };
 let filter;
 try { filter = { ...DEFAULT, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { filter = { ...DEFAULT }; }
 export const getFilter = () => filter;
@@ -17,12 +18,18 @@ export function setFilter(patch) {
 }
 
 const SHOW = [['available', 'Available'], ['remaining', 'Remaining'], ['all', 'All']];
+const SORTS = [['default', 'Default order'], ['distance', 'Nearest first']];
 const FITS = [[0, 'Any time'], [5, '≤ 5 min'], [15, '≤ 15 min'], [30, '≤ 30 min'], [60, '≤ 1 hour']];
 
-export const filterBar = () => `<div class="filter-bar" role="group" aria-label="View filter">
+export const filterBar = (extra = '') => `<div class="filter-bar" role="group" aria-label="View filter">
   <label><span aria-hidden="true">👁</span><select data-filter="show" aria-label="Show">${SHOW.map(([v, l]) => `<option value="${v}" ${filter.show === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   <label><span aria-hidden="true">⏱</span><select data-filter="fits" aria-label="Fits in">${FITS.map(([v, l]) => `<option value="${v}" ${Number(filter.fits) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+  ${extra}
+  ${app.here ? `<label><span aria-hidden="true">↕</span><select data-filter="sort" aria-label="Sort">${SORTS.map(([v, l]) => `<option value="${v}" ${filter.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
 </div>`;
+
+// "Nearest first" (needs a location fix); otherwise the list's own order.
+export const sortTasks = (tasks, fallback) => (filter.sort === 'distance' && app.here ? byDistance(tasks, fallback) : [...tasks].sort(fallback));
 
 export function passes(t) {
   // Just-completed items stay visible (struck through) until reload so Undo has context.

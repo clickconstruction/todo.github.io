@@ -6,3 +6,9 @@
 
 window.SUPABASE_URL = 'https://cgssdelgtxlrfgozchps.supabase.co';
 window.SUPABASE_ANON_KEY = 'sb_publishable_5bN5RarF89iKs2BeAHJNXQ_I9GWvrrL';
+
+// Google Maps (todo-tooling Cloud project). A browser key is public by design; it is
+// locked to todotooling.com + localhost:8765 and to Maps JS, Places (New), Geocoding
+// and Routes. The MCP server uses a separate key stored as a Worker secret.
+window.GOOGLE_MAPS_KEY = 'AIzaSyCwl3XS50OjBYS0mbD_A_MF93BFUgUBGUo';
+window.GOOGLE_MAP_ID = '194508c66d711de5dd00d220';

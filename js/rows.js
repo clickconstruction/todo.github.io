@@ -3,8 +3,11 @@ import { db, esc, byId, tagsFor, tagLabel, projectTagsFor, isOpen, isCollapsed, 
 import { fmtMinutes } from './components.js';
 import { fmtDate, isOverdue, isDeferred, isPlannedPast } from './dates.js';
 import { isSequenceBlocked, nextAction } from './availability.js';
+import { placeFor, isInside } from './places.js';
+import { distanceM, fmtDistance } from './geo.js';
+import { app } from './state.js';
 
-export function taskRow(t, { showProject = true, markNext = null, reorder = false, hierarchy = false, hasGroups = false } = {}) {
+export function taskRow(t, { showProject = true, markNext = null, reorder = false, hierarchy = false, hasGroups = false, showPlace = true } = {}) {
   const done = !!t.completed_at;
   const project = t.project_id && byId(db.projects, t.project_id);
   const tags = tagsFor(t.id);
@@ -14,6 +17,11 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   if (t.defer_at && isDeferred(t)) meta.push(`<span>⏸ ${esc(fmtDate(t.defer_at))}</span>`);
   if (t.planned_at && isOpen(t)) meta.push(`<span class="meta-planned ${isPlannedPast(t) ? 'past' : ''}" title="Planned">🗓 ${esc(fmtDate(t.planned_at))}</span>`);
   if (t.due_at) meta.push(`<span class="meta-due ${isOverdue(t) ? 'overdue' : ''}">📅 ${esc(fmtDate(t.due_at))}</span>`);
+  const loc = showPlace && isOpen(t) && placeFor(t);
+  if (loc) {
+    const d = app.here ? fmtDistance(distanceM(app.here, loc.place)) : '';
+    meta.push(`<span class="meta-place ${isInside(loc) ? 'here' : ''}" title="${esc(loc.via ? `${loc.place.name} (via ${loc.via.kind} ${loc.via.label})` : loc.place.name)}">📍 ${esc(loc.place.name)}${d ? ` · ${d}` : ''}</span>`);
+  }
   if (t.estimate_minutes) meta.push(`<span class="meta-estimate" title="Estimate">⏱ ${fmtMinutes(t.estimate_minutes)}</span>`);
   if (t.dropped_at && !t.completed_at) meta.push('<span class="chip">Dropped</span>');
   if (markNext && markNext.id === t.id) meta.unshift('<span class="chip next">Next</span>');

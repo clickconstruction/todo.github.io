@@ -57,6 +57,11 @@
         T({ id: 'c1', project_id: 'p1', title: 'Send Jodi the plumbing plans', completed_at: at(-1, 9), completion_note: 'Sent all three sets.' }),
         T({ id: 'd1', project_id: 'p3', title: 'Rent a utility trailer', dropped_at: at(-5) }),
       ],
+      places: [
+        { id: 'pl1', user_id: uid, name: 'Home Depot', address: '1000 Main St', lat: 29.7600, lng: -95.3700, google_place_id: null, radius_m: 402, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
+        { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
+        { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
+      ],
       api_tokens: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
@@ -103,13 +108,14 @@
   // Column defaults the real database fills in (and returns) on insert.
   const DEFAULTS = {
     tasks: () => ({ project_id: null, parent_id: null, in_inbox: true, notes: '', completion_note: '', flagged: false, defer_at: null, planned_at: null,
-      due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app' }),
+      due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null }),
     projects: () => ({ folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
       last_reviewed_at: null, completed_at: null }),
     folders: () => ({ archived_at: null }),
-    tags: () => ({ parent_id: null }),
+    tags: () => ({ parent_id: null, place_id: null, location_trigger: null, location_radius_m: null }),
+    places: () => ({ address: '', google_place_id: null, radius_m: 402, notes: '', archived_at: null }),
   };
-  const NO_DELETE = { tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
+  const NO_DELETE = { places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
 
   // ----- PostgREST-ish filter parsing for .or() strings -----
   function splitTop(s) {

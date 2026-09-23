@@ -14,6 +14,10 @@ import { onDoneFilterChange } from './views/done.js';
 import { setFilter } from './filter.js';
 import { openSheet } from './state.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings } from './views/settings.js';
+import { requestLocation, startWatching, onLocation } from './geo.js';
+import { openPlaceEditor, openTagEditor } from './editors/place.js';
+import { setWithin } from './views/nearby.js';
+import { hereNowCount } from './places.js';
 
 const view = $('#view');
 const typing = () => /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
@@ -31,6 +35,9 @@ const ACTIONS = {
   'toggle-inactive': () => { app.showInactive = !app.showInactive; render(); },
   'toggle-reorder': () => { const id = location.hash.split('/')[1]; app.reorder = app.reorder === id ? null : id; render(); },
   'new-tag': createTag,
+  'new-place': () => openPlaceEditor(null),
+  'request-location': () => requestLocation().then(render, render),
+  'toggle-archived-places': () => { app.showArchivedPlaces = !app.showArchivedPlaces; render(); },
   'new-token': createToken,
   'sign-out': () => sb.auth.signOut(),
 };
@@ -93,6 +100,8 @@ const CLICKS = [
   }],
   ['[data-move]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.move); if (t) moveTask(t, Number(el.dataset.dir)); }],
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
+  ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
+  ['[data-edit-tag]', (el) => openTagEditor(byId(db.tags, el.dataset.editTag))],
   ['[data-edit-folder]', (el) => openFolderEditor(byId(db.folders, el.dataset.editFolder))],
   ['[data-add-project]', (el) => openProjectEditor(null, { folder_id: el.dataset.addProject })],
   ['[data-edit-project]', (el) => (isWide() ? select('project', el.dataset.editProject) : openProjectEditor(byId(db.projects, el.dataset.editProject)))],
@@ -127,6 +136,8 @@ view.addEventListener('submit', async (e) => {
 view.addEventListener('change', (e) => {
   const doneCtl = e.target.closest('[data-done]');
   if (doneCtl) { onDoneFilterChange(doneCtl); return; }
+  const withinCtl = e.target.closest('[data-within]');
+  if (withinCtl) { setWithin(Number(withinCtl.value)); render(); return; }
   const filterCtl = e.target.closest('[data-filter]');
   if (filterCtl) { setFilter({ [filterCtl.dataset.filter]: filterCtl.dataset.filter === 'fits' ? Number(filterCtl.value) : filterCtl.value }); render(); return; }
   const kind = e.target.closest('[data-review-kind]');
@@ -149,7 +160,8 @@ const $$review = (i) => document.querySelectorAll('[data-review-go]')[i];
 // Phones: views that don't fit the tab bar live in a "More" sheet.
 $('#more-tab').onclick = () => {
   const due = reviewDueCount();
-  const links = [['#review', '🔁', `Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
+  const here = hereNowCount();
+  const links = [['#review', '🔁', `Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
   const sheet = openSheet(`<form method="dialog" class="more-sheet"><h2>More</h2>
     <nav class="more-links">${links.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}</nav>
     <div class="actions"><div class="right"><button class="btn">Close</button></div></div></form>`);
@@ -204,7 +216,15 @@ async function showApp(session) {
   await loadAll();
   await flushOutbox();
   render();
+  startWatching(); // only if location was already allowed; never prompts on launch
 }
+
+// Moving refreshes distances and the Nearby badge, but never re-renders under someone typing.
+onLocation((_here, moved) => {
+  if (!moved || !app.user) return;
+  if (typing() || $('#sheet').open || $('#sheet2').open) { $('#badge-nearby').textContent = hereNowCount() || ''; return; }
+  render();
+});
 
 if (!sb) {
   document.body.textContent = 'Supabase is not configured.';

@@ -17,7 +17,10 @@ async function reload() {
   const insp = await import('/js/state.js'); insp.app.selected = null;
   try { localStorage.removeItem('todo.filter'); localStorage.removeItem('todo.collapsed'); } catch { /* ignore */ }
   const { app } = await import('/js/state.js');
-  app.review = null; app.reviewStats = null;
+  app.review = null; app.reviewStats = null; app.here = null; app.locationState = null;
+  window.__noMaps = true; // never call Google from tests
+  window.__geo = { state: 'prompt', position: { lat: 29.7610, lng: -95.3705, accuracy: 20 } }; // ~400 ft from mock Home Depot
+  try { localStorage.removeItem('todo.here'); localStorage.removeItem('todo.nearby.within'); } catch { /* ignore */ }
   const { setFilter } = await import('/js/filter.js');
   setFilter({ show: 'remaining', fits: 0 });
   const [{ loadAll }, { render }] = await Promise.all([import('/js/data.js'), import('/js/router.js')]);
@@ -32,14 +35,14 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector };
+  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
     try { await fn(check); } catch (e) { check(`${name}: threw`, false, e.stack || e.message); }
     if ($('#sheet').open) $('#sheet').close();
   }
-  window.__forceSheet = false; window.__forceWide = false;
+  window.__forceSheet = false; window.__forceWide = false; window.__geo = undefined; window.__noMaps = false;
   const failed = results.filter((r) => !r.ok);
   console.log(`smoke: ${results.length - failed.length}/${results.length} passed`, failed);
   return { passed: results.length - failed.length, total: results.length, failed, results };
@@ -499,4 +502,115 @@ async function inspector(check) {
   await wait(700);
   check('project inspector autosaves type', proj('p1').kind === 'sequential', proj('p1').kind);
   window.__forceWide = false;
+}
+
+// Places, location, Nearby, distance sort and inheritance.
+async function nearby(check) {
+  const { db } = await import('/js/state.js');
+  const task = (id) => db.tasks.find((t) => t.id === id);
+  const { placeFor } = await import('/js/places.js');
+  window.confirm = () => true;
+
+  await go('#nearby');
+  check('no location: asks to turn it on', has(undefined, 'turn on location') && !!$('[data-act="request-location"]'));
+  check('no actions at places yet', has(undefined, 'no actions at your places'));
+  check('archived place not offered', !has(undefined, 'old storage'));
+
+  // Give an action a place through the editor.
+  $('[data-act="request-location"]').click();
+  await wait(150);
+  check('location granted: card gone, nearest-first sort offered', !$('.loc-card') && !!$('[data-filter="sort"]'));
+  await go('#project/p4');
+  $('[data-task="t11"] .row-title').click();
+  await wait(100);
+  const f = $('#editor');
+  check('editor has location field, detail hidden with no place', !!f.elements.place_id && $('.loc-detail', f).hidden);
+  check('places list distances', [...f.elements.place_id.options].some((o) => /Home Depot · 400 ft/.test(o.text)), [...f.elements.place_id.options].map((o) => o.text).join('|'));
+  f.elements.place_id.value = 'pl1';
+  f.elements.place_id.dispatchEvent(new Event('change', { bubbles: true }));
+  $('input[name=location_trigger][value=arrive]', f).checked = true;
+  f.requestSubmit();
+  await wait(200);
+  check('place + alert saved', task('t11').place_id === 'pl1' && task('t11').location_trigger === 'arrive' && task('t11').location_radius_m === null);
+  check('row shows place chip with distance, marked here', has('[data-task="t11"]', 'home depot', '400 ft') && !!$('[data-task="t11"] .meta-place.here'));
+
+  await go('#nearby');
+  check('nearby lists the place and you are here', has(undefined, 'home depot', 'you’re here', 'buy fuel filter'));
+  check('nearby badge counts actions you are inside', $('#badge-nearby').textContent === '1', $('#badge-nearby').textContent);
+
+  // New place from inside the editor (stacked dialog), using current location.
+  await go('#project/p3');
+  $('[data-task="t9"] .row-title').click();
+  await wait(100);
+  const f2 = $('#editor');
+  f2.elements.place_id.value = '__new';
+  f2.elements.place_id.dispatchEvent(new Event('change', { bubbles: true }));
+  check('+ New place opens on top of the editor', $('#sheet2').open && $('#sheet').open);
+  const pf = $('#sheet2 form');
+  pf.requestSubmit();
+  await wait(50);
+  check('place needs a location before saving', has('#sheet2', 'choose where it is'));
+  $('[data-here]', pf).click();
+  await wait(100);
+  pf.elements.name.value = 'Jobsite A';
+  $('[data-radius="152"]', pf).click();
+  pf.requestSubmit();
+  await wait(200);
+  const jobsite = T().places.find((p) => p.name === 'Jobsite A');
+  check('new place saved with radius', jobsite && jobsite.radius_m === 152);
+  check('editor selects the new place, defaults to Arriving', f2.elements.place_id.selectedOptions[0].text === 'Jobsite A' && $('input[name=location_trigger]:checked', f2).value === 'arrive');
+  $('[data-cancel]', f2).click();
+
+  // Tag places are inherited: by tagged actions, their sub-actions, and project tags.
+  await go('#tag/g1');
+  $('[data-edit-tag="g1"]').click();
+  await wait(100);
+  const tf = $('#tag-form');
+  tf.elements.place_id.value = 'pl2';
+  tf.elements.place_id.dispatchEvent(new Event('change', { bubbles: true }));
+  tf.requestSubmit();
+  await wait(200);
+  check('tag place saved', T().tags.find((t) => t.id === 'g1').place_id === 'pl2');
+  check('tagged action inherits', (placeFor(task('t6')) || {}).via?.kind === 'tag');
+  check('sub-action inherits through its group', (placeFor(task('t7')) || {}).via?.kind === 'group');
+  check('project tag is inherited', (placeFor(task('t2')) || {}).via?.kind === 'project tag');
+  $('[data-task="t6"] .row-title').click();
+  await wait(100);
+  check('editor shows inherited place', has('#editor .loc-field', 'office via tag'));
+  $('#editor [data-cancel]').click();
+
+  // Nearest first.
+  const { setFilter, sortTasks } = await import('/js/filter.js');
+  const { taskSort } = await import('/js/state.js');
+  setFilter({ sort: 'distance' });
+  const order = sortTasks([task('t6'), task('t12'), task('t11')], taskSort).map((t) => t.id);
+  check('nearest first: 400 ft before 2.7 mi, no place last', order.join() === 't11,t6,t12', order.join());
+  setFilter({ sort: 'default' });
+
+  // Within filter hides far places.
+  await go('#nearby');
+  const within = $('[data-within]');
+  within.value = '1609';
+  within.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(100);
+  check('within 1 mi hides the office (2.7 mi)', has(undefined, 'home depot') && !has('.place-section:last-of-type', 'office'));
+  $('[data-within]').value = '0';
+  $('[data-within]').dispatchEvent(new Event('change', { bubbles: true }));
+
+  // Archive, never delete.
+  await go('#places');
+  check('places list shows radius and counts', has(undefined, 'home depot', '¼ mi radius'));
+  $('[data-edit-place="pl2"]').click();
+  await wait(50);
+  $('#sheet2 [data-archive]').click();
+  await wait(200);
+  check('archived place stops applying', !!T().places.find((p) => p.id === 'pl2').archived_at && !placeFor(task('t6')));
+  const del = await window.sb.from('places').delete().eq('id', 'pl1');
+  check('places cannot be deleted', !!del.error);
+
+  // Denied: explain how to turn it back on, offer retry.
+  const { app } = await import('/js/state.js');
+  app.here = null; app.locationState = 'denied';
+  await go('#nearby');
+  check('denied shows how to fix and Try again', has(undefined, 'location is off', 'try again'));
 }

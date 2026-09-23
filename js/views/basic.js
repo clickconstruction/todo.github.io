@@ -1,8 +1,9 @@
 // Inbox, Today, Tags and Tag views.
 import { db, esc, byId, isOpen, visible, taskSort, sortedTags, tagLabel, effectiveTagIds } from '../state.js';
 import { taskList } from '../rows.js';
-import { filterBar, applyFilter, closedFor, withClosed, filterNote } from '../filter.js';
+import { filterBar, applyFilter, closedFor, withClosed, filterNote, sortTasks } from '../filter.js';
 import { isAvailable } from '../availability.js';
+import { activePlace } from '../places.js';
 
 export function viewInbox() {
   const items = db.tasks.filter((t) => t.in_inbox && !t.parent_id && visible(t)).sort(taskSort);
@@ -34,9 +35,9 @@ export function viewTag(id) {
   const taggedProjectIds = db.projectTags.filter((x) => ids.has(x.tag_id)).map((x) => x.project_id);
   const conds = [directIds.length && `id.in.(${directIds.slice(0, 300).join(',')})`, taggedProjectIds.length && `project_id.in.(${taggedProjectIds.join(',')})`].filter(Boolean);
   const closed = conds.length ? closedFor(`tag:${id}`, (q) => q.or(conds.join(','))) : [];
-  const tasks = applyFilter(withClosed(local, closed)).sort(taskSort);
+  const tasks = sortTasks(applyFilter(withClosed(local, closed)), taskSort);
   return `<a class="back" href="#tags">‹ Tags</a>
-    <div class="view-head"><h1 class="tags">${esc(tagLabel(tag))}</h1></div>
+    <div class="view-head"><h1 class="tags">${esc(tagLabel(tag))}</h1><button class="btn small" data-edit-tag="${tag.id}">${activePlace(tag.place_id) ? `📍 ${esc(activePlace(tag.place_id).name)}` : 'Edit'}</button></div>
     ${filterBar()}${filterNote(local)}
     <p class="view-sub">${local.filter(isOpen).length} open${projects.length ? ` · includes actions from ${projects.map((p) => `<a href="#project/${p.id}">${esc(p.name)}</a>`).join(', ')} (tagged project)` : ''}</p>
     ${taskList(tasks) || (local.some(isOpen) ? '<p class="empty">Nothing matches this filter.</p>' : '<p class="empty">Nothing tagged here.</p>')}`;
@@ -50,7 +51,7 @@ export function viewFlagged() {
   const local = db.tasks.filter(isFlaggedTask);
   const flaggedProjects = db.projects.filter((p) => p.flagged).map((p) => p.id);
   const closed = closedFor('flagged', (q) => q.or(['flagged.is.true', flaggedProjects.length && `project_id.in.(${flaggedProjects.join(',')})`].filter(Boolean).join(',')));
-  const tasks = applyFilter(withClosed(local, closed)).sort(taskSort);
+  const tasks = sortTasks(applyFilter(withClosed(local, closed)), taskSort);
   const groups = new Map();
   tasks.forEach((t) => { const k = t.project_id || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); });
   const sections = [...groups.entries()].sort(([a], [b]) => (!a) - (!b) || ((byId(db.projects, a) || {}).name || '').localeCompare((byId(db.projects, b) || {}).name || ''))

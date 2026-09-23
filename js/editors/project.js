@@ -3,6 +3,7 @@
 import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, bySort, PROJECT_STATUSES } from '../state.js';
 import { insertFolder, updateProject, setLinks } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
+import { locationFieldHtml, wireLocationField } from './place.js';
 import { PROJECT_KINDS } from '../availability.js';
 
 function projectFieldsHtml(p, project) {
@@ -21,6 +22,7 @@ function projectFieldsHtml(p, project) {
     <label class="flag-toggle"><input type="checkbox" name="complete_with_last" ${p.complete_with_last ? 'checked' : ''}> Complete project when its last action is done</label>
     <label class="flag-toggle"><input type="checkbox" name="flagged" ${p.flagged ? 'checked' : ''}> Flagged <span class="hint">its actions show in Flagged</span></label>
     ${tagPickerHtml('actions inherit these')}
+    ${locationFieldHtml(p)}
     ${project ? `<label>Status<select name="status">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
     <label>Notes<textarea name="notes" placeholder="Purpose, what done looks like…">${esc(p.notes)}</textarea></label>
     ${project ? '<p class="view-sub" style="margin:0">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>' : ''}`;
@@ -35,6 +37,7 @@ function wireProjectForm(form, project, onTagsChange) {
     if (!newFolder.hidden) newFolder.focus();
   });
   const selectedTags = wireTagPicker(form, project ? db.projectTags.filter((x) => x.project_id === project.id).map((x) => x.tag_id) : [], onTagsChange);
+  const collectLocation = wireLocationField(form, onTagsChange);
   form.addEventListener('change', (e) => {
     if (e.target.name === 'kind') $('.kind-hint', form).textContent = PROJECT_KINDS.find(([v]) => v === e.target.value)[2];
   });
@@ -47,7 +50,7 @@ function wireProjectForm(form, project, onTagsChange) {
       folder_id = folder.id;
     }
     const fields = { name: (f.get('name') || '').trim(), folder_id, notes: f.get('notes'), kind: f.get('kind') || 'parallel',
-      complete_with_last: f.get('complete_with_last') === 'on', flagged: f.get('flagged') === 'on' };
+      complete_with_last: f.get('complete_with_last') === 'on', flagged: f.get('flagged') === 'on', ...collectLocation() };
     if (project) fields.status = f.get('status');
     return fields.name ? { fields, tagIds: selectedTags() } : null;
   };

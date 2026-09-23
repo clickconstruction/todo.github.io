@@ -6,15 +6,16 @@ const OUTBOX_KEY = 'todo.outbox';
 
 export async function loadAll() {
   const since = new Date(Date.now() - 86400000).toISOString();
-  const [tasks, projects, folders, tags, taskTags, projectTags] = await Promise.all([
+  const [tasks, projects, folders, tags, taskTags, projectTags, places] = await Promise.all([
     run(sb.from('tasks').select('*').or(`and(completed_at.is.null,dropped_at.is.null),completed_at.gte.${since}`)),
     run(sb.from('projects').select('*')),
     run(sb.from('folders').select('*')),
     run(sb.from('tags').select('*')),
     run(sb.from('task_tags').select('*')),
     run(sb.from('project_tags').select('*')),
+    run(sb.from('places').select('*')),
   ]);
-  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags });
+  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places });
 }
 
 // Some writes fire database triggers (group completion, complete-with-last-action,
@@ -196,6 +197,13 @@ export async function createTag() {
   if (!label) return;
   await ensureTag(label);
   app.render();
+}
+
+export async function updateTag(tag, fields) {
+  const [row] = await run(sb.from('tags').update(fields).eq('id', tag.id).select());
+  syncRow('tags', tag, row);
+  app.render();
+  return row;
 }
 
 export async function insertFolder(name) {

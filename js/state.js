@@ -5,7 +5,7 @@
 export const sb = window.sb;
 export const $ = (sel, root = document) => root.querySelector(sel);
 
-export const db = { tasks: [], projects: [], folders: [], tags: [], taskTags: [], projectTags: [] };
+export const db = { tasks: [], projects: [], folders: [], tags: [], taskTags: [], projectTags: [], places: [] };
 
 export const app = {
   user: null,
@@ -17,6 +17,8 @@ export const app = {
   review: null, // { ids, reviewed, current } for the current review session
   reviewStats: null, // projectId -> last completed_at (lazy)
   selected: null, // { type: 'task'|'project', id } shown in the desktop inspector
+  here: null, // { lat, lng, accuracy, at } your last position (on this device only)
+  locationState: null, // 'granted' | 'prompt' | 'denied' | 'unsupported'
 };
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
