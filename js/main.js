@@ -1,5 +1,5 @@
 // Todo Tooling entry point: event wiring, auth, service worker.
-import { sb, db, app, $, byId, isOpen, toggleCollapsed } from './state.js';
+import { sb, db, app, $, byId, isOpen, toggleCollapsed, toast } from './state.js';
 import { render } from './router.js';
 import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, addSubAction, bulkUpdate, markReviewed } from './data.js';
 import { reviewQueue, remainingIds, reviewDueCount } from './views/review.js';
@@ -219,5 +219,18 @@ if (!sb) {
 }
 
 // The shell is served cache-first, so skip the worker on localhost to keep edits visible while developing.
+// When a new version activates, reload (or offer to, if the user is mid-edit) so nobody runs a stale app.
 const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-if ('serviceWorker' in navigator && !isLocal) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && !isLocal) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  }).catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) return; // first install, nothing stale to replace
+    const inspector = $('#inspector');
+    const busy = $('#sheet').open || typing() || (inspector && inspector.contains(document.activeElement));
+    if (busy) toast('Todo Tooling updated', { label: 'Reload', run: () => location.reload() });
+    else location.reload();
+  });
+}
