@@ -14,6 +14,9 @@
   // ---------- helpers ----------
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const byId = (list, id) => list.find((x) => x.id === id);
+  // loadAll() replaces db arrays when the app regains focus, so an object captured
+  // when a sheet opened may be stale by the time it saves. Write through by id.
+  const syncRow = (key, stale, row) => Object.assign(byId(db[key], row.id) || stale, row);
   const isOpen = (t) => !t.completed_at && !t.dropped_at;
   const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
   const endOfToday = () => { const d = new Date(); d.setHours(23, 59, 59, 999); return d; };
@@ -119,7 +122,7 @@
   async function setCompleted(task, done) {
     const completed_at = done ? new Date().toISOString() : null;
     const [row] = await run(sb.from('tasks').update({ completed_at }).eq('id', task.id).select());
-    Object.assign(task, row);
+    task = syncRow('tasks', task, row);
     render();
     if (done) toast('Completed', { label: 'Undo', run: () => setCompleted(task, false) });
   }
@@ -129,7 +132,7 @@
     let row;
     if (task) {
       [row] = await run(sb.from('tasks').update(fields).eq('id', task.id).select());
-      Object.assign(task, row);
+      syncRow('tasks', task, row);
     } else {
       [row] = await run(sb.from('tasks').insert(fields).select());
       db.tasks.push(row);
@@ -171,27 +174,121 @@
     return parent;
   }
 
-  async function createProject() {
-    const name = prompt('Project name');
-    if (!name || !name.trim()) return;
-    let folder_id = null;
-    if (db.folders.length) {
-      const names = db.folders.map((f, i) => `${i + 1}. ${f.name}`).join('\n');
-      const pick = prompt(`Folder (number, or leave blank for none):\n${names}`);
-      const f = db.folders[Number(pick) - 1];
-      if (f) folder_id = f.id;
-    }
-    const [row] = await run(sb.from('projects').insert({ name: name.trim(), folder_id, sort: db.projects.length }).select());
-    db.projects.push(row);
-    location.hash = `#project/${row.id}`;
+  const PROJECT_STATUSES = [['active', 'Active'], ['on_hold', 'On hold'], ['completed', 'Completed'], ['dropped', 'Dropped']];
+  const bySort = (a, b) => a.sort - b.sort || a.name.localeCompare(b.name);
+
+  // Project editor sheet: create or edit name, folder (with inline "New folder…"), status and notes.
+  function openProjectEditor(project, defaults = {}) {
+    const p = project || { name: '', folder_id: null, status: 'active', notes: '', ...defaults };
+    const sheet = $('#sheet');
+    sheet.classList.remove('full');
+    const folderOptions = db.folders.filter((f) => !f.archived_at || f.id === p.folder_id).sort(bySort)
+      .map((f) => `<option value="${f.id}" ${f.id === p.folder_id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
+    sheet.innerHTML = `<form method="dialog" id="project-form">
+      <h2>${project ? 'Edit project' : 'New project'}</h2>
+      <input type="text" name="name" value="${esc(p.name)}" placeholder="Outcome, e.g. Launch todotooling.com" required autocomplete="off">
+      <label>Folder
+        <select name="folder_id"><option value="">No folder</option>${folderOptions}<option value="__new">+ New folder…</option></select></label>
+      <input type="text" name="new_folder" placeholder="New folder name" autocomplete="off" hidden>
+      ${project ? `<label>Status<select name="status">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
+      <label>Notes<textarea name="notes" placeholder="Purpose, what done looks like…">${esc(p.notes)}</textarea></label>
+      ${project ? '<p class="view-sub" style="margin:0">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>' : ''}
+      <div class="actions">
+        <div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div>
+      </div>
+    </form>`;
+    const form = $('#project-form', sheet);
+    const newFolder = form.elements.new_folder;
+    form.elements.folder_id.onchange = (e) => {
+      newFolder.hidden = e.target.value !== '__new';
+      newFolder.required = !newFolder.hidden;
+      if (!newFolder.hidden) newFolder.focus();
+    };
+    $('[data-cancel]', sheet).onclick = () => sheet.close();
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const f = new FormData(form);
+      let folder_id = f.get('folder_id') || null;
+      if (folder_id === '__new') {
+        const folder = await insertFolder(f.get('new_folder'));
+        if (!folder) return;
+        folder_id = folder.id;
+      }
+      const fields = { name: f.get('name').trim(), folder_id, notes: f.get('notes') };
+      if (project) fields.status = f.get('status');
+      if (!fields.name) return;
+      sheet.close();
+      if (project) return updateProject(project, fields);
+      const [row] = await run(sb.from('projects').insert({ ...fields, sort: db.projects.length }).select());
+      db.projects.push(row);
+      location.hash = `#project/${row.id}`;
+    };
+    sheet.showModal();
+    if (!project) form.elements.name.focus();
   }
-  async function createFolder() {
-    const name = prompt('Folder name');
-    if (!name || !name.trim()) return;
-    const [row] = await run(sb.from('folders').insert({ name: name.trim(), sort: db.folders.length }).select());
+
+  async function insertFolder(name) {
+    name = (name || '').trim();
+    if (!name) return null;
+    const existing = db.folders.find((f) => !f.archived_at && f.name.toLowerCase() === name.toLowerCase());
+    if (existing) return existing;
+    const [row] = await run(sb.from('folders').insert({ name, sort: db.folders.length }).select());
     db.folders.push(row);
-    render();
+    return row;
   }
+
+  // Folder sheet: create, rename, archive/unarchive. Folders are never deleted, and a
+  // folder can only be archived once it has no active or on-hold projects (the database enforces this too).
+  function openFolderEditor(folder) {
+    const sheet = $('#sheet');
+    sheet.classList.remove('full');
+    const inside = folder ? db.projects.filter((p) => p.folder_id === folder.id) : [];
+    const live = inside.filter((p) => p.status === 'active' || p.status === 'on_hold');
+    let archiveControl = '';
+    if (folder && folder.archived_at) {
+      archiveControl = '<button type="button" class="btn" data-archive="off">Unarchive folder</button>';
+    } else if (folder) {
+      archiveControl = live.length
+        ? `<p class="view-sub" style="margin:0">To archive this folder, first move or complete its ${live.length} active project${live.length === 1 ? '' : 's'}.</p>`
+        : '<button type="button" class="btn" data-archive="on">Archive folder</button>';
+    }
+    sheet.innerHTML = `<form method="dialog" id="folder-form">
+      <h2>${folder ? 'Edit folder' : 'New folder'}</h2>
+      <input type="text" name="name" value="${esc(folder ? folder.name : '')}" placeholder="e.g. PRIORITIES, Click Construction, Personal" required autocomplete="off">
+      ${folder ? `<p class="view-sub" style="margin:0">${inside.length} project${inside.length === 1 ? '' : 's'} in this folder${folder.archived_at ? ' · archived' : ''}</p>` : ''}
+      <div class="actions">
+        ${archiveControl}
+        <div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div>
+      </div>
+    </form>`;
+    const form = $('#folder-form', sheet);
+    $('[data-cancel]', sheet).onclick = () => sheet.close();
+    const archive = $('[data-archive]', sheet);
+    if (archive) archive.onclick = async () => {
+      const archived_at = archive.dataset.archive === 'on' ? new Date().toISOString() : null;
+      sheet.close();
+      const [row] = await run(sb.from('folders').update({ archived_at }).eq('id', folder.id).select());
+      syncRow('folders', folder, row);
+      toast(archived_at ? `Archived "${folder.name}"` : `Unarchived "${folder.name}"`);
+      render();
+    };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const name = form.elements.name.value.trim();
+      if (!name) return;
+      sheet.close();
+      if (folder) {
+        const [row] = await run(sb.from('folders').update({ name }).eq('id', folder.id).select());
+        syncRow('folders', folder, row);
+      } else {
+        await insertFolder(name);
+      }
+      render();
+    };
+    sheet.showModal();
+    form.elements.name.focus();
+  }
+
   async function createTag() {
     const label = prompt('Tag name (use "Parent : Child" to nest, e.g. Waiting : Hiro)');
     if (!label) return;
@@ -200,7 +297,7 @@
   }
   async function updateProject(project, fields) {
     const [row] = await run(sb.from('projects').update(fields).eq('id', project.id).select());
-    Object.assign(project, row);
+    syncRow('projects', project, row);
     render();
   }
 
@@ -259,19 +356,27 @@
     const c = projectCounts(p);
     const muted = p.status !== 'active';
     const count = c.overdue ? `<span class="count due">${c.overdue}</span>` : `<span class="count">${c.open || ''}</span>`;
-    return `<a class="group-row ${muted ? 'muted' : ''}" href="#project/${p.id}"><span class="dot"></span><span>${esc(p.name)}${p.status === 'on_hold' ? ' (on hold)' : ''}</span>${count}</a>`;
+    return `<a class="group-row ${muted ? 'muted' : ''}" href="#project/${p.id}"><span class="dot"></span><span>${esc(p.name)}${p.status === 'active' ? '' : ` (${PROJECT_STATUSES.find(([v]) => v === p.status)[1].toLowerCase()})`}</span>${count}</a>`;
   }
 
+  let showInactive = false;
+
   function viewProjects() {
-    const live = db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold');
-    const bySort = (a, b) => a.sort - b.sort || a.name.localeCompare(b.name);
+    const isLive = (p) => p.status === 'active' || p.status === 'on_hold';
+    const shown = db.projects.filter((p) => showInactive || isLive(p));
+    const liveCount = db.projects.filter(isLive).length;
+    const archivedFolders = db.folders.filter((f) => f.archived_at).length;
+    const inactiveCount = db.projects.length - liveCount;
+    const hiddenLabel = [inactiveCount && `${inactiveCount} completed/dropped`, archivedFolders && `${archivedFolders} archived folder${archivedFolders === 1 ? '' : 's'}`].filter(Boolean).join(', ');
+    const folderHead = (f) => `<div class="folder-title ${f.archived_at ? 'muted' : ''}"><span>${f.archived_at ? '🗄️' : '📁'} ${esc(f.name)}${f.archived_at ? ' (archived)' : ''}</span>
+      <span class="folder-actions">${f.archived_at ? '' : `<button class="icon-btn" data-add-project="${f.id}" aria-label="New project in ${esc(f.name)}">+</button>`}<button class="icon-btn" data-edit-folder="${f.id}" aria-label="Edit folder ${esc(f.name)}">✎</button></span></div>`;
     let html = `<div class="view-head"><h1>Projects</h1><span><button class="btn small" data-act="new-folder">+ Folder</button> <button class="btn small primary" data-act="new-project">+ Project</button></span></div>
-      <p class="view-sub">${live.length} active project${live.length === 1 ? '' : 's'}</p>`;
-    db.folders.slice().sort(bySort).forEach((f) => {
-      const ps = live.filter((p) => p.folder_id === f.id).sort(bySort);
-      html += `<div class="folder-title"><span>📁 ${esc(f.name)}</span></div>${ps.map(projectRow).join('') || '<p class="empty" style="padding:8px 0">No projects</p>'}`;
+      <p class="view-sub">${liveCount} active project${liveCount === 1 ? '' : 's'}${hiddenLabel ? ` · <a href="#projects" data-act="toggle-inactive">${showInactive ? 'hide' : 'show'} ${hiddenLabel}</a>` : ''}</p>`;
+    db.folders.filter((f) => showInactive || !f.archived_at).sort(bySort).forEach((f) => {
+      const ps = shown.filter((p) => p.folder_id === f.id).sort(bySort);
+      html += folderHead(f) + (ps.map(projectRow).join('') || '<p class="empty" style="padding:8px 0">No projects</p>');
     });
-    const loose = live.filter((p) => !p.folder_id || !byId(db.folders, p.folder_id)).sort(bySort);
+    const loose = shown.filter((p) => !p.folder_id || !byId(db.folders, p.folder_id)).sort(bySort);
     if (loose.length) html += `${db.folders.length ? '<div class="folder-title"><span>No folder</span></div>' : ''}${loose.map(projectRow).join('')}`;
     if (!db.projects.length) html += '<p class="empty">No projects yet. A project is any outcome that takes more than one action.</p>';
     return html;
@@ -283,10 +388,11 @@
     const tasks = db.tasks.filter((t) => t.project_id === p.id && visible(t)).sort(taskSort);
     const top = tasks.filter((t) => !t.parent_id);
     const ordered = top.flatMap((t) => [t, ...tasks.filter((s) => s.parent_id === t.id)]);
-    const statuses = [['active', 'Active'], ['on_hold', 'On hold'], ['completed', 'Completed'], ['dropped', 'Dropped']];
-    return `<a class="back" href="#projects">‹ Projects</a>
-      <div class="view-head"><h1>${esc(p.name)}</h1></div>
-      <p class="view-sub"><select data-project-status="${p.id}" style="width:auto;padding:6px 10px">${statuses.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></p>
+    const folder = p.folder_id && byId(db.folders, p.folder_id);
+    return `<a class="back" href="#projects">‹ Projects${folder ? ` / 📁 ${esc(folder.name)}` : ''}</a>
+      <div class="view-head"><h1>${esc(p.name)}</h1><button class="btn small" data-edit-project="${p.id}">Edit</button></div>
+      ${p.notes ? `<p class="view-sub" style="white-space:pre-wrap">${esc(p.notes)}</p>` : ''}
+      <p class="view-sub"><select data-project-status="${p.id}" style="width:auto;padding:6px 10px">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></p>
       <form class="capture" data-capture data-project="${p.id}"><input type="text" name="title" placeholder="Add an action to ${esc(p.name)}…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
       ${taskList(ordered, { showProject: false }) || '<p class="empty">No actions. What is the very next physical step?</p>'}`;
   }
@@ -502,9 +608,15 @@
     }
     const act = e.target.closest('[data-act]');
     if (act) {
-      ({ 'new-project': createProject, 'new-folder': createFolder, 'new-tag': createTag, 'new-token': createToken, 'sign-out': () => sb.auth.signOut() })[act.dataset.act]();
+      ({ 'new-project': () => openProjectEditor(null), 'new-folder': () => openFolderEditor(null), 'toggle-inactive': () => { showInactive = !showInactive; render(); }, 'new-tag': createTag, 'new-token': createToken, 'sign-out': () => sb.auth.signOut() })[act.dataset.act]();
       return;
     }
+    const editFolder = e.target.closest('[data-edit-folder]');
+    if (editFolder) { openFolderEditor(byId(db.folders, editFolder.dataset.editFolder)); return; }
+    const addProject = e.target.closest('[data-add-project]');
+    if (addProject) { openProjectEditor(null, { folder_id: addProject.dataset.addProject }); return; }
+    const editProject = e.target.closest('[data-edit-project]');
+    if (editProject) { openProjectEditor(byId(db.projects, editProject.dataset.editProject)); return; }
     const removeSender = e.target.closest('[data-remove-sender]');
     if (removeSender) {
       if (confirm('Stop accepting email capture from this address?')) {

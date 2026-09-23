@@ -13,7 +13,8 @@ const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = `Todo Tooling is the user's GTD system. Capture anything new with capture (it lands in the Inbox).
 Clarify inbox items with update_task: give each a project and/or tags (contexts like "Laptop", people like "Waiting : Hiro"); an item leaves the Inbox once it has a project or tag.
 Use due dates only for hard deadlines; use flagged for "today-ish". Dates are YYYY-MM-DD in the user's timezone.
-Never complete, reschedule or re-file tasks the user did not ask you to change.`;
+Never complete, reschedule or re-file tasks the user did not ask you to change.
+Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.`;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -276,6 +277,17 @@ class Api {
     return p.id;
   }
 
+  // Folder by name (case-insensitive), created if missing. null/'' means no folder.
+  async resolveFolder(name) {
+    if (name === null || name === '') return null;
+    const key = String(name).trim().toLowerCase();
+    const all = (await this.q(`folders?${this.u}&select=id,name,archived_at`)).filter((f) => f.name.toLowerCase() === key);
+    const found = all.find((f) => !f.archived_at) || all[0];
+    if (found) return found.id;
+    const [row] = await this.q('folders', { method: 'POST', prefer: 'return=representation', body: { user_id: this.userId, name: String(name).trim() } });
+    return row.id;
+  }
+
   // "Waiting : Hiro" finds or creates parent "Waiting" and child "Hiro".
   async ensureTag(label) {
     const parts = String(label).split(':').map((s) => s.trim()).filter(Boolean).slice(0, 2);
@@ -470,14 +482,89 @@ const TOOLS = [
       required: ['name'],
     },
     async run(api, { name, folder, notes = '' }) {
-      let folder_id = null;
-      if (folder) {
-        const found = (await api.q(`folders?${api.u}&select=id,name`)).find((f) => f.name.toLowerCase() === folder.toLowerCase());
-        folder_id = found ? found.id
-          : (await api.q('folders', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name: folder } }))[0].id;
-      }
+      const folder_id = folder ? await api.resolveFolder(folder) : null;
       const [row] = await api.q('projects', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name: String(name).trim(), notes, folder_id } });
       return { id: row.id, name: row.name, folder: folder || null, status: row.status };
+    },
+  },
+  {
+    name: 'update_project',
+    description: 'Rename a project, move it to a folder (created if missing; null for no folder), change its status, or edit its notes. Only fields you pass change.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Project name or id' },
+        name: { type: 'string' },
+        folder: { type: ['string', 'null'] },
+        status: { type: 'string', enum: ['active', 'on_hold', 'completed', 'dropped'] },
+        notes: { type: 'string' },
+      },
+      required: ['project'],
+    },
+    async run(api, a) {
+      const id = await api.resolveProject(a.project);
+      const patch = {};
+      if (a.name !== undefined) patch.name = String(a.name).trim();
+      if (a.folder !== undefined) patch.folder_id = await api.resolveFolder(a.folder);
+      if (a.status !== undefined) patch.status = a.status;
+      if (a.notes !== undefined) patch.notes = a.notes;
+      if (Object.keys(patch).length) await api.q(`projects?${api.u}&id=eq.${id}`, { method: 'PATCH', body: patch });
+      const [p] = await api.q(`projects?${api.u}&id=eq.${id}&select=id,name,status,folder_id,notes`);
+      const folder = p.folder_id ? (await api.q(`folders?${api.u}&id=eq.${p.folder_id}&select=name`))[0] : null;
+      return { id: p.id, name: p.name, status: p.status, folder: folder ? folder.name : null, notes: p.notes || undefined };
+    },
+  },
+  {
+    name: 'list_folders',
+    description: 'List project folders with how many active/on-hold and completed/dropped projects each holds. Archived folders are included only if include_archived is true.',
+    inputSchema: { type: 'object', properties: { include_archived: { type: 'boolean', default: false } } },
+    async run(api, { include_archived = false }) {
+      const [folders, projects] = await Promise.all([
+        api.q(`folders?${api.u}${include_archived ? '' : '&archived_at=is.null'}&order=sort.asc&select=id,name,archived_at`),
+        api.q(`projects?${api.u}&folder_id=not.is.null&select=folder_id,status`),
+      ]);
+      return folders.map((f) => {
+        const inside = projects.filter((p) => p.folder_id === f.id);
+        const live = inside.filter((p) => p.status === 'active' || p.status === 'on_hold').length;
+        return { id: f.id, name: f.name, archived: !!f.archived_at, active_projects: live, archived_projects: inside.length - live };
+      });
+    },
+  },
+  {
+    name: 'create_folder',
+    description: 'Create a project folder (returns the existing one if a non-archived folder with that name exists).',
+    inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+    async run(api, { name }) {
+      if (!name || !String(name).trim()) throw new Error('name is required');
+      const id = await api.resolveFolder(name);
+      const [f] = await api.q(`folders?${api.u}&id=eq.${id}&select=id,name,archived_at`);
+      return { id: f.id, name: f.name, archived: !!f.archived_at };
+    },
+  },
+  {
+    name: 'update_folder',
+    description: 'Rename a folder, or archive/unarchive it (archived: true/false). Folders cannot be deleted. Archiving fails while the folder has active or on-hold projects; move them with update_project or mark them completed/dropped first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        folder: { type: 'string', description: 'Folder name or id' },
+        name: { type: 'string', description: 'New name' },
+        archived: { type: 'boolean' },
+      },
+      required: ['folder'],
+    },
+    async run(api, a) {
+      const all = await api.q(`folders?${api.u}&select=id,name,archived_at`);
+      const key = String(a.folder).trim().toLowerCase();
+      const matches = all.filter((f) => f.id === a.folder || f.name.toLowerCase() === key);
+      const f = matches.find((x) => !x.archived_at) || matches[0];
+      if (!f) throw new Error(`No folder "${a.folder}". Use list_folders.`);
+      const patch = {};
+      if (a.name !== undefined) patch.name = String(a.name).trim();
+      if (a.archived !== undefined) patch.archived_at = a.archived ? new Date().toISOString() : null;
+      if (Object.keys(patch).length) await api.q(`folders?${api.u}&id=eq.${f.id}`, { method: 'PATCH', body: patch });
+      const [row] = await api.q(`folders?${api.u}&id=eq.${f.id}&select=id,name,archived_at`);
+      return { id: row.id, name: row.name, archived: !!row.archived_at };
     },
   },
   {
