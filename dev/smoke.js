@@ -13,6 +13,7 @@ const T = () => window.__mock.tables;
 // Reset mock data and reload it through the app's own modules (same instances the page uses).
 async function reload() {
   window.__mock.reset();
+  (await import('/js/prefs.js')).setFocus(null);
   window.__forceSheet = true; window.__forceWide = false; // suites use the sheet unless they opt in
   const insp = await import('/js/state.js'); insp.app.selected = null;
   try { localStorage.removeItem('todo.filter'); localStorage.removeItem('todo.collapsed'); } catch { /* ignore */ }
@@ -37,7 +38,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -723,6 +724,120 @@ async function templates(check) {
   $(`[data-tpl-archive="${saved.id}"]`).click();
   await until(() => location.hash === '#projects');
   check('archive: gone from the list, can be shown and restored', !has(undefined, 'planning kit') && has(undefined, '1 archived template') && !!T().project_templates.find((t) => t.id === saved.id).archived_at);
+}
+
+// Focus: narrow the app to folders/projects on this device.
+async function focusMode(check) {
+  const { db } = await import('/js/state.js');
+  const P = await import('/js/prefs.js');
+  P.setFocus(null);
+  try {
+    await go('#flagged');
+    check('no banner without focus', !$('.focus-banner'));
+    document.querySelector('.nav-focus').click();
+    await wait(80);
+    check('focus picker lists folders with their projects', has('#sheet', 'focus', 'priorities', 'click plumbing', 'personal', 'end of life planning', 'errands'));
+    const f1 = $('#sheet [data-focus-folder="f1"]'); f1.checked = true; f1.dispatchEvent(new Event('change', { bubbles: true }));
+    check('ticking a folder ticks its projects', $('#sheet [data-focus-project="p1"]').checked && $('#sheet [data-focus-project="p1"]').disabled);
+    $('#sheet form').requestSubmit();
+    await wait(150);
+    check('banner shows what’s in focus', has('.focus-banner', 'focused on', 'priorities'));
+    check('flagged narrows to the focus', has(undefined, 'get plans released') && !has(undefined, 'pick up cp33'), text());
+    await go('#projects');
+    check('projects list narrows', has(undefined, 'click plumbing') && !has(undefined, 'end of life planning'));
+    await go('#inbox');
+    check('the Inbox always shows everything', !$('.focus-banner') && has(undefined, 'frog pond ein'));
+    await go('#project/p2');
+    check('an out-of-focus project still opens (no banner)', has(undefined, 'end of life planning') && !$('.focus-banner'));
+    $('[data-focus-here="p2"]').click();
+    await wait(100);
+    check('🎯 on a project focuses on it', P.getFocus().projects.join() === 'p2' && !P.getFocus().folders.length);
+    await go('#forecast');
+    check('forecast narrows', !has(undefined, 'call gvec'));
+    $('.focus-banner [data-act="unfocus"]').click();
+    await wait(100);
+    check('unfocus shows everything again', !P.getFocus() && !$('.focus-banner'));
+    check('focus is kept on this device', localStorage.getItem('todo.focus') === null);
+    void db;
+  } finally { P.setFocus(null); }
+}
+
+// Settings → Dates: default times (the account's) and the Forecast tag.
+async function datesSettings(check) {
+  const { db, app } = await import('/js/state.js');
+  const { HOURS } = await import('/js/dates.js');
+  await go('#settings');
+  check('dates section with three times and the Today tag', $$('[data-setting-time]').length === 3 && !!$('[data-setting-forecast-tag]') && has(undefined, 'due dates', 'defer dates', 'planned dates', 'always show in today'));
+  const due = $('[data-setting-time="due_minutes"]'); due.value = '15:30'; due.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(200);
+  check('saved to the account and used right away', T().user_settings[0].due_minutes === 930 && HOURS.due_at === 15.5);
+  const { openEditor } = await import('/js/editors/task.js');
+  openEditor(db.tasks.find((t) => t.id === 't9'));
+  await wait(80);
+  const f = $('#editor');
+  f.elements.due_at.value = '2026-10-05';
+  f.requestSubmit();
+  await wait(250);
+  const d = new Date(T().tasks.find((t) => t.id === 't9').due_at);
+  check('a plain due date lands at the new time', d.getHours() === 15 && d.getMinutes() === 30, d.toString());
+  const tagSel = $('[data-setting-forecast-tag]'); tagSel.value = 'g1'; tagSel.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(200);
+  check('forecast tag saved', app.settings.forecast_tag_id === 'g1');
+  await go('#forecast');
+  check('Today shows the tag’s actions', has(undefined, 'tagged laptop', 'inside deadmans switch') || has(undefined, 'tagged laptop'), text().slice(0, 300));
+  // Put everything back.
+  const { saveSettings } = await import('/js/prefs.js');
+  await saveSettings({ due_minutes: 1020, forecast_tag_id: null }, { quiet: true });
+}
+
+// Keyboard shortcuts: keys do things, never while typing; Settings → Keyboard shows them.
+async function keyboard(check) {
+  const { db, app } = await import('/js/state.js');
+  const key = (k, opts = {}) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...opts }));
+  await go('#inbox');
+  key('2'); await wait(80);
+  check('number keys go to views', location.hash === '#forecast');
+  key('4'); await wait(80);
+  check('4 → Projects', location.hash === '#projects');
+  await go('#project/p1');
+  key('j'); await wait(80);
+  check('j selects the first item', app.selected && app.selected.id === 't1' && !!$('[data-task="t1"].selected'));
+  key('j'); await wait(80);
+  check('j again moves down', app.selected.id === 't2');
+  key('f'); await wait(250);
+  check('f flags the selected item', db.tasks.find((t) => t.id === 't2').flagged === true);
+  key('p'); await wait(250);
+  check('p plans it for today', !!db.tasks.find((t) => t.id === 't2').planned_at && new Date(db.tasks.find((t) => t.id === 't2').planned_at).toDateString() === new Date().toDateString() && has('#toast', 'undo'));
+  key('x'); await wait(300);
+  check('x completes it', !!T().tasks.find((t) => t.id === 't2').completed_at);
+  key('k'); await wait(80);
+  check('k moves up', app.selected.id === 't1');
+  key('F', { shiftKey: true }); await wait(120);
+  const P = await import('/js/prefs.js');
+  check('⇧F focuses on the selected item’s project', P.getFocus() && P.getFocus().projects.join() === 'p1');
+  key('U', { shiftKey: true }); await wait(120);
+  check('⇧U unfocuses', !P.getFocus());
+  key('Escape'); await wait(80);
+  check('Esc clears the selection', !app.selected);
+  // Not while typing.
+  const input = $('[data-capture] input');
+  input.focus();
+  key('4');
+  await wait(60);
+  check('keys don’t fire while typing', location.hash.startsWith('#project/p1'));
+  input.blur();
+  key('?', { shiftKey: true }); await wait(100);
+  check('? shows the shortcuts with the drawn keyboard', $('#sheet').open && !!$('#sheet .kbd') && has('#sheet', 'capture to the inbox', 'flag or unflag'));
+  $('#sheet [data-kbd="x"]').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  check('hovering a key tells you what it does', has('#sheet [data-kbd-tip]', 'x: complete'));
+  $('#sheet').close();
+  key('n'); await wait(80);
+  check('n captures to the Inbox', $('#sheet').open && !!$('#quick'));
+  $('#sheet').close();
+  await go('#settings');
+  check('Settings → Keyboard: keyboard and every shortcut', !!$('.settings-card .kbd') && $$('.settings-card .kbd-key.on').length > 20 && has(undefined, 'keyboard', 'selected item', 'go to'));
+  $('.settings-card [data-kbd="/"]').click();
+  check('tapping a key shows its shortcuts', has('.settings-card [data-kbd-tip]', '/: search', '?: show keyboard shortcuts'), text('.settings-card [data-kbd-tip]'));
 }
 
 // P4: estimates, row signals, project flags and tags.

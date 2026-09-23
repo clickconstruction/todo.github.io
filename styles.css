@@ -771,3 +771,49 @@ form label.prop-inline.review-every select { width: auto; }
 .tpl-moves .danger-text { margin-left: auto; }
 .from-template { margin-top: -8px; font-size: 14px; }
 .prop-val.follows { color: var(--muted); font-size: 14px; }
+
+/* Focus */
+.focus-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; padding: 8px 12px; border-radius: 12px; background: var(--accent-soft); color: var(--text); font-size: 14px; }
+.focus-banner .link-btn { margin-left: 12px; }
+.focus-picker { display: grid; gap: 10px; }
+.focus-list { display: grid; gap: 2px; max-height: 55vh; overflow: auto; }
+.sheet label.focus-item, label.focus-item { display: flex; align-items: center; gap: 8px; padding: 7px 4px; font-size: 15px; font-weight: 400; color: var(--text); }
+label.focus-item.indent { padding-left: 26px; }
+label.focus-item input { width: 18px; height: 18px; margin: 0; }
+.tabs .nav-focus { display: none; }
+@media (min-width: 900px) {
+  .tabs button.nav-focus { display: flex; flex: none; flex-direction: row; justify-content: flex-start; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; font-size: 15px; font-weight: 600; background: none; border: none; color: var(--muted); cursor: pointer; font-family: inherit; }
+  body.is-focused .tabs .nav-focus { background: var(--accent-soft); color: var(--accent); }
+}
+.more-sheet .focus-more { width: 100%; justify-content: flex-start; margin-bottom: 8px; }
+
+/* Settings cards, keyboard */
+.settings-card { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-bottom: 12px; display: grid; gap: 4px; }
+.settings-card .prop-inline { flex-wrap: wrap; }
+.settings-card .prop-inline .hint { flex: 1; min-width: 140px; font-size: 13px; }
+.settings-card input[type=time] { width: auto; padding: 7px 10px; }
+.settings-card select { width: auto; max-width: 50%; padding: 7px 10px; }
+kbd { display: inline-block; min-width: 1.6em; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line); border-bottom-width: 2px; background: var(--surface-2); font: 600 13px ui-monospace, monospace; text-align: center; color: var(--text); }
+.kbd { display: grid; gap: 5px; padding: 10px; border-radius: 12px; background: var(--surface-2); overflow-x: auto; }
+.kbd-row { display: flex; gap: 5px; padding-left: calc(var(--indent, 0) * 12px); }
+.kbd-row.arrows { justify-content: flex-end; }
+.kbd-key { flex: 1 1 0; min-width: 26px; height: 36px; border-radius: 7px; border: 1px solid var(--line); border-bottom-width: 3px; background: var(--surface); color: var(--muted); font: 600 13px ui-monospace, monospace; cursor: pointer; padding: 0; }
+.kbd-key.wide { flex: 1.8 1 0; font-size: 15px; }
+.kbd-key.on { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.kbd-key.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.kbd-row.arrows .kbd-key { flex: 0 0 44px; }
+.kbd-tip { min-height: 1.4em; font-size: 14px; color: var(--text); padding: 4px 2px 0; }
+.kbd-lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 4px 20px; margin-top: 8px; }
+.kbd-group { margin: 10px 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; grid-column: 1 / -1; }
+.kbd-lists .kbd-group { grid-column: auto; }
+.kbd-list { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px; align-items: baseline; font-size: 14px; }
+.kbd-list dt { white-space: nowrap; }
+.kbd-list dd { margin: 0; }
+.kbd-sheet { display: grid; gap: 10px; }
+@media (max-width: 520px) { .kbd-key { min-width: 20px; height: 30px; font-size: 11px; } .kbd-row { gap: 3px; } }
+.settings-card label.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 2px; border-bottom: 1px solid var(--line); font-weight: 400; color: var(--text); font-size: 15px; }
+.settings-card label.set-row:last-of-type { border-bottom: none; }
+.set-text { display: grid; gap: 2px; min-width: 0; }
+.set-text b { font-weight: 600; }
+.set-text .hint { font-size: 13px; }
+.kbd-row:first-child .kbd-key { flex: 0 0 64px; }

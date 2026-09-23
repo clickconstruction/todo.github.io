@@ -5,6 +5,7 @@ import { sb, app, run, esc, toast } from '../state.js';
 import { parse, prepare, sampleTree, chunks, sumCounts, omniRunUrl, OMNI_SCRIPT } from '../omnifocus-import.js';
 import { localTz } from '../repeat.js';
 import { loadAll } from '../data.js';
+import { HOURS } from '../dates.js';
 
 const S = { step: 'start', text: '', parsed: null, prepared: null, preview: null, result: null, error: '', completed: 'none', progress: '', imports: null };
 const reset = () => Object.assign(S, { step: 'start', text: '', parsed: null, prepared: null, preview: null, result: null, error: '', completed: 'none', progress: '' });
@@ -24,7 +25,7 @@ async function check(text) {
   S.error = '';
   try {
     S.text = text;
-    S.parsed = parse(text, { tz: localTz() });
+    S.parsed = parse(text, { tz: localTz(), hours: { due: HOURS.due_at, planned: HOURS.planned_at, defer: HOURS.defer_at } });
   } catch (e) { S.error = e.message; S.step = 'start'; app.render(); return; }
   await recheck();
 }

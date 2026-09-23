@@ -7,7 +7,7 @@ import { descendants } from './tree.js';
 import { reviewQueue, remainingIds, reviewDueCount } from './views/review.js';
 import { startOfToday } from './dates.js';
 import { forecastData } from './views/forecast.js';
-import { HOURS } from './dates.js';
+import { HOURS, atDefaultTime } from './dates.js';
 import { openEditor, openQuickEntry } from './editors/task.js';
 import { openProjectEditor, openFolderEditor } from './editors/project.js';
 import { isWide, select, clearSelection, moveSelection } from './inspector.js';
@@ -16,9 +16,12 @@ import { onDoneFilterChange } from './views/done.js';
 import { setFilter } from './filter.js';
 import { setTagStatus } from './data.js';
 import { openNewProject, openNewTemplate, openSaveAsTemplate } from './views/templates.js';
+import { openFocusPicker, unfocus, focusOn } from './editors/focus.js';
+import { handleKey, H } from './shortcuts.js';
 import { openSheet, esc } from './state.js';
 import { openNewPerspective, openPerspectiveEditor, openPerspectiveMenu, saveCurrentViewAsPerspective } from './editors/perspective.js';
 import { livePerspectives, movePerspective, archivePerspective, badgeCount } from './perspectives.js';
+import { getFocus, focusLabel } from './prefs.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
 import { enableAlerts } from './alerts.js';
@@ -42,6 +45,8 @@ const findTask = (id) => byId(db.tasks, id) || byId(app.searchExtra, id) || (app
 const ACTIONS = {
   'new-project': () => openNewProject(null, () => openProjectEditor(null)),
   'new-template': openNewTemplate,
+  focus: openFocusPicker,
+  unfocus,
   'toggle-archived-templates': () => { app.showArchivedTemplates = !app.showArchivedTemplates; render(); },
   'new-folder': () => openFolderEditor(null),
   'toggle-inactive': () => { app.showInactive = !app.showInactive; render(); },
@@ -81,7 +86,7 @@ const CLICKS = [
   ['[data-flag-project]', (el, e) => { e.stopPropagation(); const p = byId(db.projects, el.dataset.flagProject); if (p) updateProject(p, { flagged: !p.flagged }); }],
   ['[data-triage]', (el) => {
     const { overdue, plannedPast, today } = forecastData();
-    const at9 = new Date(today); at9.setHours(HOURS.planned_at);
+    const at9 = atDefaultTime(new Date(today), 'planned_at');
     if (el.dataset.triage === 'due-to-planned') {
       if (!confirm(`Turn ${overdue.length} overdue deadline${overdue.length === 1 ? '' : 's'} into plans for today? (Due dates are cleared; use this for dates that were never real deadlines.)`)) return;
       bulkUpdate(overdue, () => ({ due_at: null, planned_at: at9.toISOString() }), `${overdue.length} moved to Planned today`);
@@ -107,7 +112,7 @@ const CLICKS = [
     if (fix === 'add') { const input = $('#review-capture'); input.focus(); input.scrollIntoView({ block: 'center' }); return; }
     if (fix === 'forecast') { location.hash = '#forecast/past'; return; }
     if (fix === 'replan') {
-      const at9 = startOfToday(); at9.setHours(HOURS.planned_at);
+      const at9 = atDefaultTime(startOfToday(), 'planned_at');
       const stale = db.tasks.filter((t) => t.project_id === p.id && isOpen(t) && t.planned_at && new Date(t.planned_at) < startOfToday());
       bulkUpdate(stale, () => ({ planned_at: at9.toISOString() }), `${stale.length} planned for today`);
       return;
@@ -124,6 +129,7 @@ const CLICKS = [
   ['[data-persp-menu]', (el) => { const p = byId(db.perspectives, el.dataset.perspMenu); if (p) openPerspectiveMenu(p); }],
   ['[data-persp-move]', async (el) => { const p = byId(db.perspectives, el.dataset.perspMove); if (p) { await movePerspective(p, Number(el.dataset.dir)); render(); } }],
   ['[data-persp-restore]', async (el) => { const p = byId(db.perspectives, el.dataset.perspRestore); if (p) { await archivePerspective(p, false); render(); } }],
+  ['[data-focus-here]', (el) => focusOn(el.dataset.focusHere)],
   ['[data-save-template]', (el) => { const p = byId(db.projects, el.dataset.saveTemplate); if (p) openSaveAsTemplate(p); }],
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
@@ -145,6 +151,14 @@ view.addEventListener('click', (e) => {
     const el = e.target.closest(sel);
     if (el) { fn(el, e); return; }
   }
+});
+
+// Focus from the sidebar (desktop) or the More sheet (phones): both live outside #view.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.nav-focus, .focus-more');
+  if (!b) return;
+  e.preventDefault();
+  openFocusPicker();
 });
 
 view.addEventListener('submit', async (e) => {
@@ -194,7 +208,7 @@ $('#more-tab').onclick = () => {
   const here = hereNowCount();
   const links = [['#review', '🔁', `Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
   const persp = livePerspectives().map((p) => { const n = badgeCount(p); return [`#perspective/${p.id}`, esc(p.icon), `${esc(p.name)}${n ? ` <b class="badge persp inline">${n}</b>` : ''}`]; });
-  const sheet = openSheet(`<form method="dialog" class="more-sheet"><h2>Perspectives</h2>
+  const sheet = openSheet(`<form method="dialog" class="more-sheet"><button type="button" class="btn focus-more" data-act="focus">🎯 ${getFocus() ? `Focused on ${esc(focusLabel())} · change` : 'Focus'}</button><h2>Perspectives</h2>
     <nav class="more-links">${persp.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}<a href="#perspectives" data-more-link><span>🔭</span>${persp.length ? 'All perspectives' : 'Perspectives: saved views'}</a></nav>
     <h2>More</h2>
     <nav class="more-links">${links.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}</nav>
@@ -204,16 +218,26 @@ $('#more-tab').onclick = () => {
 };
 window.addEventListener('hashchange', render);
 document.addEventListener('keydown', (e) => {
-  if (e.metaKey || e.ctrlKey || $('#sheet').open || typing()) return;
-  if (isWide() && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); moveSelection(e.key === 'ArrowDown' ? 1 : -1); return; }
-  if (e.key === 'Escape' && app.selected) { clearSelection(); return; }
-  if (location.hash.startsWith('#review') && ['j', 'k', 'm'].includes(e.key)) {
+  if (!e.metaKey && !e.ctrlKey && !$('#sheet').open && !typing() && location.hash.startsWith('#review') && ['j', 'k', 'm'].includes(e.key)) {
     const btn = e.key === 'm' ? $('[data-mark-reviewed]') : $$review(e.key === 'j' ? 1 : 0);
     if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
     return;
   }
-  if (e.key === '/') { e.preventDefault(); location.hash = '#search'; }
-  else if (e.key === 'n') { e.preventDefault(); openQuickEntry(); }
+  handleKey(e);
+});
+// What the shortcuts do (js/shortcuts.js lists them).
+Object.assign(H, {
+  capture: openQuickEntry,
+  newProject: () => openNewProject(null, () => openProjectEditor(null)),
+  focusPicker: openFocusPicker,
+  focusOn,
+  unfocus,
+  move: (dir) => moveSelection(dir),
+  open: (t) => (isWide() ? select('task', t.id) : openEditor(t)),
+  clear: () => { if (app.selected) clearSelection(); },
+  breakdown: (t) => openBreakdown(t),
+  indent: (t) => indentTask(t),
+  outdent: (t) => outdentTask(t),
 });
 // Pick up changes made on another device when the app comes back to the foreground.
 document.addEventListener('visibilitychange', async () => {

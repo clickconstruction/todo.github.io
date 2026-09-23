@@ -12,6 +12,8 @@
 //                estimate_minutes, repeat_rule, steps_in_order, completed_at, dropped_at, created_at, updated_at, tag_refs, sort }]
 
 export const MAX_DEPTH = 4;
+// The time of day a plain date lands at (hours; the account's Settings → Dates).
+export const DEFAULT_HOURS = { due: 17, planned: 9, defer: 0 };
 
 // ---------- the OmniFocus script (Omni Automation; read-only) ----------
 // Runs inside OmniFocus (Mac or iPhone/iPad), reads folders, tags, projects and actions, and copies
@@ -76,9 +78,10 @@ export function localToIso(text, tz, defaultHour = 0) {
   if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) && !isNaN(Date.parse(s.replace(' ', 'T')))) return new Date(s.replace(/^(\d{4}-\d{2}-\d{2}) /, '$1T').replace(/ ([+-]\d{4})$/, '$1')).toISOString();
   const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?)?$/i);
   if (!m) { const d = Date.parse(s); return isNaN(d) ? null : new Date(d).toISOString(); }
-  let hh = m[4] !== undefined ? +m[4] : defaultHour;
+  let hh = m[4] !== undefined ? +m[4] : Math.floor(defaultHour);
+  const mm = m[4] !== undefined ? (m[5] ? +m[5] : 0) : Math.round((defaultHour % 1) * 60); // a plain date gets the default time
   if (m[7]) hh = (hh % 12) + (/pm/i.test(m[7]) ? 12 : 0);
-  const guess = Date.UTC(+m[1], +m[2] - 1, +m[3], hh, m[5] ? +m[5] : 0, m[6] ? +m[6] : 0);
+  const guess = Date.UTC(+m[1], +m[2] - 1, +m[3], hh, mm, m[6] ? +m[6] : 0);
   const once = guess - tzOffsetMs(guess, tz);
   return new Date(guess - tzOffsetMs(once, tz)).toISOString();
 }
@@ -179,7 +182,7 @@ function fromOmniJSON(data, tz) {
 }
 
 // ---------- TaskPaper (File → Export → TaskPaper, or Copy as TaskPaper) ----------
-function fromTaskPaper(text, tz) {
+function fromTaskPaper(text, tz, hours = DEFAULT_HOURS) {
   const warn = [];
   const out = { source: 'taskpaper', folders: [], tags: [], projects: [], tasks: [], warn, stats: { attachments: 0, notifications: 0, onHoldTags: 0, inexactRepeats: 0, unknownAttrs: {} } };
   const tagRefs = new Map();
@@ -226,7 +229,7 @@ function fromTaskPaper(text, tz) {
     Object.keys(attrs).forEach((k) => { if (!KNOWN.has(k)) out.stats.unknownAttrs[k] = (out.stats.unknownAttrs[k] || 0) + 1; });
     const tagLabels = [attrs.tags, attrs.context].filter((v) => typeof v === 'string').flatMap((v) => v.split(',')).map(clean).filter(Boolean);
     const common = {
-      flagged: !!attrs.flagged, defer_at: localToIso(attrs.defer || attrs.start, tz), planned_at: localToIso(attrs.planned, tz, 9), due_at: localToIso(attrs.due, tz, 17),
+      flagged: !!attrs.flagged, defer_at: localToIso(attrs.defer || attrs.start, tz, hours.defer), planned_at: localToIso(attrs.planned, tz, hours.planned), due_at: localToIso(attrs.due, tz, hours.due),
       estimate_minutes: parseEstimate(attrs.estimate), tag_refs: tagLabels.map(tagRef),
     };
     const rr = attrs['repeat-rule'] ? repeatFrom(attrs['repeat-rule'], attrs['repeat-method'], tz) : { rule: null, exact: true };
@@ -276,7 +279,7 @@ function parseCsvRows(text) {
   if (cur || row.length) { row.push(cur); rows.push(row); }
   return rows.filter((r) => r.some((c) => c.trim()));
 }
-function fromCSV(text, tz) {
+function fromCSV(text, tz, hours = DEFAULT_HOURS) {
   const warn = [];
   const out = { source: 'csv', folders: [], tags: [], projects: [], tasks: [], warn, stats: { attachments: 0, notifications: 0, onHoldTags: 0, inexactRepeats: 0 } };
   const [head, ...rows] = parseCsvRows(text);
@@ -302,7 +305,7 @@ function fromCSV(text, tz) {
     const tags = [v(r, 'tags'), v(r, 'context')].flatMap((x) => x.split(',')).map(clean).filter(Boolean);
     const done = localToIso(v(r, 'done'), tz, 12);
     const dropped = !done && /drop/.test(status) ? (localToIso(v(r, 'dropped'), tz, 12) || new Date().toISOString()) : null;
-    const common = { flagged, defer_at: localToIso(v(r, 'defer'), tz), planned_at: localToIso(v(r, 'planned'), tz, 9), due_at: localToIso(v(r, 'due'), tz, 17),
+    const common = { flagged, defer_at: localToIso(v(r, 'defer'), tz, hours.defer), planned_at: localToIso(v(r, 'planned'), tz, hours.planned), due_at: localToIso(v(r, 'due'), tz, hours.due),
       estimate_minutes: parseEstimate(v(r, 'duration')), tag_refs: [...new Set(tags.map(tagRef))], notes: v(r, 'notes') };
     if (type === 'project' || type === 'folder') {
       if (type === 'folder') { out.folders.push({ ref: `csv-folder:${hash(v(r, 'name').toLowerCase())}`, name: v(r, 'name'), sort: out.folders.length }); return; }
@@ -328,7 +331,7 @@ function fromCSV(text, tz) {
   return out;
 }
 
-export function parse(text, { tz = 'UTC' } = {}) {
+export function parse(text, { tz = 'UTC', hours = DEFAULT_HOURS } = {}) {
   const format = detectFormat(text);
   if (format === 'json') {
     let data;
@@ -336,8 +339,8 @@ export function parse(text, { tz = 'UTC' } = {}) {
     if (data.format !== 'todotooling-omnifocus') throw new Error('That JSON didn’t come from the Todo Tooling OmniFocus script.');
     return { format, ...fromOmniJSON(data, tz) };
   }
-  if (format === 'csv') return { format, ...fromCSV(text, tz) };
-  if (format === 'taskpaper') return { format, ...fromTaskPaper(text, tz) };
+  if (format === 'csv') return { format, ...fromCSV(text, tz, hours) };
+  if (format === 'taskpaper') return { format, ...fromTaskPaper(text, tz, hours) };
   throw new Error('That doesn’t look like an OmniFocus export. Use “Copy from OmniFocus”, or a TaskPaper or CSV file.');
 }
 

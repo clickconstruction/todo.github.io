@@ -1,5 +1,6 @@
 // Reads and writes. Every write goes to Supabase first, then updates `db`.
 import { sb, db, app, run, syncRow, toast, byId, isOpen, taskSort, onHoldTagFor } from './state.js';
+import { loadSettings } from './prefs.js';
 import { openCompletionNote } from './editors/completion.js';
 import { saveReminders, refreshReminders } from './editors/notifyField.js';
 import { uploadFiles } from './editors/attachField.js';
@@ -23,6 +24,7 @@ export async function loadAll() {
     run(sb.from('project_templates').select('*').order('sort')),
   ]);
   Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates });
+  await loadSettings();
 }
 
 // Some writes fire database triggers (group completion, complete-with-last-action,

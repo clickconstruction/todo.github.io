@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -604,6 +604,20 @@ assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'r
   bad = '';
   try { await tool('create_from_template', { template: 'New job' }); } catch (e) { bad = e.message; }
   assert(/archived/.test(bad) && (await tool('list_templates', {})).every((t) => t.name !== 'New job'), 'archived templates are hidden and can\'t be used');
+}
+
+// ---------- settings: default times, time zone, Forecast tag ----------
+{
+  db.user_settings.push({ user_id: UID, due_minutes: 15 * 60 + 30, planned_minutes: 8 * 60, defer_minutes: 6 * 60, timezone: 'America/New_York', forecast_tag_id: null });
+  const t = await tool('capture', { title: 'Settings check', due: '2026-10-05', planned: '2026-10-04', defer: '2026-10-03' });
+  const row = db.tasks.find((x) => x.id === t.id);
+  assert(row.due_at === '2026-10-05T19:30:00.000Z' && row.planned_at === '2026-10-04T12:00:00.000Z' && row.defer_at === '2026-10-03T10:00:00.000Z', 'plain dates land at the account\'s times, in its time zone', `${row.due_at} ${row.planned_at} ${row.defer_at}`);
+  const todayTag = await tool('create_tag', { label: 'Today' });
+  db.user_settings[0].forecast_tag_id = todayTag.id;
+  const pick = await tool('capture', { title: 'Tagged for today', tags: ['Today'] });
+  const fc = await tool('forecast', { days: 2 });
+  assert(fc.today_tag && fc.today_tag.tag === 'Today' && fc.today_tag.items.some((x) => x.id === pick.id), 'forecast includes the "always show in Today" tag');
+  db.user_settings.length = 0;
 }
 
 // ---------- OmniFocus import ----------

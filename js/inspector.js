@@ -57,7 +57,7 @@ export function renderInspector(force = false) {
   el.dataset.key = key;
   if (task) renderTaskInspector(el, task);
   else if (project) renderProjectInspector(el, project);
-  else el.innerHTML = `<div class="inspector-empty"><p>Select an action to inspect it here.</p><p class="hint">↑ ↓ to move · Esc to clear · ⌘↵ to save now</p></div>`;
+  else el.innerHTML = `<div class="inspector-empty"><p>Select an action to inspect it here.</p><p class="hint">j / k or ↑ ↓ to move · x complete · f flag · Esc to clear · ? for all shortcuts</p></div>`;
   highlight();
 }
 

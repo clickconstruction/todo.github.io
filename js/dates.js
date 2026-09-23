@@ -1,7 +1,15 @@
 // Date helpers. Stored as timestamptz; shown and edited as local calendar days.
-// Due dates land at 5pm local, planned at 9am, defer at midnight.
+// A plain date lands at a time of day: due 5pm, planned 9am, defer midnight by default; the
+// account's Settings → Dates can change them (js/settings.js updates HOURS, in hours, fractions ok).
 
 export const HOURS = { defer_at: 0, planned_at: 9, due_at: 17 };
+export const setDefaultTimes = ({ due_minutes, defer_minutes, planned_minutes }) => {
+  if (Number.isFinite(due_minutes)) HOURS.due_at = due_minutes / 60;
+  if (Number.isFinite(defer_minutes)) HOURS.defer_at = defer_minutes / 60;
+  if (Number.isFinite(planned_minutes)) HOURS.planned_at = planned_minutes / 60;
+};
+// Set a Date to one of those times of day (in place).
+export const atDefaultTime = (d, key) => { d.setHours(0, Math.round(HOURS[key] * 60), 0, 0); return d; };
 
 export const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
 export const endOfToday = () => { const d = new Date(); d.setHours(23, 59, 59, 999); return d; };
@@ -37,7 +45,7 @@ export const toDateInput = (iso) => {
 export const fromDateInput = (v, hour) => {
   if (!v) return null;
   const [y, m, d] = v.split('-').map(Number);
-  return new Date(y, m - 1, d, hour).toISOString();
+  return new Date(y, m - 1, d, 0, Math.round(hour * 60)).toISOString();
 };
 
 // <input type=datetime-local> value <-> timestamptz (editing completed/dropped times).

@@ -1,5 +1,8 @@
 // Settings: agent access tokens (MCP), email-capture senders, account.
-import { sb, app, esc, run, toast, openSheet, $ } from '../state.js';
+import { saveSettings, DEFAULT_SETTINGS, minutesToInput, inputToMinutes } from '../prefs.js';
+import { keyboardHtml, shortcutListHtml } from '../shortcuts.js';
+import { localTz } from '../repeat.js';
+import { sb, app, esc, run, toast, openSheet, $, sortedTags, tagLabel } from '../state.js';
 import { fmtDate } from '../dates.js';
 import { resultLines, stripIcon, when, timeOnly } from '../pushResult.js';
 
@@ -46,6 +49,8 @@ export function viewSettings() {
     <ul class="list">${emailSenders.map((e) => `<li class="row" style="cursor:default"><div class="row-main"><div class="row-title">${esc(e.email)}</div></div>
       <button class="btn small danger" data-remove-sender="${e.id}">Remove</button></li>`).join('')}</ul>
     <form class="capture" data-add-sender style="margin-top:12px"><input type="email" name="email" placeholder="Add another address you send from" autocomplete="off"><button class="btn">Add</button></form>
+    ${datesSection()}
+    ${keyboardSection()}
     <h2 class="section-title">Import</h2>
     <p class="view-sub" style="margin-bottom:8px">Moving from OmniFocus? Bring folders, projects, tags, repeats and review schedules over; you'll see a preview first.</p>
     <a class="btn" href="#import">Import from OmniFocus</a>
@@ -208,3 +213,33 @@ export async function removeDevice(id) {
   await run(sb.from('push_subscriptions').delete().eq('id', id));
   await loadSettings();
 }
+
+// ---------- Dates: default times and the Forecast tag (saved to the account) ----------
+function datesSection() {
+  const st = app.settings || DEFAULT_SETTINGS;
+  const row = (key, label, hint) => `<label class="set-row"><span class="set-text"><b>${label}</b><span class="hint">${hint}</span></span><input type="time" step="300" data-setting-time="${key}" value="${minutesToInput(st[key])}"></label>`;
+  return `<h2 class="section-title">Dates</h2>
+    <p class="view-sub">When you pick just a day, this is the time it lands at. Agents, templates and imports use the same times.</p>
+    <div class="settings-card">
+      ${row('due_minutes', 'Due dates', 'a deadline on that day')}
+      ${row('defer_minutes', 'Defer dates', 'when it shows up again')}
+      ${row('planned_minutes', 'Planned dates', 'when you mean to do it')}
+      <label class="set-row"><span class="set-text"><b>Always show in Today</b><span class="hint">actions with this tag appear in Forecast → Today</span></span>
+        <select data-setting-forecast-tag><option value="">No tag</option>${sortedTags().map((g) => `<option value="${g.id}" ${st.forecast_tag_id === g.id ? 'selected' : ''}>${esc(tagLabel(g))}</option>`).join('')}</select></label>
+      <p class="hint">Time zone: ${esc(st.timezone || localTz())} (from this device)</p>
+    </div>`;
+}
+
+// ---------- Keyboard: the drawn keyboard and every shortcut ----------
+function keyboardSection() {
+  return `<h2 class="section-title">Keyboard</h2>
+    <p class="view-sub">With a keyboard (Mac, PC, iPad), plain keys do things when you’re not typing. Highlighted keys have shortcuts; hover or tap one to see what it does. Press <kbd>?</kbd> anywhere for this list.</p>
+    <div class="settings-card">${keyboardHtml()}<div class="kbd-lists">${shortcutListHtml()}</div></div>`;
+}
+
+document.addEventListener('change', async (e) => {
+  const time = e.target.closest && e.target.closest('[data-setting-time]');
+  if (time) { const m = inputToMinutes(time.value); if (m !== null) await saveSettings({ [time.dataset.settingTime]: m }); return; }
+  const tag = e.target.closest && e.target.closest('[data-setting-forecast-tag]');
+  if (tag) await saveSettings({ forecast_tag_id: tag.value || null });
+});

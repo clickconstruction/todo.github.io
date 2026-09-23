@@ -1,7 +1,7 @@
 // Forecast: a day strip (Past · Today · next 6 days · Future) of what's due, planned,
 // or becoming available. Replaces the old Today view. Past has one-tap triage for the
 // classic "everything is overdue" problem: turn fake deadlines into plans.
-import { db, esc, isOpen, visible, taskSort, onHoldTagFor } from '../state.js';
+import { db, app, esc, isOpen, visible, taskSort, onHoldTagFor, byId, tagLabel, effectiveTagIds } from '../state.js';
 import { startOfToday, addDays, sameDay, dayStart, isDeferred } from '../dates.js';
 import { taskList, projectRow } from '../rows.js';
 import { filterBar, passes, sortTasks } from '../filter.js';
@@ -37,6 +37,15 @@ export function forecastData() {
   return { today, tasks, overdue, plannedPast, days, future, liveProjects, overdueProjects };
 }
 
+// Settings → Dates → "Always show in Today": open, not deferred, not parked actions with that tag (or a sub-tag).
+export function forecastTag() { const id = app.settings && app.settings.forecast_tag_id; return id ? byId(db.tags, id) : null; }
+export function forecastTagTasks(tasks = db.tasks) {
+  const tag = forecastTag();
+  if (!tag) return [];
+  const ids = new Set([tag.id, ...db.tags.filter((g) => g.parent_id === tag.id).map((g) => g.id)]);
+  return tasks.filter((t) => isOpen(t) && !isDeferred(t) && !onHoldTagFor(t) && [...effectiveTagIds(t)].some((x) => ids.has(x)));
+}
+
 const projectsOn = (day, projects) => projects.filter((p) => [p.due_at, p.planned_at].some((iso) => iso && sameDay(dayStart(iso), day)));
 const projectSection = (title, list) => (list.length ? `<h2 class="section-title">${title} · ${list.length}</h2><div class="group-list">${list.map(projectRow).join('')}</div>` : '');
 
@@ -55,7 +64,8 @@ export function viewForecast(selected = 'today') {
     cell('past', 'Past', '', pastCount, overdue.length ? 'late' : ''),
     ...days.map((d, i) => {
       const it = dayItems(d, tasks.filter(isOpen));
-      const n = it.due.length + it.planned.length + projectsOn(d, liveProjects).length;
+      const tagged = i === 0 ? forecastTagTasks(tasks).filter((t) => !it.due.includes(t) && !it.planned.includes(t)).length : 0;
+      const n = it.due.length + it.planned.length + projectsOn(d, liveProjects).length + tagged;
       return cell(i === 0 ? 'today' : key(d), i === 0 ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' }), d.getDate(), n, it.due.length && i === 0 ? 'due' : '');
     }),
     cell('future', 'Future', '', future.length),
@@ -85,7 +95,11 @@ export function viewForecast(selected = 'today') {
     body += section(isToday ? 'Available today' : 'Becomes available', it.available);
     if (isToday) {
       const dated = new Set([...it.due, ...it.planned, ...it.available].map((t) => t.id));
-      body += section('Flagged', db.tasks.filter((t) => isOpen(t) && !isDeferred(t) && isFlaggedTask(t) && !dated.has(t.id)));
+      const tag = forecastTag();
+      const taggedList = forecastTagTasks(tasks).filter((t) => !dated.has(t.id));
+      if (tag) body += section(`Tagged ${esc(tagLabel(tag))}`, taggedList);
+      const shownTagged = new Set(taggedList.map((t) => t.id));
+      body += section('Flagged', db.tasks.filter((t) => isOpen(t) && !isDeferred(t) && isFlaggedTask(t) && !dated.has(t.id) && !shownTagged.has(t.id)));
     }
     if (!body.replace(/<a class="fc-banner"[\s\S]*?<\/a>/, '').trim()) body += `<p class="empty">Nothing due or planned ${isToday ? 'today' : 'this day'}.</p>`;
   }

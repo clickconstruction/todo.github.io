@@ -18,7 +18,7 @@ const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = `Todo Tooling is the user's GTD system. Capture anything new with capture (it lands in the Inbox).
 Clarify inbox items with update_task: give each a project and/or tags (contexts like "Laptop", people like "Waiting : Hiro"); an item leaves the Inbox once it has a project or tag.
-Use planned for when the user intends to work on something and due only for hard deadlines; flagged means "important now". Dates are YYYY-MM-DD in the user's timezone.
+Use planned for when the user intends to work on something and due only for hard deadlines; flagged means "important now". Dates are YYYY-MM-DD in the user's timezone; a plain date lands at the user's default time (Settings → Dates).
 Never complete, reschedule or re-file tasks the user did not ask you to change.
 Notifications: pass notifications (e.g. [{"kind":"before_due","minutes":60}]) to remind the user on their devices; they follow the item's dates.
 Attachments: add_attachment attaches text, base64 or a URL's file to an action or project; get_task returns download links; remove_attachment archives.
@@ -74,6 +74,7 @@ export default {
     let body;
     try { body = await request.json(); } catch { return json(rpcError(null, -32700, 'Parse error'), 400); }
     const api = new Api(env, auth.userId);
+    await api.loadSettings();
     if (Array.isArray(body)) {
       const out = (await Promise.all(body.map((m) => handle(m, api)))).filter(Boolean);
       return out.length ? json(out) : new Response(null, { status: 202, headers: CORS });
@@ -264,7 +265,7 @@ function zonedToIso(value, hour, tz) {
     return d.toISOString();
   }
   const [y, m, d] = value.split('-').map(Number);
-  const guess = Date.UTC(y, m - 1, d, hour);
+  const guess = Date.UTC(y, m - 1, d, 0, Math.round(hour * 60));
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
     timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   }).formatToParts(new Date(guess)).map((p) => [p.type, p.value]));
@@ -285,6 +286,18 @@ class Api {
     this.userId = userId;
     this.tz = env.TIMEZONE || 'America/Chicago';
     this.u = `user_id=eq.${userId}`;
+    this.hours = { due: 17, planned: 9, defer: 0 }; // Settings → Dates (loadSettings)
+    this.settings = {};
+  }
+  // The account's settings: time zone, the times plain dates land at, the Forecast tag.
+  async loadSettings() {
+    try {
+      const [s] = await this.q(`user_settings?${this.u}&select=*`);
+      if (!s) return;
+      this.settings = s;
+      if (s.timezone) this.tz = s.timezone;
+      this.hours = { due: s.due_minutes / 60, planned: s.planned_minutes / 60, defer: s.defer_minutes / 60 };
+    } catch { /* defaults */ }
   }
   q(path, opts) { return rest(this.env, path, opts); }
 
@@ -790,7 +803,7 @@ const TOOLS = [
   },
   {
     name: 'forecast',
-    description: 'Day-by-day view of what is due, planned, or becoming available (deferred until that day), plus past-due and past-planned items. Use for "what is coming up this week" and daily planning.',
+    description: 'Day-by-day view of what is due, planned, or becoming available (deferred until that day), plus past-due and past-planned items, and (today_tag) the actions with the user\'s "always show in Today" tag. Use for "what is coming up this week" and daily planning.',
     inputSchema: { type: 'object', properties: { days: { type: 'integer', default: 7, description: 'How many days from today (1-60)' } } },
     async run(api, { days = 7 }) {
       days = Math.min(Math.max(1, Math.round(Number(days) || 7)), 60);
@@ -802,6 +815,17 @@ const TOOLS = [
       const items = await api.shape(rows);
       const projects = await api.q(`projects?${api.u}&status=in.(active,on_hold)&or=(due_at.lt.${end},planned_at.lt.${end})&select=id,name,due_at,planned_at,status`);
       const out = { today, past: { overdue: [], planned_earlier: [], overdue_projects: [] }, days: {} };
+      // Settings → Dates → "Always show in Today": that tag's open, available-now actions.
+      const ftag = api.settings.forecast_tag_id;
+      if (ftag) {
+        const [tags, links] = await Promise.all([api.q(`tags?${api.u}&select=id,name,parent_id`), api.q(`task_tags?${api.u}&select=task_id,tag_id`)]);
+        const ids = new Set([ftag, ...tags.filter((g) => g.parent_id === ftag).map((g) => g.id)]);
+        const taggedIds = [...new Set(links.filter((l) => ids.has(l.tag_id)).map((l) => l.task_id))];
+        const nowIso = new Date().toISOString();
+        const tagged = taggedIds.length ? (await api.q(`tasks?${api.u}&${OPEN}&id=${inList(taggedIds)}&select=*`)).filter((t) => !t.defer_at || t.defer_at <= nowIso) : [];
+        const t0 = tags.find((g) => g.id === ftag);
+        out.today_tag = { tag: t0 ? t0.name : null, items: await api.shape(tagged) };
+      }
       for (let i = 0; i < days; i++) {
         const d = localDate(new Date(Date.parse(start) + i * 86400000 + 12 * 3600000).toISOString(), api.tz);
         out.days[d] = { due: [], planned: [], becomes_available: [], projects: [] };
@@ -958,9 +982,9 @@ const TOOLS = [
       if (a.notes !== undefined) patch.notes = a.notes;
       if (a.flagged !== undefined) patch.flagged = !!a.flagged;
       if (a.steps_in_order !== undefined) patch.steps_in_order = !!a.steps_in_order;
-      if (a.due !== undefined) patch.due_at = zonedToIso(a.due, 17, api.tz);
-      if (a.planned !== undefined) patch.planned_at = zonedToIso(a.planned, 9, api.tz);
-      if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, 0, api.tz);
+      if (a.due !== undefined) patch.due_at = zonedToIso(a.due, api.hours.due, api.tz);
+      if (a.planned !== undefined) patch.planned_at = zonedToIso(a.planned, api.hours.planned, api.tz);
+      if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, api.hours.defer, api.tz);
       if (a.project !== undefined) patch.project_id = await api.resolveProject(a.project);
       if (a.completion_note !== undefined) patch.completion_note = String(a.completion_note).trim();
       if (a.estimate_minutes !== undefined) patch.estimate_minutes = a.estimate_minutes === null ? null : Math.max(0, Math.round(Number(a.estimate_minutes)));
@@ -1217,7 +1241,7 @@ const TOOLS = [
       required: ['data'],
     },
     async run(api, { data, completed = 'none', confirm = false }) {
-      const parsed = OF.parse(String(data || ''), { tz: api.tz });
+      const parsed = OF.parse(String(data || ''), { tz: api.tz, hours: api.hours });
       const prepared = OF.prepare(parsed, { completed });
       const parts = OF.chunks(prepared.payload);
       const results = [];
@@ -1859,9 +1883,9 @@ function describeRepeat(rule) {
 // Date/duration/review/completion arguments shared by create_project and update_project.
 function projectPatch(api, a) {
   const patch = {};
-  if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, 0, api.tz);
-  if (a.planned !== undefined) patch.planned_at = zonedToIso(a.planned, 9, api.tz);
-  if (a.due !== undefined) patch.due_at = zonedToIso(a.due, 17, api.tz);
+  if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, api.hours.defer, api.tz);
+  if (a.planned !== undefined) patch.planned_at = zonedToIso(a.planned, api.hours.planned, api.tz);
+  if (a.due !== undefined) patch.due_at = zonedToIso(a.due, api.hours.due, api.tz);
   if (a.estimate_minutes !== undefined) patch.estimate_minutes = a.estimate_minutes === null ? null : Math.max(0, Math.round(Number(a.estimate_minutes)));
   if (a.review_every !== undefined) patch.review_every = Math.min(999, Math.max(1, Math.round(Number(a.review_every))));
   if (a.review_unit !== undefined) {

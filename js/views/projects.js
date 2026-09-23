@@ -37,7 +37,7 @@ export function viewProject(id) {
   const ordered = entries.map((e) => e.t);
   const folder = p.folder_id && byId(db.folders, p.folder_id);
   return `<a class="back" href="#projects">‹ Projects${folder ? ` / 📁 ${esc(folder.name)}` : ''}</a>
-    <div class="view-head"><h1>${esc(p.name)}</h1><span class="head-actions"><button class="btn small" data-save-template="${p.id}" title="Save as template">📋</button><button class="btn small" data-edit-project="${p.id}">Edit</button></span></div>
+    <div class="view-head"><h1>${esc(p.name)}</h1><span class="head-actions"><button class="btn small" data-focus-here="${p.id}" title="Focus on this project" aria-label="Focus on this project">🎯</button><button class="btn small" data-save-template="${p.id}" title="Save as template" aria-label="Save as template">📋</button><button class="btn small" data-edit-project="${p.id}">Edit</button></span></div>
     ${p.template_id && byId(db.templates || [], p.template_id) ? `<p class="view-sub from-template">From the template <a href="#template/${p.template_id}">${esc(byId(db.templates, p.template_id).name)}</a></p>` : ''}
     ${p.notes ? `<p class="view-sub" style="white-space:pre-wrap">${esc(p.notes)}</p>` : ''}
     <p class="view-sub project-props"><select data-project-status="${p.id}" style="width:auto;padding:6px 10px">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
