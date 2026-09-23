@@ -629,6 +629,7 @@ const TOOLS = [
         status: { type: 'string', enum: ['open', 'completed', 'dropped'], description: 'Only change when the user says so' },
         completion_note: { type: 'string' },
         estimate_minutes: { type: ['integer', 'null'], description: 'How long it takes, in minutes; null to clear' },
+        move: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'Reorder among its siblings (same project and parent). Order decides the next action in sequential projects.' },
       },
       required: ['id'],
     },
@@ -677,6 +678,17 @@ const TOOLS = [
       const parentId = patch.parent_id !== undefined ? patch.parent_id : task.parent_id;
       patch.in_inbox = !(projectId || parentId || tagCount);
       await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: patch });
+      if (a.move) {
+        const sibs = await api.q(`tasks?${api.u}&${OPEN}&project_id=${projectId ? `eq.${projectId}` : 'is.null'}&parent_id=${parentId ? `eq.${parentId}` : 'is.null'}&select=id,sort,created_at`);
+        sibs.sort((x, y) => (x.sort - y.sort) || (x.created_at < y.created_at ? -1 : 1));
+        const i = sibs.findIndex((x) => x.id === task.id);
+        if (i >= 0) {
+          const [me] = sibs.splice(i, 1);
+          const to = { up: Math.max(0, i - 1), down: Math.min(sibs.length, i + 1), top: 0, bottom: sibs.length }[a.move];
+          sibs.splice(to, 0, me);
+          await Promise.all(sibs.map((x, sort) => (x.sort === sort ? null : api.q(`tasks?${api.u}&id=eq.${x.id}`, { method: 'PATCH', body: { sort } }))));
+        }
+      }
       return (await api.shape([await api.task(task.id)]))[0];
     },
   },
@@ -866,6 +878,17 @@ const TOOLS = [
       if (Object.keys(patch).length) await api.q(`folders?${api.u}&id=eq.${f.id}`, { method: 'PATCH', body: patch });
       const [row] = await api.q(`folders?${api.u}&id=eq.${f.id}&select=id,name,archived_at`);
       return { id: row.id, name: row.name, archived: !!row.archived_at };
+    },
+  },
+  {
+    name: 'create_tag',
+    description: 'Create a tag (context, person or waiting-for). Use "Parent : Child" to nest, e.g. "Waiting : Hiro". Returns the existing tag if it already exists.',
+    inputSchema: { type: 'object', properties: { label: { type: 'string' } }, required: ['label'] },
+    async run(api, { label }) {
+      if (!label || !String(label).trim()) throw new Error('label is required');
+      const id = await api.ensureTag(label);
+      const { tags, tagLabel } = await api.lookups();
+      return { id, label: tagLabel(tags.find((t) => t.id === id)) };
     },
   },
   {

@@ -58,7 +58,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 19 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 19 tools, no internals leaked');
+assert(list.body.result.tools.length === 20 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 20 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -82,6 +82,12 @@ await tool('create_project', { name: 'Seq', kind: 'sequential', complete_with_la
 const s1 = await tool('capture', { title: 'Seq first', project: 'Seq' });
 const s2 = await tool('capture', { title: 'Seq second', project: 'Seq' });
 assert(db.tasks.find((x) => x.id === s2.id).sort > db.tasks.find((x) => x.id === s1.id).sort, 'capture into project appends at the end');
+await tool('update_task', { id: s2.id, move: 'top' });
+const afterMove = await tool('list_tasks', { project: 'Seq', available_only: true });
+assert(afterMove.items[0].id === s2.id, 'update_task move: top changes the sequential head');
+await tool('update_task', { id: s2.id, move: 'bottom' });
+const ct = await tool('create_tag', { label: 'Waiting : Mark' });
+assert(ct.label === 'Waiting : Mark' && (await tool('create_tag', { label: 'waiting : mark' })).id === ct.id, 'create_tag nests and is idempotent');
 const nextActs = await tool('list_tasks', { project: 'Seq', available_only: true });
 assert(nextActs.count === 1 && nextActs.items[0].id === s1.id, 'available_only: sequential shows only the head');
 const seqRow = (await tool('list_projects', {})).find((x) => x.name === 'Seq');
