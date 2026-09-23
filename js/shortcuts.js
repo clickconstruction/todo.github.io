@@ -40,6 +40,10 @@ export const SHORTCUTS = [
   { key: '8', group: 'Go to', label: 'Nearby', run: () => { location.hash = '#nearby'; } },
   { key: '9', group: 'Go to', label: 'Done', run: () => { location.hash = '#done'; } },
   { key: '0', group: 'Go to', label: 'Settings', run: () => { location.hash = '#settings'; } },
+  { key: 'c', group: 'Go to', label: 'Clarify: process the Inbox', run: () => { location.hash = '#clarify'; } },
+  { key: 'w', group: 'Go to', label: 'Waiting For', run: () => { location.hash = '#waiting'; } },
+  { key: 'r', group: 'Go to', label: 'Reference', run: () => { location.hash = '#reference'; } },
+  { key: 'T', shift: true, group: 'Go to', label: 'Tickler', run: () => { location.hash = '#tickler'; } },
   { key: 'j', alt: 'ArrowDown', group: 'Lists', label: 'Select the next item', run: () => H.move(1) },
   { key: 'k', alt: 'ArrowUp', group: 'Lists', label: 'Select the previous item', run: () => H.move(-1) },
   { key: 'e', alt: 'Enter', group: 'Lists', label: 'Open the selected item', run: needTask((t) => H.open(t)) },
@@ -49,12 +53,16 @@ export const SHORTCUTS = [
   { key: 'p', group: 'Selected item', label: 'Plan for today', run: needTask((t) => patch(t, { planned_at: atDefaultTime(startOfToday(), 'planned_at').toISOString() }, 'Planned for today')) },
   { key: 'd', group: 'Selected item', label: 'Defer until tomorrow', run: needTask((t) => patch(t, { defer_at: atDefaultTime(addDays(startOfToday(), 1), 'defer_at').toISOString() }, 'Deferred until tomorrow')) },
   { key: 'D', shift: true, group: 'Selected item', label: 'Drop (with Undo)', run: needTask((t) => patch(t, { dropped_at: new Date().toISOString() }, `Dropped “${t.title}”`)) },
+  { key: 'a', group: 'Selected item', label: 'Delegate (waiting on someone)', run: needTask((t) => H.delegate(t)) },
+  { key: 't', group: 'Selected item', label: 'Tickle: back in the Inbox on a day', run: needTask((t) => H.tickle(t)) },
   { key: 'b', group: 'Selected item', label: 'Break it down into steps', run: needTask((t) => H.breakdown(t)) },
   { key: ']', group: 'Selected item', label: 'Make it a step of the item above', run: needTask((t) => H.indent(t)) },
   { key: '[', group: 'Selected item', label: 'Move it up a level', run: needTask((t) => H.outdent(t)) },
   { key: `${MOD}+Enter`, group: 'Editing', label: 'Save now (inspector and sheets)', passive: true },
   { key: 'Esc', group: 'Editing', label: 'Close the open row or sheet', passive: true },
   { key: 'j k m', group: 'Review', label: 'Previous / next project, mark reviewed', passive: true },
+  { key: '1–8', group: 'Clarify', label: 'Next action · Do it now · Delegate · Project · Someday · Tickler · Trash · Reference', passive: true },
+  { key: 's z', group: 'Clarify', label: 'Skip · undo the last decision', passive: true },
 ];
 
 const typing = () => { const el = document.activeElement; return el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)); };
@@ -106,7 +114,7 @@ export function shortcutListHtml() {
 }
 
 export function tipFor(k) {
-  if (k === 'Shift') return '⇧ Shift with a letter: N new project · F focus · U unfocus · D drop · ? this list';
+  if (k === 'Shift') return '⇧ Shift with a letter: N new project · F focus · U unfocus · D drop · T tickler · ? this list';
   if (k === 'ArrowUp' || k === 'ArrowDown') return `${k === 'ArrowUp' ? '↑' : '↓'}: select the ${k === 'ArrowUp' ? 'previous' : 'next'} item`;
   const list = shortcutsOn(k);
   if (!list.length) return `${labelFor(k)}: no shortcut`;

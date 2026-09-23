@@ -10,7 +10,7 @@ const OUTBOX_KEY = 'todo.outbox';
 
 export async function loadAll() {
   const since = new Date(Date.now() - 86400000).toISOString();
-  const [tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars] = await Promise.all([
+  const [tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references] = await Promise.all([
     run(sb.from('tasks').select('*').or(`and(completed_at.is.null,dropped_at.is.null),completed_at.gte.${since}`)),
     run(sb.from('projects').select('*')),
     run(sb.from('folders').select('*')),
@@ -23,8 +23,10 @@ export async function loadAll() {
     run(sb.from('perspectives').select('*').order('sort')),
     run(sb.from('project_templates').select('*').order('sort')),
     run(sb.from('calendars').select('*').order('sort')),
+    run(sb.from('people').select('*').order('sort')),
+    run(sb.from('reference_items').select('*').is('archived_at', null)),
   ]);
-  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars });
+  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references });
   await loadSettings();
 }
 
@@ -250,8 +252,10 @@ export async function saveTask(task, fields, tagIds) {
   const files = fields.attachments_pending;
   delete fields.notifications; // kept in their own tables
   delete fields.attachments_pending;
-  // Anything with no project, no tags and no parent action lives in the Inbox, so nothing falls out of every list.
-  fields.in_inbox = !(fields.project_id || fields.parent_id || tagIds.length);
+  // Anything with no project, no tags, no parent action and no person (waiting on / agenda) lives in the
+  // Inbox, so nothing falls out of every list. A tickled item stays in the Inbox (hidden until its day).
+  const eff = (k) => (k in fields ? fields[k] : task ? task[k] : null);
+  fields.in_inbox = !!eff('tickler') || !(fields.project_id || fields.parent_id || tagIds.length || eff('waiting_on') || eff('agenda_for'));
   let row;
   const since = new Date(Date.now() - 2000).toISOString();
   const completesRepeat = task && !task.completed_at && fields.completed_at && (fields.repeat_rule || task.repeat_rule);

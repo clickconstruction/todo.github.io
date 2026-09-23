@@ -1,4 +1,5 @@
 // Projects list (by folder) and the single-project view.
+import { referencesFor } from '../gtd.js';
 import { db, app, esc, byId, isOpen, taskSort, bySort, projectTagsFor, tagLabel, PROJECT_STATUSES } from '../state.js';
 import { projectRow, treeList } from '../rows.js';
 import { flattenTree } from '../tree.js';
@@ -27,6 +28,15 @@ export function viewProjects() {
   return html + templatesSectionHtml();
 }
 
+// Support material filed in Reference for this project.
+function referenceBox(p) {
+  const refs = referencesFor(p.id);
+  if (!refs.length) return '';
+  return `<details class="ref-box"><summary>🗄 Reference · ${refs.length} <span class="hint">${refs.slice(0, 3).map((r) => esc(r.title)).join(' · ')}${refs.length > 3 ? ' …' : ''}</span></summary>
+    <div class="group-list">${refs.map((r) => `<a class="group-row" href="#reference/${r.id}"><span>${r.secret_value ? '🔑 ' : ''}${esc(r.title)}</span></a>`).join('')}</div>
+    <button class="btn small" data-gtd="new-ref" data-project="${p.id}">+ Add</button></details>`;
+}
+
 export function viewProject(id) {
   const p = byId(db.projects, id);
   if (!p) return '<a class="back" href="#projects">‹ Projects</a><p class="empty">Project not found.</p>';
@@ -46,6 +56,7 @@ export function viewProject(id) {
       <button class="flag-btn ${p.flagged ? 'on' : ''}" data-flag-project="${p.id}" aria-pressed="${!!p.flagged}" title="${p.flagged ? 'Unflag project' : 'Flag project'}">⚑</button>
       ${projectTagsFor(p.id).map((tg) => `<a class="chip" href="#tag/${tg.id}">🏷️ ${esc(tagLabel(tg))}</a>`).join('')}
       ${ordered.filter((t) => !t.completed_at).length > 1 ? `<button class="btn small" data-act="toggle-reorder">${app.reorder === p.id ? 'Done reordering' : 'Reorder'}</button>` : ''}</p>
+    ${referenceBox(p)}
     ${filterBar()}${filterNote(local)}
     <form class="capture" data-capture data-project="${p.id}"><input type="text" name="title" placeholder="Add an action to ${esc(p.name)}…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
     ${treeList(entries, { showProject: false, markNext: p.status === 'active' ? nextAction(p) : null, reorder: app.reorder === p.id }) || (local.some(isOpen) ? '<p class="empty">Nothing matches this filter.</p>' : '<p class="empty">No actions. What is the very next physical step?</p>')}

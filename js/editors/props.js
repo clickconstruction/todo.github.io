@@ -32,6 +32,11 @@ const VALUES = {
   planned_at: (f) => fmtDay(f.elements.planned_at && f.elements.planned_at.value),
   due_at: (f) => fmtDay(f.elements.due_at && f.elements.due_at.value),
   next_review_at: (f) => fmtDay(f.elements.next_review_at && f.elements.next_review_at.value),
+  waiting: (f) => {
+    const w = f.elements.waiting_on; const a = f.elements.agenda_for;
+    const fu = f.elements.follow_up_at && f.elements.follow_up_at.value;
+    return [w && w.value ? `⏳ ${optText(w)}${fu ? ` · ${fmtDay(fu).replace(/,.*$/, '')}` : ''}` : '', a && a.value ? `🗣 ${optText(a)}` : ''].filter(Boolean).join(' · ');
+  },
   estimate: (f) => { const m = Number(f.elements.estimate_minutes && f.elements.estimate_minutes.value); return m ? fmtMinutes(m) : ''; },
   repeat: (f) => { const s = f.elements.repeat_preset; return s && s.value && s.value !== 'none' ? optText(s) : ''; },
   notify: (f) => { const n = f.querySelectorAll('[data-notify-list] li').length; return n ? `${n} reminder${n === 1 ? '' : 's'}` : ''; },
@@ -44,7 +49,8 @@ const SUMMARIES = {
     const proj = f.elements.project_id && f.elements.project_id.value ? optText(f.elements.project_id)
       : f.elements.folder_id && f.elements.folder_id.value && f.elements.folder_id.value !== '__new' ? `📁 ${optText(f.elements.folder_id)}` : '';
     const tags = f.querySelectorAll('.tag-picker .tag-toggle.on').length;
-    return [part ? `in ${part.textContent.split(' › ').pop()}` : proj, tags ? `${tags} tag${tags === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+    const w = f.elements.waiting_on && f.elements.waiting_on.value ? `⏳ ${optText(f.elements.waiting_on)}` : '';
+    return [part ? `in ${part.textContent.split(' › ').pop()}` : proj, tags ? `${tags} tag${tags === 1 ? '' : 's'}` : '', w].filter(Boolean).join(' · ');
   },
   dates: (f) => [['due_at', 'Due'], ['planned_at', 'Planned'], ['defer_at', 'Defer']]
     .map(([k, l]) => (VALUES[k](f) ? `${l} ${VALUES[k](f).replace(/,.*$/, '')}` : '')).filter(Boolean).slice(0, 2).join(' · '),

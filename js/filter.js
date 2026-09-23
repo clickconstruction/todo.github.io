@@ -6,7 +6,7 @@ import { isAvailable } from './availability.js';
 import { byDistance } from './places.js';
 
 const KEY = 'todo.filter';
-const DEFAULT = { show: 'remaining', fits: 0, sort: 'default' };
+const DEFAULT = { show: 'remaining', fits: 0, sort: 'default', energy: '' };
 let filter;
 try { filter = { ...DEFAULT, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { filter = { ...DEFAULT }; }
 export const getFilter = () => filter;
@@ -19,11 +19,14 @@ export function setFilter(patch) {
 
 const SHOW = [['available', 'Available'], ['remaining', 'Remaining'], ['all', 'All']];
 const SORTS = [['default', 'Default order'], ['distance', 'Nearest first']];
+const ENERGIES = [['', 'Any energy'], ['low', '🔋 Low energy'], ['medium', '⚡ Up to medium']];
+const LEVEL = { low: 1, medium: 2, high: 3 };
 const FITS = [[0, 'Any time'], [5, '≤ 5 min'], [15, '≤ 15 min'], [30, '≤ 30 min'], [60, '≤ 1 hour']];
 
 export const filterBar = (extra = '') => `<div class="filter-bar" role="group" aria-label="View filter">
   <label><span aria-hidden="true">👁</span><select data-filter="show" aria-label="Show">${SHOW.map(([v, l]) => `<option value="${v}" ${filter.show === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   <label><span aria-hidden="true">⏱</span><select data-filter="fits" aria-label="Fits in">${FITS.map(([v, l]) => `<option value="${v}" ${Number(filter.fits) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+  <label><span aria-hidden="true">⚡</span><select data-filter="energy" aria-label="Energy">${ENERGIES.map(([v, l]) => `<option value="${v}" ${(filter.energy || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   ${extra}
   ${app.here ? `<label><span aria-hidden="true">↕</span><select data-filter="sort" aria-label="Sort">${SORTS.map(([v, l]) => `<option value="${v}" ${filter.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
   <button type="button" class="btn small save-persp" data-act="save-perspective" title="Save this view as a perspective">🔭 Save view</button>
@@ -38,6 +41,7 @@ export function passes(t) {
   if (filter.show === 'available' && !isAvailable(t)) return false;
   const fits = Number(filter.fits);
   if (fits && !(t.estimate_minutes && t.estimate_minutes <= fits)) return false;
+  if (filter.energy && !(t.energy && LEVEL[t.energy] <= LEVEL[filter.energy])) return false;
   return true;
 }
 
@@ -53,6 +57,7 @@ export function applyFilter(tasks) {
 }
 
 // How many were hidden only because they have no estimate (so "fits in" isn't silently lossy).
+export const hiddenForNoEnergy = (tasks) => (filter.energy ? tasks.filter((t) => isOpen(t) && !t.energy).length : 0);
 export function hiddenForNoEstimate(tasks) {
   if (!Number(filter.fits)) return 0;
   return tasks.filter((t) => isOpen(t) && !t.estimate_minutes).length;
@@ -60,8 +65,9 @@ export function hiddenForNoEstimate(tasks) {
 
 export const filterNote = (tasks) => {
   const n = hiddenForNoEstimate(tasks);
+  const ne = hiddenForNoEnergy(tasks);
   const held = filter.show === 'available' ? tasks.filter((t) => isOpen(t) && onHoldTagFor(t)).length : 0;
-  return [n ? `${n} without an estimate hidden by “fits in”.` : '', held ? `⏸ ${held} on hold hidden · <button class="link-btn" data-act="show-remaining">Show</button>` : '']
+  return [n ? `${n} without an estimate hidden by “fits in”.` : '', ne ? `${ne} without an energy level hidden by the energy filter.` : '', held ? `⏸ ${held} on hold hidden · <button class="link-btn" data-act="show-remaining">Show</button>` : '']
     .filter(Boolean).map((x) => `<p class="view-sub filter-note">${x}</p>`).join('');
 };
 

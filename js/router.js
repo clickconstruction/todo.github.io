@@ -14,18 +14,22 @@ import { hereNowCount } from './places.js';
 import { viewPerspective, viewPerspectives, perspectiveNav } from './views/perspective.js';
 import { viewImport } from './views/import.js';
 import { viewTemplate } from './views/templates.js';
+import { isTickled } from './gtd.js';
+import { viewTickler, viewReference, viewWaiting, viewPerson, waitingBadgeCount, mountReferenceFiles } from './views/gtd.js';
+import { viewClarify, mountClarify } from './views/clarify.js';
 import { withFocus, getFocus, focusLabel, focusedProjectIds } from './prefs.js';
 
-const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done']);
+const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person']);
 const VIEWS = {
   search: viewSearch, inbox: viewInbox, forecast: viewForecast, projects: viewProjects, project: viewProject,
   tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone, flagged: viewFlagged, review: viewReview,
   nearby: viewNearby, places: viewPlaces, alerts: viewAlerts, perspective: viewPerspective, perspectives: viewPerspectives, import: viewImport, template: viewTemplate,
+  clarify: viewClarify, tickler: viewTickler, reference: viewReference, waiting: viewWaiting, person: viewPerson,
 };
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
-const AFTER = { nearby: mountNearbyMap };
+const AFTER = { nearby: mountNearbyMap, clarify: mountClarify, reference: (id) => id && mountReferenceFiles(id) };
 // Detail views highlight their parent tab.
-const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects' };
+const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting' };
 
 export function render() {
   if (location.hash === '#today') { history.replaceState(null, '', '#forecast'); } // old links
@@ -49,15 +53,16 @@ export function render() {
   if (AFTER[view]) AFTER[view](...args);
   const tab = TAB_FOR[view] || view;
   document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('active', a.dataset.view === tab));
-  const inboxCount = db.tasks.filter((t) => t.in_inbox && !t.parent_id && isOpen(t)).length;
+  const inboxCount = db.tasks.filter((t) => t.in_inbox && !t.parent_id && isOpen(t) && !isTickled(t)).length;
   const dueCount = ids ? withFocus(forecastBadgeCount) : forecastBadgeCount(); // due today + overdue (in focus)
   $('#badge-inbox').textContent = inboxCount || '';
   $('#badge-forecast').textContent = dueCount || '';
   $('#badge-flagged').textContent = (ids ? withFocus(flaggedBadgeCount) : flaggedBadgeCount()) || '';
   $('#badge-review').textContent = (ids ? withFocus(reviewDueCount) : reviewDueCount()) || '';
   $('#badge-nearby').textContent = hereNowCount() || '';
+  $('#badge-waiting').textContent = waitingBadgeCount() || '';
   // Views that live under "More" on phones light up the More tab.
-  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts', 'perspective', 'perspectives', 'import'].includes(view));
+  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts', 'perspective', 'perspectives', 'import', 'waiting', 'person', 'tickler', 'reference'].includes(view));
   const nav = $('#nav-perspectives');
   if (nav) nav.innerHTML = ids ? withFocus(() => perspectiveNav(view === 'perspective' ? args[0] : null)) : perspectiveNav(view === 'perspective' ? args[0] : null);
   renderInspector();

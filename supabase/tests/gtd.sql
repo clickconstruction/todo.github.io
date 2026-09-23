@@ -1,0 +1,38 @@
+-- GTD: people, reference items, waiting/agenda/tickler/energy columns (migration 20261004000001).
+-- One rolled-back transaction; every row should be ok = true.
+begin;
+insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','gtd1@test.invalid'),('00000000-0000-0000-0000-0000000000d2','00000000-0000-0000-0000-000000000000','authenticated','authenticated','gtd2@test.invalid');
+create temp table r (n int generated always as identity, test text, ok boolean, detail text); grant all on r to authenticated;
+insert into public.people (id, user_id, name) values ('00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-0000000000d2', 'Their person');
+insert into public.reference_items (id, user_id, title) values ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-0000000000d2', 'Their ref');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000d1","role":"authenticated"}', true);
+insert into public.people (id, name, email) values ('00000000-0000-0000-0000-0000000000e1', 'Jodi', 'jodi@example.com');
+insert into r (test, ok, detail) select 'owner adds a person; can''t see others', count(*) = 1, '' from public.people;
+insert into public.tasks (id, title, waiting_on, follow_up_at) values ('00000000-0000-0000-0000-0000000000a1', 'Send drawings', '00000000-0000-0000-0000-0000000000e1', now() + interval '7 days');
+insert into r (test, ok, detail) select 'delegating stamps delegated_at', delegated_at is not null and follow_up_at is not null, '' from public.tasks where id = '00000000-0000-0000-0000-0000000000a1';
+update public.tasks set waiting_on = null where id = '00000000-0000-0000-0000-0000000000a1';
+insert into r (test, ok, detail) select 'taking it back clears the follow-up', follow_up_at is null, '' from public.tasks where id = '00000000-0000-0000-0000-0000000000a1';
+do $$ begin update public.tasks set waiting_on = '00000000-0000-0000-0000-0000000000e2' where id = '00000000-0000-0000-0000-0000000000a1'; insert into r (test, ok, detail) values ('can''t wait on another user''s person', false, '');
+exception when foreign_key_violation then insert into r (test, ok, detail) values ('can''t wait on another user''s person', true, sqlerrm); end $$;
+do $$ begin update public.tasks set agenda_for = '00000000-0000-0000-0000-0000000000e2' where id = '00000000-0000-0000-0000-0000000000a1'; insert into r (test, ok, detail) values ('can''t put it on another user''s person''s agenda', false, '');
+exception when foreign_key_violation then insert into r (test, ok, detail) values ('can''t put it on another user''s person''s agenda', true, sqlerrm); end $$;
+do $$ begin update public.tasks set energy = 'extreme' where id = '00000000-0000-0000-0000-0000000000a1'; insert into r (test, ok, detail) values ('energy is low/medium/high', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('energy is low/medium/high', true, sqlerrm); end $$;
+update public.tasks set energy = 'low', tickler = true, defer_at = now() + interval '2 days' where id = '00000000-0000-0000-0000-0000000000a1';
+insert into r (test, ok, detail) select 'energy + tickler saved', energy = 'low' and tickler, '' from public.tasks where id = '00000000-0000-0000-0000-0000000000a1';
+insert into public.reference_items (id, title, topic, secret_value) values ('00000000-0000-0000-0000-0000000000f1', 'Gate code', 'Smith job', '4411#');
+insert into r (test, ok, detail) select 'owner files reference; can''t see others', count(*) = 1, '' from public.reference_items;
+do $$ begin update public.tasks set reference_id = '00000000-0000-0000-0000-0000000000f2' where id = '00000000-0000-0000-0000-0000000000a1'; insert into r (test, ok, detail) values ('can''t link another user''s reference', false, '');
+exception when foreign_key_violation then insert into r (test, ok, detail) values ('can''t link another user''s reference', true, sqlerrm); end $$;
+insert into public.attachments (reference_id, path, name, size, mime) values ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000d1/x/plan.pdf', 'plan.pdf', 10, 'application/pdf');
+insert into r (test, ok, detail) select 'attachments can belong to a reference item', count(*) = 1, '' from public.attachments where reference_id is not null;
+do $$ begin insert into public.attachments (task_id, reference_id, path, name, size, mime) values ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000d1/y/a.txt', 'a.txt', 1, 'text/plain'); insert into r (test, ok, detail) values ('an attachment has exactly one owner', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('an attachment has exactly one owner', true, sqlerrm); end $$;
+do $$ begin insert into public.attachments (reference_id, path, name, size, mime) values ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-0000000000d1/z/a.txt', 'a.txt', 1, 'text/plain'); insert into r (test, ok, detail) values ('can''t attach to another user''s reference', false, '');
+exception when foreign_key_violation then insert into r (test, ok, detail) values ('can''t attach to another user''s reference', true, sqlerrm); end $$;
+delete from public.people;
+delete from public.reference_items;
+insert into r (test, ok, detail) select 'people and reference items can''t be deleted', (select count(*) from public.people) = 1 and (select count(*) from public.reference_items) = 1, '';
+select test, ok, detail from r order by n;
+rollback;

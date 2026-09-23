@@ -30,6 +30,9 @@ import { openPlaceEditor, openTagEditor } from './editors/place.js';
 import { setWithin } from './views/nearby.js';
 import { openErrandPlanner } from './views/errands.js';
 import { hereNowCount } from './places.js';
+import { gtdAction, gtdSubmit, onRefSearch, waitingBadgeCount } from './views/gtd.js';
+import { clarifyAction, onClarifySubmit, clarifyKey } from './views/clarify.js';
+import { openDelegate, openTickle } from './editors/gtd.js';
 
 const view = $('#view');
 const typing = () => /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
@@ -132,6 +135,8 @@ const CLICKS = [
   ['[data-focus-here]', (el) => focusOn(el.dataset.focusHere)],
   ['[data-save-template]', (el) => { const p = byId(db.projects, el.dataset.saveTemplate); if (p) openSaveAsTemplate(p); }],
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
+  ['[data-clarify]', (el, e) => { e.stopPropagation(); clarifyAction(el.dataset.clarify); }],
+  ['[data-gtd]', (el, e) => { e.stopPropagation(); gtdAction(el); }],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
   ['[data-copy-geo]', (el) => copyGeoUrl(el)],
   ['[data-setup-auto]', (el) => openAutomationGuide(el.dataset.setupAuto)],
@@ -162,6 +167,7 @@ document.addEventListener('click', (e) => {
 });
 
 view.addEventListener('submit', async (e) => {
+  if (onClarifySubmit(e) || gtdSubmit(e)) return;
   const senderForm = e.target.closest('[data-add-sender]');
   if (senderForm) { e.preventDefault(); await addSender(senderForm); return; }
   const form = e.target.closest('[data-capture]');
@@ -197,6 +203,7 @@ view.addEventListener('change', (e) => {
 
 view.addEventListener('input', (e) => {
   if (e.target.id === 'search-input') onSearchInput(e.target);
+  if (e.target.id === 'ref-search') onRefSearch(e.target);
 });
 
 $('#fab').onclick = openQuickEntry;
@@ -206,7 +213,8 @@ const $$review = (i) => document.querySelectorAll('[data-review-go]')[i];
 $('#more-tab').onclick = () => {
   const due = reviewDueCount();
   const here = hereNowCount();
-  const links = [['#review', '🔁', `Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
+  const waiting = waitingBadgeCount();
+  const links = [['#waiting', '⏳', `Waiting For${waiting ? ` <b class="badge due inline">${waiting}</b>` : ''}`], ['#tickler', '📆', 'Tickler'], ['#reference', '🗄️', 'Reference'], ['#review', '🔁', `Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
   const persp = livePerspectives().map((p) => { const n = badgeCount(p); return [`#perspective/${p.id}`, esc(p.icon), `${esc(p.name)}${n ? ` <b class="badge persp inline">${n}</b>` : ''}`]; });
   const sheet = openSheet(`<form method="dialog" class="more-sheet"><button type="button" class="btn focus-more" data-act="focus">🎯 ${getFocus() ? `Focused on ${esc(focusLabel())} · change` : 'Focus'}</button><h2>Perspectives</h2>
     <nav class="more-links">${persp.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}<a href="#perspectives" data-more-link><span>🔭</span>${persp.length ? 'All perspectives' : 'Perspectives: saved views'}</a></nav>
@@ -218,6 +226,7 @@ $('#more-tab').onclick = () => {
 };
 window.addEventListener('hashchange', render);
 document.addEventListener('keydown', (e) => {
+  if (clarifyKey(e)) return;
   if (!e.metaKey && !e.ctrlKey && !$('#sheet').open && !typing() && location.hash.startsWith('#review') && ['j', 'k', 'm'].includes(e.key)) {
     const btn = e.key === 'm' ? $('[data-mark-reviewed]') : $$review(e.key === 'j' ? 1 : 0);
     if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
@@ -238,6 +247,8 @@ Object.assign(H, {
   breakdown: (t) => openBreakdown(t),
   indent: (t) => indentTask(t),
   outdent: (t) => outdentTask(t),
+  delegate: (t) => openDelegate(t),
+  tickle: (t) => openTickle(t),
 });
 // Pick up changes made on another device when the app comes back to the foreground.
 document.addEventListener('visibilitychange', async () => {

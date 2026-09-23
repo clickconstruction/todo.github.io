@@ -1,7 +1,7 @@
 // Task editor: one form builder used by the pop-up sheet (phones, new items) and by the
 // desktop inspector panel (edits in place, saving as you go). Plus quick entry.
 import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, isOpen, taskSort, tagsFor, onHoldTagFor, tagLabel } from '../state.js';
-import { fromDateInput, fromDateTimeInput, HOURS } from '../dates.js';
+import { fromDateInput, fromDateTimeInput, HOURS, quickDate } from '../dates.js';
 import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
 import { saveTask, capture } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
@@ -15,6 +15,21 @@ import { skipOccurrence } from '../data.js';
 import { stepsFieldHtml, partOfFieldHtml, wireStepsFields } from './steps.js';
 import { openBreakdown } from './breakdown.js';
 import { section, prop, propInline, wireProps } from './props.js';
+import { ENERGY, ENERGY_ICON, livePeople } from '../gtd.js';
+import { openDelegate, openTickle } from './gtd.js';
+
+// Waiting on someone (with a follow-up day), or something to discuss with them (Agenda).
+function waitingFieldHtml(t, task) {
+  const people = livePeople();
+  const opts = (sel) => `<option value="">Nobody</option>${[...people, ...(db.people || []).filter((p) => p.archived_at && p.id === sel)].map((p) => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}`;
+  return `<div class="waiting-field">
+    <label>Waiting on <span class="hint">someone else’s move; not your next action</span><select name="waiting_on">${opts(t.waiting_on)}</select></label>
+    <div data-follow-box ${t.waiting_on ? '' : 'hidden'}>${dateField('follow_up_at', 'Follow up', t.follow_up_at)}</div>
+    <label>Discuss with <span class="hint">on their Agenda</span><select name="agenda_for">${opts(t.agenda_for)}</select></label>
+    ${task && isOpen(task) ? '<button type="button" class="btn small" data-delegate-task>⏳ Delegate with a message…</button>' : ''}
+    ${people.length ? '' : '<p class="hint">People are added when you delegate, or in Waiting For.</p>'}
+  </div>`;
+}
 
 const notesAreLong = (text) => text.length > 280 || text.split('\n').length > 8;
 
@@ -37,7 +52,9 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
       ${partOfFieldHtml(t)}
       ${propInline('Project', `<select name="project_id"><option value="">${task && task.in_inbox ? 'None (Inbox)' : 'None'}</option>
         ${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select><span class="prop-val follows" data-project-follows hidden></span>`)}
-      ${prop('tags', 'Tags', tagPickerHtml())}`)}
+      ${prop('tags', 'Tags', tagPickerHtml())}
+      ${prop('waiting', 'Waiting on', waitingFieldHtml(t, task))}
+      ${propInline('Energy', `<select name="energy"><option value="">None</option>${ENERGY.map(([v, l]) => `<option value="${v}" ${t.energy === v ? 'selected' : ''}>${ENERGY_ICON[v]} ${l}</option>`).join('')}</select>`)}`)}
     ${section('dates', 'Dates', `
       ${prop('defer_at', 'Defer until', dateField('defer_at', 'Defer until', t.defer_at))}
       ${prop('planned_at', 'Planned', dateField('planned_at', 'Planned', t.planned_at))}
@@ -62,7 +79,7 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
 }
 
 const secondaryButtons = (task) => `
-  ${task && isOpen(task) ? '<button type="button" class="btn danger" data-drop>Drop</button>' : ''}
+  ${task && isOpen(task) ? '<button type="button" class="btn danger" data-drop>Drop</button><button type="button" class="btn" data-tickle-task title="Out of sight until a day, then back in the Inbox">📆 Tickle…</button>' : ''}
 `;
 
 // Wire behaviour shared by sheet and panel; returns collect() → { fields, tagIds } or null.
@@ -77,6 +94,16 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
   const collectReminders = wireNotifyField(form, remindersFor('task_id', task && task.id), onTagsChange);
   const collectFiles = wireAttachField(form, 'task_id', task && task.id);
   wireHistoryField(form, 'task_id', task && task.id);
+  const waitSel = form.elements.waiting_on;
+  if (waitSel) waitSel.addEventListener('change', () => {
+    $('[data-follow-box]', form).hidden = !waitSel.value;
+    const fu = form.elements.follow_up_at; // a week from today unless you pick a day
+    if (waitSel.value && !fu.value) { fu.value = quickDate('', '+1w'); fu.dispatchEvent(new Event('change', { bubbles: true })); }
+  });
+  const del = $('[data-delegate-task]', form);
+  if (del && task) del.onclick = () => openDelegate(byId(db.tasks, task.id) || task);
+  const tk = $('[data-tickle-task]', form);
+  if (tk && task) tk.onclick = () => openTickle(byId(db.tasks, task.id) || task);
   const skip = $('[data-skip-occurrence]', form);
   if (skip && task) skip.onclick = () => skipOccurrence(task, () => { const sheet = form.closest('dialog'); if (sheet) sheet.close(); });
   if (form.elements.status) {
@@ -98,6 +125,10 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
       planned_at: fromDateInput(f.get('planned_at'), HOURS.planned_at),
       due_at: fromDateInput(f.get('due_at'), HOURS.due_at),
       estimate_minutes: f.get('estimate_minutes') === '' ? null : Math.max(0, Math.round(Number(f.get('estimate_minutes')))),
+      energy: f.get('energy') || null,
+      waiting_on: f.get('waiting_on') || null,
+      follow_up_at: f.get('waiting_on') ? fromDateInput(f.get('follow_up_at'), 9) : null,
+      agenda_for: f.get('agenda_for') || null,
       ...collectLocation(),
       repeat_rule: collectRepeat(),
       notifications: collectReminders(),

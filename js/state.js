@@ -5,7 +5,7 @@
 export const sb = window.sb;
 export const $ = (sel, root = document) => root.querySelector(sel);
 
-export const db = { tasks: [], projects: [], folders: [], tags: [], taskTags: [], projectTags: [], places: [], notifications: [], attachments: [], perspectives: [], templates: [], calendars: [] };
+export const db = { tasks: [], projects: [], folders: [], tags: [], taskTags: [], projectTags: [], places: [], notifications: [], attachments: [], perspectives: [], templates: [], calendars: [], people: [], references: [] };
 
 export const app = {
   user: null,

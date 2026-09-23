@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -66,13 +66,13 @@ globalThis.fetch = async (url, init = {}) => {
   if (String(url).includes('/rest/v1/rpc/')) { rpcCalls.push({ fn: String(url).split('/rpc/')[1], body: JSON.parse(init.body) }); return new Response('{}', { status: 200 }); }
   const u = new URL(url); const table = u.pathname.split('/').pop();
   const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','or'].includes(k));
-  const ors = [...u.searchParams].filter(([k]) => k === 'or').map(([, v]) => v.slice(1, -1).match(/[a-z_]+\.(?:ilike\.\*[^*]*\*|in\.\([^)]*\)|not\.is\.null|is\.null|(?:lt|lte|gte|gt|eq)\.[^,)]+)/g) || []);
+  const ors = [...u.searchParams].filter(([k]) => k === 'or').map(([, v]) => v.slice(1, -1).match(/[a-z_]+\.(?:ilike\.\*[^*]*\*|in\.\([^)]*\)|not\.is\.null|is\.null|is\.(?:true|false)|(?:lt|lte|gte|gt|eq)\.[^,)]+)/g) || []);
   const orMatch = (r) => ors.every((conds) => conds.some((c) => {
     const [k, op, ...rest] = c.split('.'); const v = rest.join('.');
     if (op === 'ilike') return (r[k] || '').toLowerCase().includes(decodeURIComponent(v).replace(/\*/g, '').toLowerCase());
     if (op === 'in') return v.slice(1, -1).split(',').map((x) => x.replace(/"/g, '')).includes(String(r[k]));
     if (op === 'not') return r[k] != null;
-    if (op === 'is') return r[k] == null;
+    if (op === 'is') return v === 'null' ? r[k] == null : String(!!r[k]) === v;
     if (op === 'lt') return r[k] != null && r[k] < v;
     if (op === 'lte') return r[k] != null && r[k] <= v;
     if (op === 'gt') return r[k] != null && r[k] > v;
@@ -110,7 +110,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (m === 'POST' && table === 'tasks') for (const b of (Array.isArray(body) ? body : [body])) { const e = guard({}, b); if (e) return res({ message: e }, 400); }
   if (m === 'PATCH' && table === 'tasks') for (const r of rows.filter(match)) { const b = { ...body }; const e = guard(r, b); if (e) return res({ message: e }, 400); Object.assign(r, b); follow(r); }
   if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
-  if (m === 'PATCH') { rows.filter(match).forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); return res(null, 204); }
+  if (m === 'PATCH') { const hit = rows.filter((r) => match(r) && orMatch(r)); hit.forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); if (table === 'tasks') hit.forEach((r) => { if (!r.waiting_on) r.follow_up_at = null; }); return init.headers.Prefer ? res(hit) : res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
 };
 const env = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SECRET_KEY: 'sb_secret_test', TIMEZONE: 'America/Chicago' };
@@ -129,7 +129,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 41 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 41 tools, no internals leaked');
+assert(list.body.result.tools.length === 53 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 53 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -709,4 +709,79 @@ const hist = await tool('get_history', { task: oneShot.id });
 assert(hist.changes[0].field === 'due_at' && hist.changes[0].by === 'app' && hist.notifications_sent[0].kind === 'reminder', 'get_history returns changes and notifications sent');
 const dl = await tool('list_deliveries', {});
 assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.example.com') && dl.deliveries.length >= 2, 'list_deliveries shows devices and recent sends');
+// ---------- GTD: clarify, delegate / waiting / agendas, tickler, reference, energy ----------
+{
+  const inboxItem = await tool('capture', { title: 'Call Hiro about the backflow permit' });
+  const pl = (await tool('list_projects', {})).projects || (await tool('list_projects', {}));
+  const projName = (Array.isArray(pl) ? pl : pl.projects || [])[0]?.name || null;
+  let err = '';
+  try { await tool('clarify_item', { id: inboxItem.id, decision: 'next_action' }); } catch (e) { err = e.message; }
+  assert(/project or at least one tag/.test(err), 'clarify next_action needs a project or tag');
+  const na = await tool('clarify_item', { id: inboxItem.id, decision: 'next_action', tags: ['Phone'], energy: 'low', planned: '2026-10-05' });
+  assert(!na.item.in_inbox && na.item.tags.includes('Phone') && na.item.energy === 'low' && na.item.planned === '2026-10-05', 'clarify next_action: tags, energy, planned; leaves the Inbox');
+  const lowOnly = await tool('list_tasks', { max_energy: 'low' });
+  assert(lowOnly.items.some((t) => t.id === inboxItem.id) && lowOnly.items.every((t) => t.energy === 'low'), 'list_tasks max_energy');
+  // Delegate: drafts a message, never sends; the item waits and isn't available.
+  const d1 = await tool('capture', { title: 'Send the permit drawings to the city', tags: ['Laptop'] });
+  const del = await tool('delegate', { id: d1.id, person: 'Jodi Park', email: 'jodi@example.com', follow_up: 3 });
+  const jodi = db.people.find((p) => p.name === 'Jodi Park');
+  assert(jodi && jodi.email === 'jodi@example.com' && del.item.waiting_on === 'Jodi Park' && del.item.follow_up && del.person.name === 'Jodi Park', 'delegate makes a person and waits on them');
+  assert(del.message.mailto.startsWith('mailto:jodi%40example.com?subject=Send%20the%20permit') && /Not sent/.test(del.message.note), 'delegate returns a draft for the user to send (nothing sent)');
+  const avail = await tool('list_tasks', { available_only: true });
+  assert(!avail.items.some((t) => t.id === d1.id), 'a delegated item is not a next action');
+  db.tasks.find((t) => t.id === d1.id).follow_up_at = new Date(Date.now() - 86400000).toISOString();
+  const w = await tool('list_waiting', {});
+  assert(w.count >= 1 && w.follow_ups_due >= 1 && w.by_person['Jodi Park'][0].follow_up_due, 'list_waiting groups by person, flags due follow-ups');
+  const fc = await tool('forecast', { days: 2 });
+  assert(fc.follow_ups && fc.follow_ups.some((t) => t.id === d1.id), 'forecast lists follow-ups due');
+  const nudge = await tool('draft_nudge', { id: d1.id, snooze_days: 2 });
+  assert(/just checking in/.test(nudge.message.body) && nudge.follow_up > new Date().toISOString().slice(0, 10), 'draft_nudge drafts a check-in and snoozes');
+  const back = await tool('update_task', { id: d1.id, waiting_on: null });
+  assert(!back.waiting_on && !db.tasks.find((t) => t.id === d1.id).follow_up_at, 'update_task waiting_on null takes it back');
+  const viaUpdate = await tool('update_task', { id: d1.id, waiting_on: 'Jodi' });
+  assert(viaUpdate.waiting_on === 'Jodi Park' && viaUpdate.follow_up, 'update_task waiting_on by first name, follow-up defaults to a week');
+  // A "Waiting : Hiro" tag becomes Hiro's.
+  const hiroTask = await tool('capture', { title: 'Hiro: quote for water heater', tags: ['Waiting : Hiro'] });
+  const hiro = await tool('save_person', { name: 'Hiro', tag: 'Waiting : Hiro' });
+  const w2 = await tool('list_waiting', { person: 'Hiro' });
+  assert(hiro.name === 'Hiro' && w2.count >= 1 && w2.by_person.Hiro.some((t) => t.id === hiroTask.id) && Object.keys(w2.by_person).length === 1, 'a person linked to a Waiting tag: tagged items wait on them');
+  // Agendas.
+  const ag = await tool('add_agenda_item', { person: 'Jodi Park', title: 'Budget for fixtures' });
+  assert(ag.item.agenda_for === 'Jodi Park' && !ag.item.in_inbox, 'add_agenda_item');
+  const la = await tool('list_agenda', { person: 'jodi park' });
+  assert(la.agenda.length === 1 && la.waiting_on_them.some((t) => t.id === d1.id), 'list_agenda: agenda + what you wait on them for');
+  const lp = await tool('list_people', {});
+  assert(lp.people.find((p) => p.name === 'Jodi Park').agenda === 1 && lp.people.find((p) => p.name === 'Jodi Park').waiting === 1, 'list_people with counts');
+  const arch = await tool('save_person', { id: hiro.id, archived: true });
+  assert(arch.archived && db.people.some((p) => p.id === hiro.id), 'people are archived, not deleted');
+  // Tickler.
+  const tk = await tool('tickle', { title: 'Reconsider the gym membership', date: '2099-01-15' });
+  assert(tk.item.tickler === 'back in the Inbox on 2099-01-15' && tk.item.in_inbox, 'tickle a new reminder');
+  const inbox = await tool('list_inbox', {});
+  assert(!inbox.items.some((t) => t.id === tk.item.id), 'tickled items are hidden from list_inbox until their day');
+  const lt = await tool('list_tickler', {});
+  assert(lt.by_day['2099-01-15'].some((t) => t.id === tk.item.id), 'list_tickler by day');
+  let past = ''; try { await tool('tickle', { id: tk.item.id, date: '2000-01-01' }); } catch (e) { past = e.message; }
+  assert(/after today/.test(past), 'tickle needs a future day');
+  const cl = await tool('clarify_item', { id: tk.item.id, decision: 'next_action', tags: ['Phone'] });
+  assert(!cl.item.tickler && !cl.item.in_inbox, 'clarifying a tickler item takes it out of the tickler');
+  // Reference.
+  const r1 = await tool('save_reference', { title: 'Gate code', topic: 'Smith job', hidden_value: '4411#', notes: 'Side gate on Elm St.' });
+  assert(r1.has_hidden_value && !r1.hidden_value, 'save_reference hides the value');
+  const s1 = await tool('search_reference', { query: 'gate' });
+  const s2 = await tool('search_reference', { query: 'elm', reveal: true });
+  assert(s1.items[0].title === 'Gate code' && !s1.items[0].hidden_value && s2.items[0].hidden_value === '4411#', 'search_reference; reveal only when asked');
+  const filed = await tool('capture', { title: 'Water heater warranty', notes: 'Serial 123' });
+  const fr = await tool('clarify_item', { id: filed.id, decision: 'reference', topic: 'Home' });
+  assert(fr.reference.topic === 'Home' && fr.reference.notes === 'Serial 123' && db.tasks.find((t) => t.id === filed.id).dropped_at, 'clarify reference files it (the item is dropped, not deleted)');
+  await tool('save_reference', { id: r1.id, archived: true });
+  assert((await tool('search_reference', { query: 'gate' })).count === 0 && db.reference_items.some((r) => r.id === r1.id), 'archived reference is hidden, not deleted');
+  // Trash / done / someday.
+  const tr = await tool('capture', { title: 'Old flyer' });
+  await tool('clarify_item', { id: tr.id, decision: 'trash' });
+  assert(db.tasks.find((t) => t.id === tr.id).dropped_at, 'clarify trash drops');
+  const sd = await tool('capture', { title: 'Learn Italian' });
+  const sdo = await tool('clarify_item', { id: sd.id, decision: 'someday' });
+  assert(sdo.item.tags.includes('Someday') && db.tags.find((g) => g.name === 'Someday').status === 'on_hold' && !sdo.item.in_inbox, 'clarify someday: on-hold Someday tag');
+}
 console.log('ALL PASSED');

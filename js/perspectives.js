@@ -5,7 +5,7 @@ import { isAvailable } from './availability.js';
 import { evaluate, describe, validate, TEMPLATES, instantiate } from './perspective-engine.js';
 
 export const livePerspectives = () => db.perspectives.filter((p) => !p.archived_at).sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
-export const perspectiveData = (tasks = db.tasks) => ({ tasks, projects: db.projects, folders: db.folders, tags: db.tags, taskTags: db.taskTags, projectTags: db.projectTags });
+export const perspectiveData = (tasks = db.tasks) => ({ tasks, projects: db.projects, folders: db.folders, tags: db.tags, taskTags: db.taskTags, projectTags: db.projectTags, people: db.people || [] });
 export const summaryOf = (p) => describe(p, perspectiveData());
 
 // Does it look at completed or dropped items? Then the local open-only data isn't enough.

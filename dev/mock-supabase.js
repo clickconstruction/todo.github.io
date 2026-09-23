@@ -13,7 +13,7 @@
   function seed() {
     const T = (o) => ({ user_id: uid, parent_id: null, project_id: null, in_inbox: false, notes: '', completion_note: '', flagged: false,
       defer_at: null, planned_at: null, due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app',
-      sort: 0, created_at: at(-20), updated_at: at(-1), ...o });
+      energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, sort: 0, created_at: at(-20), updated_at: at(-1), ...o });
     const P = (o) => ({ user_id: uid, folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false,
       review_every_days: 7, review_every: 1, review_unit: 'week', last_reviewed_at: null, next_review_at: null, completed_at: null, sort: 0,
       defer_at: null, planned_at: null, due_at: null, estimate_minutes: null, place_id: null, location_trigger: null, location_radius_m: null,
@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -180,6 +180,9 @@
   }
 
   function taskRules(t, before) {
+    // tasks_people_guard: delegated_at when waiting_on changes; no follow-up without a person.
+    if (t.waiting_on && (!before || before.waiting_on !== t.waiting_on) && !t.delegated_at) t.delegated_at = now();
+    if (!t.waiting_on) t.follow_up_at = null;
     const wasOpen = !before || isOpen(before);
     if (wasOpen && t.completed_at && !t.dropped_at && t.repeat_rule) repeatTask(t); // runs first, like tasks_0_repeat
     if (wasOpen && !isOpen(t)) { // closing a task closes its open steps, all the way down
@@ -226,7 +229,8 @@
   // Column defaults the real database fills in (and returns) on insert.
   const DEFAULTS = {
     tasks: () => ({ project_id: null, parent_id: null, in_inbox: true, notes: '', completion_note: '', flagged: false, defer_at: null, planned_at: null,
-      due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null, repeat_rule: null, steps_in_order: false }),
+      due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null, repeat_rule: null, steps_in_order: false,
+      energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null }),
     projects: () => ({ folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
       review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null, defer_at: null, planned_at: null, due_at: null, estimate_minutes: null,
       place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null, repeat_rule: null }),
@@ -238,9 +242,11 @@
     project_templates: () => ({ icon: '📋', folder_id: null, schedule: null, next_run_at: null, last_run_at: null, sort: 0, archived_at: null }),
     perspectives: () => ({ icon: '🔭', rules: { v: 1, match: 'all', rules: [] }, options: { show: 'available', group_by: 'project', sort_by: 'project', layout: 'tree' }, badge: false, sort: 0, archived_at: null }),
     notifications: () => ({ task_id: null, project_id: null, offset_minutes: 0, at: null, sent_at: null }),
-    attachments: () => ({ task_id: null, project_id: null, size: 0, mime: 'application/octet-stream', archived_at: null }),
+    people: () => ({ email: null, phone: null, notes: '', tag_id: null, sort: 0, archived_at: null }),
+    reference_items: () => ({ body: '', topic: '', secret_value: null, project_id: null, archived_at: null }),
+    attachments: () => ({ task_id: null, project_id: null, reference_id: null, size: 0, mime: 'application/octet-stream', archived_at: null }),
   };
-  const NO_DELETE = { calendars: 'calendars are archived, not deleted.', project_templates: 'templates are archived, not deleted.', imports: 'imports are kept.', perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
+  const NO_DELETE = { people: 'people are archived, not deleted.', reference_items: 'reference items are archived, not deleted.', calendars: 'calendars are archived, not deleted.', project_templates: 'templates are archived, not deleted.', imports: 'imports are kept.', perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
 
   // ----- PostgREST-ish filter parsing for .or() strings -----
   function splitTop(s) {

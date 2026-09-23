@@ -6,6 +6,7 @@ import { startOfToday, addDays, sameDay, dayStart, isDeferred } from '../dates.j
 import { taskList, projectRow } from '../rows.js';
 import { filterBar, passes, sortTasks } from '../filter.js';
 import { isFlaggedTask } from './basic.js';
+import { followUpDue, isWaiting, livePeople, agendaFor, mentions } from '../gtd.js';
 import { calendarEvents, calendarErrors, liveCalendars, fmtEventTime } from '../calendars.js';
 
 const DAYS_AHEAD = 6;
@@ -56,6 +57,12 @@ export const forecastBadgeCount = () => {
     + db.projects.filter((p) => ['active', 'on_hold'].includes(p.status) && p.due_at && new Date(p.due_at) < end).length;
 };
 
+// Agenda items for the people named in an event's title ("1:1 with Jodi"), so they're there when you meet.
+function agendaHtml(e) {
+  const hits = livePeople().filter((p) => mentions(p, e.title) && agendaFor(p).length);
+  return hits.map((p) => `<a class="cal-agenda" href="#person/${p.id}">🗣 ${esc(p.name)}: ${agendaFor(p).slice(0, 3).map((t) => esc(t.title)).join(' · ')}${agendaFor(p).length > 3 ? ` · +${agendaFor(p).length - 3}` : ''}</a>`).join('');
+}
+
 export function viewForecast(selected = 'today') {
   const { today, tasks, overdue, plannedPast, days, future, liveProjects, overdueProjects } = forecastData();
   const pastCount = overdue.length + plannedPast.length + overdueProjects.length;
@@ -99,10 +106,12 @@ export function viewForecast(selected = 'today') {
     if (dayEvents.length) {
       body += `<h2 class="section-title">Calendar · ${dayEvents.length}</h2><ul class="list cal-list">${dayEvents.map((e) => `<li class="cal-event ${e.busy ? '' : 'free'}" style="--cal:${esc(e.color)}">
         <span class="cal-time">${esc(fmtEventTime(e))}</span><span class="cal-main"><span class="cal-title">${esc(e.title)}</span>
-        ${e.location || e.calendar ? `<span class="cal-meta">${[e.location, e.calendar].filter(Boolean).map((x) => esc(x.split('\n')[0])).join(' · ')}</span>` : ''}</span></li>`).join('')}</ul>`;
+        ${e.location || e.calendar ? `<span class="cal-meta">${[e.location, e.calendar].filter(Boolean).map((x) => esc(x.split('\n')[0])).join(' · ')}</span>` : ''}${agendaHtml(e)}</span></li>`).join('')}</ul>`;
     }
     calendarErrors().forEach((c) => { body += `<p class="persp-warning">📅 ${esc(c.name)}: ${esc(c.error)} <a href="#settings">Settings</a></p>`; });
     if (isToday && pastCount) body += `<a class="fc-banner" href="#forecast/past">${overdue.length ? `<b>${overdue.length} overdue</b>` : ''}${overdue.length && plannedPast.length ? ' · ' : ''}${plannedPast.length ? `${plannedPast.length} planned earlier` : ''} → triage</a>`;
+    const follow = isToday ? db.tasks.filter((t) => followUpDue(t) && isWaiting(t)) : []; // not your actions, so the view filter doesn't apply
+    if (follow.length) body += `<h2 class="section-title">Follow up · ${follow.length} <a class="btn small" href="#waiting">Waiting For</a></h2>${taskList(follow)}`;
     body += section('Due', it.due);
     body += section('Planned', it.planned);
     body += projectSection('Projects', projectsOn(day, liveProjects));

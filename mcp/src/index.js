@@ -14,11 +14,14 @@ import { handleCalendarFetch, calendarEvents } from './calendar.js';
 import * as P from '../../js/perspective-engine.js';
 import * as OF from '../../js/omnifocus-import.js';
 import * as TPL from '../../js/templates.js';
+import { gtdTools } from './gtd.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = `Todo Tooling is the user's GTD system. Capture anything new with capture (it lands in the Inbox).
-Clarify inbox items with update_task: give each a project and/or tags (contexts like "Laptop", people like "Waiting : Hiro"); an item leaves the Inbox once it has a project or tag.
+Clarify inbox items one at a time with clarify_item (next_action, done, delegate, project, someday, tickler, trash, reference), or with update_task: an item leaves the Inbox once it has a project, a tag or a person (waiting_on / agenda_for).
+Delegation: delegate (or update_task waiting_on + follow_up) makes an item wait on a person; it is then not a next action. You never send anything: delegate and draft_nudge return a drafted message and mailto/sms link for the user to send. list_waiting shows follow-ups due; add_agenda_item/list_agenda keep what to discuss with someone. People: list_people, save_person.
+Tickler: tickle puts an item (or a new reminder) out of sight until a day, then it is back in the Inbox. Reference: search_reference / save_reference hold non-actionable information (codes, warranties); reveal hidden values only when the user asks. Energy (low/medium/high) is set with update_task and filtered with list_tasks max_energy.
 Use planned for when the user intends to work on something and due only for hard deadlines; flagged means "important now". Dates are YYYY-MM-DD in the user's timezone; a plain date lands at the user's default time (Settings → Dates).
 Never complete, reschedule or re-file tasks the user did not ask you to change.
 Notifications: pass notifications (e.g. [{"kind":"before_due","minutes":60}]) to remind the user on their devices; they follow the item's dates.
@@ -308,15 +311,43 @@ class Api {
   q(path, opts) { return rest(this.env, path, opts); }
 
   async lookups() {
-    const [projects, tags] = await Promise.all([
+    const [projects, tags, people] = await Promise.all([
       this.q(`projects?${this.u}&select=id,name,status,folder_id`),
       this.q(`tags?${this.u}&select=id,name,parent_id,status`),
+      this.q(`people?${this.u}&select=id,name,email,phone,tag_id,archived_at`),
     ]);
     const tagLabel = (t) => {
       const p = t.parent_id && tags.find((x) => x.id === t.parent_id);
       return p ? `${p.name} : ${t.name}` : t.name;
     };
-    return { projects, tags, tagLabel };
+    return { projects, tags, tagLabel, people };
+  }
+
+  // A person by id or name (live people first). create: make one for a new name.
+  async resolvePerson(ref, { create = false, email, phone, archived = false } = {}) {
+    const r = String(ref || '').trim();
+    if (!r) throw new Error('person is required');
+    const people = await this.q(`people?${this.u}&select=*`);
+    const live = people.filter((p) => archived || !p.archived_at);
+    const hit = live.find((p) => p.id === r) || live.find((p) => p.name.toLowerCase() === r.toLowerCase()) || live.find((p) => p.name.toLowerCase().split(/\s+/)[0] === r.toLowerCase());
+    if (hit) {
+      const fill = Object.fromEntries(Object.entries({ email, phone }).filter(([k, v]) => v && !hit[k]));
+      if (Object.keys(fill).length) Object.assign(hit, (await this.q(`people?${this.u}&id=eq.${hit.id}`, { method: 'PATCH', prefer: 'return=representation', body: fill }))[0]);
+      return hit;
+    }
+    if (!create) throw new Error(`No person called "${r}". Use list_people or save_person.`);
+    // An existing "Waiting : Name" tag becomes theirs, so items with it count as waiting on them.
+    const tags = await this.q(`tags?${this.u}&select=id,name,parent_id`);
+    const tag = tags.find((g) => g.parent_id && g.name.toLowerCase() === r.toLowerCase() && /waiting/i.test((tags.find((x) => x.id === g.parent_id) || {}).name || ''));
+    const [row] = await this.q('people', { method: 'POST', prefer: 'return=representation', body: { user_id: this.userId, name: r, email: email || null, phone: phone || null, tag_id: tag ? tag.id : null } });
+    return row;
+  }
+
+  // Waiting on someone (delegated, a person's tag, or on an agenda): the shared rule (js/perspective-engine.js).
+  async waitingRule() {
+    const [people, taskTags] = await Promise.all([this.q(`people?${this.u}&archived_at=is.null&select=*`), this.q(`task_tags?${this.u}&select=task_id,tag_id`)]);
+    const fn = P.makeWaiting({ people, taskTags });
+    return { people, isWaiting: fn, personFor: fn.personFor };
   }
 
   async shape(tasks) {
@@ -328,7 +359,7 @@ class Api {
     const reminders = await this.notificationsFor('task_id', tasks.map((t) => t.id));
     const files = await this.q(`attachments?${this.u}&task_id=${inList(tasks.map((t) => t.id))}&archived_at=is.null&order=created_at.asc&select=id,task_id,name,size,mime`);
     const projectIds = [...new Set(tasks.map((t) => t.project_id).filter(Boolean))];
-    const [{ projects, tags, tagLabel }, links, pLinks] = await Promise.all([
+    const [{ projects, tags, tagLabel, people }, links, pLinks] = await Promise.all([
       this.lookups(),
       this.q(`task_tags?${this.u}&task_id=${inList(tasks.map((t) => t.id))}&select=task_id,tag_id`),
       projectIds.length ? this.q(`project_tags?${this.u}&project_id=${inList(projectIds)}&select=project_id,tag_id`) : [],
@@ -345,6 +376,13 @@ class Api {
         return !t.completed_at && !t.dropped_at && held ? `Not available: tag “${tagLabel(held)}” is on hold` : undefined; })(),
       project_tags: pLinks.filter((l) => l.project_id === t.project_id).map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel),
       estimate_minutes: t.estimate_minutes ?? undefined,
+      energy: t.energy || undefined,
+      waiting_on: t.waiting_on ? ((people.find((p) => p.id === t.waiting_on) || {}).name || 'someone') : undefined,
+      delegated: t.waiting_on ? localDate(t.delegated_at, this.tz) : undefined,
+      follow_up: t.waiting_on ? localDate(t.follow_up_at, this.tz) : undefined,
+      agenda_for: t.agenda_for ? ((people.find((p) => p.id === t.agenda_for) || {}).name || 'someone') : undefined,
+      tickler: t.tickler && !t.completed_at && !t.dropped_at ? (t.defer_at && t.defer_at > new Date().toISOString() ? `back in the Inbox on ${localDate(t.defer_at, this.tz)}` : 'back from the tickler') : undefined,
+      reference_id: t.reference_id || undefined,
       place: placeSummary(placeOf(t)),
       repeat: t.repeat_rule ? { ...t.repeat_rule, summary: describeRepeat(t.repeat_rule) } : undefined,
       notifications: reminders[t.id],
@@ -552,14 +590,17 @@ function availabilityOf(tasks, projects, nowIso = new Date().toISOString(), onHo
   return { available, nextFor };
 }
 
-// Parked by an on-hold tag? (shared rule: js/perspective-engine.js makeOnHold)
+// Not the user's to do now: parked by an on-hold tag, or waiting on someone / on an agenda.
+// (shared rules: js/perspective-engine.js makeOnHold and makeWaiting)
+const parkedOf = (data) => { const hold = P.makeOnHold(data); const wait = P.makeWaiting(data); return (t) => hold(t) || wait(t); };
 async function holdFor(api, tasks) {
-  const [tags, taskTags, projectTags] = await Promise.all([
+  const [tags, taskTags, projectTags, people] = await Promise.all([
     api.q(`tags?${api.u}&select=id,name,parent_id,status`),
     api.q(`task_tags?${api.u}&select=task_id,tag_id`),
     api.q(`project_tags?${api.u}&select=project_id,tag_id`),
+    api.q(`people?${api.u}&archived_at=is.null&select=id,name,tag_id,archived_at`),
   ]);
-  return P.makeOnHold({ tasks, tags, taskTags, projectTags });
+  return parkedOf({ tasks, tags, taskTags, projectTags, people });
 }
 
 // A task's steps as a nested tree, with progress counted over the smallest steps (leaves).
@@ -585,7 +626,7 @@ const RULES_DOC = 'Rules: {"match":"all"|"any"|"none","rules":[...]} where each 
 const OPTIONS_DOC = 'Display: {"show":"available"|"remaining"|"completed"|"dropped"|"all","group_by":"project"|"folder"|"tag"|"due"|"flagged"|"none","sort_by":"project"|"due"|"planned"|"defer"|"added"|"changed"|"completed"|"duration"|"title","layout":"tree"|"flat"}';
 
 async function perspectiveData(api, needClosed) {
-  const [open, closed, projects, folders, tags, taskTags, projectTags] = await Promise.all([
+  const [open, closed, projects, folders, tags, taskTags, projectTags, people] = await Promise.all([
     api.q(`tasks?${api.u}&${OPEN}&select=*`),
     needClosed ? api.q(`tasks?${api.u}&or=(completed_at.not.is.null,dropped_at.not.is.null)&order=updated_at.desc&limit=500&select=*`) : [],
     api.q(`projects?${api.u}&select=*`),
@@ -593,9 +634,10 @@ async function perspectiveData(api, needClosed) {
     api.q(`tags?${api.u}&select=id,name,parent_id,status`),
     api.q(`task_tags?${api.u}&select=task_id,tag_id`),
     api.q(`project_tags?${api.u}&select=project_id,tag_id`),
+    api.q(`people?${api.u}&archived_at=is.null&select=id,name,tag_id,archived_at`),
   ]);
   const ids = new Set(open.map((t) => t.id));
-  return { tasks: [...open, ...closed.filter((t) => !ids.has(t.id))], open, projects, folders, tags, taskTags, projectTags };
+  return { tasks: [...open, ...closed.filter((t) => !ids.has(t.id))], open, projects, folders, tags, taskTags, projectTags, people };
 }
 const needsClosed = (x) => ['completed', 'dropped', 'all'].includes((x.options || {}).show) || JSON.stringify(x.rules || {}).includes('"completed"');
 
@@ -682,6 +724,10 @@ const TOOLS = [
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
+        energy: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Energy it takes' },
+        waiting_on: { type: 'string', description: 'Person it is delegated to (name or id; new names become people)' },
+        follow_up: { type: 'string', description: 'YYYY-MM-DD to follow up (with waiting_on; default a week)' },
+        agenda_for: { type: 'string', description: 'Person to discuss it with (their Agenda)' },
       },
       required: ['title'],
     },
@@ -695,17 +741,18 @@ const TOOLS = [
         body.sort = sib.length ? (sib[0].sort || 0) + 1 : 0;
       }
       const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body });
-      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'steps_in_order', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m', 'repeat', 'notifications'].includes(k) && v !== undefined));
+      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'steps_in_order', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m', 'repeat', 'notifications', 'energy', 'waiting_on', 'follow_up', 'agenda_for'].includes(k) && v !== undefined));
       if (!Object.keys(fields).length) return (await api.shape([row]))[0];
       return TOOLS.find((t) => t.name === 'update_task').run(api, { id: row.id, ...fields });
     },
   },
   {
     name: 'list_inbox',
-    description: 'List open Inbox items (captured but not yet clarified), oldest first.',
+    description: 'List open Inbox items (captured but not yet clarified), oldest first. Items waiting in the tickler are left out until their day (list_tickler).',
     inputSchema: { type: 'object', properties: { limit: { type: 'integer', default: 100 } } },
     async run(api, { limit = 100 }) {
-      const rows = await api.q(`tasks?${api.u}&${OPEN}&in_inbox=is.true&parent_id=is.null&order=created_at.asc&limit=${Math.min(+limit || 100, 500)}&select=*`);
+      const now = new Date().toISOString();
+      const rows = await api.q(`tasks?${api.u}&${OPEN}&in_inbox=is.true&parent_id=is.null&or=(tickler.is.false,defer_at.is.null,defer_at.lte.${now})&order=created_at.asc&limit=${Math.min(+limit || 100, 500)}&select=*`);
       return { count: rows.length, items: await api.shape(rows) };
     },
   },
@@ -748,7 +795,8 @@ const TOOLS = [
         tag: { type: 'string', description: 'Tag label, e.g. "Laptop" or "Waiting : Hiro" (a parent tag includes its children)' },
         flagged: { type: 'boolean' },
         max_minutes: { type: 'integer', description: 'Only actions with an estimate of at most this many minutes ("I have 15 minutes")' },
-        available_only: { type: 'boolean', description: 'Only actions that can be done now (not deferred, not waiting in a sequential project, project active). This is the Next Actions list.' },
+        available_only: { type: 'boolean', description: 'Only actions that can be done now (not deferred, not waiting in a sequential project, not delegated or on an agenda, project active). This is the Next Actions list.' },
+        max_energy: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Only actions marked with at most this energy ("I\'m tired": low)' },
         due_before: { type: 'string', description: 'YYYY-MM-DD; items due on or before this date' },
         include_completed: { type: 'boolean', default: false },
         limit: { type: 'integer', default: 100 },
@@ -759,6 +807,7 @@ const TOOLS = [
       if (!a.include_completed) f.push(OPEN);
       if (a.flagged !== undefined) f.push(`flagged=is.${!!a.flagged}`);
       if (a.max_minutes !== undefined) f.push(`estimate_minutes=lte.${Math.max(0, Math.round(Number(a.max_minutes)))}`);
+      if (a.max_energy) f.push(`energy=in.(${['low', 'medium', 'high'].slice(0, ['low', 'medium', 'high'].indexOf(a.max_energy) + 1).join(',')})`);
       if (a.due_before) f.push(`due_at=lt.${zonedToIso(a.due_before, 24, api.tz)}`);
       if (a.project) f.push(`project_id=eq.${await api.resolveProject(a.project)}`);
       if (a.search) {
@@ -797,7 +846,7 @@ const TOOLS = [
       let rows = await api.q(`tasks?${f.join('&')}`);
       if (a.available_only) {
         const [allOpen, projects] = await Promise.all([
-          api.q(`tasks?${api.u}&${OPEN}&select=id,project_id,parent_id,steps_in_order,sort,created_at,defer_at,completed_at,dropped_at`),
+          api.q(`tasks?${api.u}&${OPEN}&select=id,project_id,parent_id,steps_in_order,sort,created_at,defer_at,completed_at,dropped_at,waiting_on,agenda_for`),
           api.q(`projects?${api.u}&select=id,kind,status,defer_at`),
         ]);
         const { available } = availabilityOf(allOpen, projects, undefined, await holdFor(api, allOpen));
@@ -821,6 +870,9 @@ const TOOLS = [
       const items = await api.shape(rows);
       const projects = await api.q(`projects?${api.u}&status=in.(active,on_hold)&or=(due_at.lt.${end},planned_at.lt.${end})&select=id,name,due_at,planned_at,status`);
       const out = { today, past: { overdue: [], planned_earlier: [], overdue_projects: [] }, days: {} };
+      // Waiting For follow-ups due today or earlier (someone else's move; check in).
+      const follow = await api.q(`tasks?${api.u}&${OPEN}&waiting_on=not.is.null&follow_up_at=lt.${zonedToIso(today, 24, api.tz)}&order=follow_up_at.asc&select=*`);
+      if (follow.length) out.follow_ups = await api.shape(follow);
       // Settings → Dates → "Always show in Today": that tag's open, available-now actions.
       const ftag = api.settings.forecast_tag_id;
       if (ftag) {
@@ -867,7 +919,7 @@ const TOOLS = [
       const nowIso = new Date().toISOString();
       const [projects, open, folders] = await Promise.all([
         api.q(`projects?${api.u}&status=in.(active,on_hold)&order=next_review_at.asc&select=*`),
-        api.q(`tasks?${api.u}&${OPEN}&select=id,title,project_id,parent_id,steps_in_order,sort,created_at,defer_at,due_at,planned_at,completed_at,dropped_at`),
+        api.q(`tasks?${api.u}&${OPEN}&select=id,title,project_id,parent_id,steps_in_order,sort,created_at,defer_at,due_at,planned_at,completed_at,dropped_at,waiting_on,agenda_for`),
         api.q(`folders?${api.u}&select=id,name`),
       ]);
       const due = projects.filter((p) => include_not_due || (p.next_review_at && p.next_review_at <= nowIso));
@@ -985,6 +1037,11 @@ const TOOLS = [
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
+        energy: { type: ['string', 'null'], enum: ['low', 'medium', 'high', null], description: 'Energy it takes; null to clear' },
+        waiting_on: { type: ['string', 'null'], description: 'Delegated to this person (name or id; new names become people); null takes it back. Use delegate to also draft the request.' },
+        follow_up: { type: ['string', 'null'], description: 'YYYY-MM-DD to follow up on a waiting item' },
+        agenda_for: { type: ['string', 'null'], description: 'Something to discuss with this person (their Agenda); null to remove' },
+        tickle: { type: ['string', 'null'], description: 'YYYY-MM-DD: out of sight until that day, then back in the Inbox (tickler); null takes it out of the tickler' },
       },
       required: ['id'],
     },
@@ -1003,6 +1060,18 @@ const TOOLS = [
       if (a.estimate_minutes !== undefined) patch.estimate_minutes = a.estimate_minutes === null ? null : Math.max(0, Math.round(Number(a.estimate_minutes)));
       Object.assign(patch, await api.locationPatch(a));
       if (a.repeat !== undefined) patch.repeat_rule = repeatRule(a.repeat, api.tz, task.repeat_rule);
+      if (a.energy !== undefined) { if (a.energy !== null && !['low', 'medium', 'high'].includes(a.energy)) throw new Error('energy must be low, medium or high'); patch.energy = a.energy; }
+      if (a.waiting_on !== undefined) {
+        patch.waiting_on = a.waiting_on === null || a.waiting_on === '' ? null : (await api.resolvePerson(a.waiting_on, { create: true })).id;
+        if (patch.waiting_on && patch.waiting_on !== task.waiting_on) { patch.delegated_at = new Date().toISOString(); if (a.follow_up === undefined && !task.follow_up_at) a.follow_up = localDate(new Date(Date.now() + 7 * 86400000).toISOString(), api.tz); }
+        if (patch.waiting_on) patch.tickler = false;
+      }
+      if (a.follow_up !== undefined) patch.follow_up_at = zonedToIso(a.follow_up, 9, api.tz);
+      if (a.agenda_for !== undefined) patch.agenda_for = a.agenda_for === null || a.agenda_for === '' ? null : (await api.resolvePerson(a.agenda_for, { create: true })).id;
+      if (a.tickle !== undefined) {
+        if (a.tickle) { Object.assign(patch, { tickler: true, defer_at: zonedToIso(a.tickle, 6, api.tz), project_id: null, parent_id: null }); a.project = undefined; a.parent = undefined; }
+        else if (task.tickler) Object.assign(patch, { tickler: false, ...(task.defer_at && task.defer_at > new Date().toISOString() ? { defer_at: null } : {}) });
+      } else if (task.tickler && (a.project || a.parent || (a.tags && a.tags.length) || (a.add_tags && a.add_tags.length) || patch.waiting_on || patch.agenda_for)) patch.tickler = false; // clarified
       if (a.completed_at && a.status === undefined) a.status = 'completed';
       if (a.dropped_at && a.status === undefined) a.status = 'dropped';
       if (a.status !== undefined) {
@@ -1037,7 +1106,8 @@ const TOOLS = [
       }
       const tagCount = (await api.q(`task_tags?${api.u}&task_id=eq.${task.id}&select=tag_id`)).length;
       const parentId = patch.parent_id !== undefined ? patch.parent_id : task.parent_id;
-      patch.in_inbox = !(projectId || parentId || tagCount);
+      const eff = (k) => (k in patch ? patch[k] : task[k]);
+      patch.in_inbox = !!eff('tickler') || !(eff('project_id') || parentId || tagCount || eff('waiting_on') || eff('agenda_for'));
       await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: patch });
       if (Array.isArray(a.notifications)) await api.setNotifications('task_id', task.id, a.notifications);
       if (a.skip_occurrence) {
@@ -1128,7 +1198,7 @@ const TOOLS = [
     async run(api, { include_archived = false }) {
       const all = (await api.q(`perspectives?${api.u}&order=sort.asc&select=*`)).filter((p) => include_archived || !p.archived_at).sort((x, y) => (x.sort - y.sort) || x.name.localeCompare(y.name));
       const data = await perspectiveData(api, all.some(needsClosed));
-      const { available } = availabilityOf(data.open, data.projects, undefined, P.makeOnHold(data));
+      const { available } = availabilityOf(data.open, data.projects, undefined, parkedOf(data));
       return all.map((p) => ({ ...perspectiveOut(p, data), open_count: P.evaluate(p, data, { tz: api.tz, available }).tasks.filter((t) => !t.completed_at && !t.dropped_at).length }));
     },
   },
@@ -1155,7 +1225,7 @@ const TOOLS = [
         const errors = P.validate({ rules: p.rules, options: p.options });
         if (errors.length) throw new Error(errors.join('; '));
       }
-      const { available } = availabilityOf(data.open, data.projects, undefined, P.makeOnHold(data));
+      const { available } = availabilityOf(data.open, data.projects, undefined, parkedOf(data));
       const r = P.evaluate(p, data, { tz: api.tz, available });
       const limit = Math.min(Math.max(1, +a.limit || 100), 500);
       const picked = new Set(r.tasks.slice(0, limit).map((t) => t.id));
@@ -1861,6 +1931,7 @@ const TOOLS = [
     },
   },
 ];
+TOOLS.push(...gtdTools({ OPEN, zonedToIso, localDate, inList, tool: (name) => TOOLS.find((t) => t.name === name) }));
 
 // ---------- repeat ----------
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

@@ -7,9 +7,10 @@ import { placeFor, isInside } from './places.js';
 import { describe } from './repeat.js';
 import { distanceM, fmtDistance } from './geo.js';
 import { app } from './state.js';
+import { waitingPerson, agendaPerson, followUpDue, ENERGY_ICON, returnedFromTickler, isTickled } from './gtd.js';
 import { progress, nextStep, ancestors, rootOf, depthOf, heightOf, MAX_DEPTH } from './tree.js';
 
-export function taskRow(t, { showProject = true, markNext = null, reorder = false, hierarchy = false, hasGroups = false, showPlace = true, depth = 0 } = {}) {
+export function taskRow(t, { showProject = true, markNext = null, reorder = false, hierarchy = false, hasGroups = false, showPlace = true, depth = 0, extra = '' } = {}) {
   const done = !!t.completed_at;
   const project = t.project_id && byId(db.projects, t.project_id);
   const tags = tagsFor(t.id);
@@ -21,7 +22,15 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
     if (up.length) meta.unshift(`<span class="meta-parent" title="${esc(up.map((a) => a.title).reverse().join(' › '))}">↳ ${esc(up[0].title)}</span>`);
   }
   tags.forEach((tag) => meta.push(tagStatus(tag) === 'on_hold' ? `<span class="chip hold" title="On hold: not available">⏸ ${esc(tagLabel(tag))}</span>` : `<span class="chip">${esc(tagLabel(tag))}</span>`));
-  if (t.defer_at && isDeferred(t)) meta.push(`<span>⏸ ${esc(fmtDate(t.defer_at))}</span>`);
+  if (isOpen(t)) {
+    const wp = (t.waiting_on || (db.people || []).some((p) => p.tag_id)) && waitingPerson(t);
+    if (wp && !t.agenda_for) meta.push(`<span class="meta-wait ${followUpDue(t) ? 'late' : ''}" title="Waiting on ${esc(wp.name)}">⏳ ${esc(wp.name)}${t.follow_up_at ? ` · follow up ${esc(fmtDate(t.follow_up_at))}` : ''}</span>`);
+    const ap = t.agenda_for && agendaPerson(t);
+    if (ap) meta.push(`<span class="meta-agenda" title="To discuss with ${esc(ap.name)}">🗣 ${esc(ap.name)}</span>`);
+    if (t.tickler && isTickled(t)) meta.push(`<span class="meta-tickler" title="In the tickler">📆 ${esc(fmtDate(t.defer_at))}</span>`);
+    else if (returnedFromTickler(t)) meta.push('<span class="meta-tickler">📆 from the tickler</span>');
+  }
+  if (t.defer_at && isDeferred(t) && !t.tickler) meta.push(`<span>⏸ ${esc(fmtDate(t.defer_at))}</span>`);
   if (t.planned_at && isOpen(t)) meta.push(`<span class="meta-planned ${isPlannedPast(t) ? 'past' : ''}" title="Planned">🗓 ${esc(fmtDate(t.planned_at))}</span>`);
   if (t.due_at) meta.push(`<span class="meta-due ${isOverdue(t) ? 'overdue' : ''}">📅 ${esc(fmtDate(t.due_at))}</span>`);
   const loc = showPlace && isOpen(t) && placeFor(t);
@@ -34,6 +43,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   if (clips) meta.push(`<span class="meta-clip" title="${clips} attachment${clips === 1 ? '' : 's'}">📎${clips > 1 ? clips : ''}</span>`);
   if (bells) meta.push(`<span class="meta-bell" title="${bells} notification${bells === 1 ? '' : 's'}">🔔</span>`);
   if (t.repeat_rule && isOpen(t)) meta.push(`<span class="meta-repeat" title="${esc(describe(t.repeat_rule))}">🔁</span>`);
+  if (t.energy && isOpen(t)) meta.push(`<span class="meta-energy" title="${esc(t.energy)} energy">${ENERGY_ICON[t.energy] || ''}</span>`);
   if (t.estimate_minutes) meta.push(`<span class="meta-estimate" title="Estimate">⏱ ${fmtMinutes(t.estimate_minutes)}</span>`);
   if (t.dropped_at && !t.completed_at) meta.push('<span class="chip">Dropped</span>');
   // "Next": the project's next action, or the step you're on inside a do-in-order task.
@@ -70,7 +80,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
     <div class="row-main"><div class="row-title">${esc(t.title)}</div>${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}${prog}</div>
     <span class="row-signals">${t.notes ? '<span class="sig-note" title="Has notes" aria-label="Has notes">📝</span>' : ''}
       ${isOpen(t) ? `<button class="flag-btn ${t.flagged ? 'on' : ''}" data-flag="${t.id}" aria-pressed="${!!t.flagged}" aria-label="${t.flagged ? 'Unflag' : 'Flag'}" title="${t.flagged ? 'Unflag' : 'Flag'}">⚑</button>` : ''}</span>
-    ${handles}${reorder ? '' : addSub}
+    ${handles}${reorder ? '' : addSub}${extra}
   </li>`;
 }
 

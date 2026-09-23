@@ -2,12 +2,22 @@
 //   available = open, not deferred (nor any ancestor), its project is active and not
 //               deferred, it has no open steps of its own, and nothing ahead of it in an
 //               ordered container blocks it.
-//               No on-hold tag parks it (its own, its project's or a parent task's).
+//               No on-hold tag parks it (its own, its project's or a parent task's), and it isn't
+//               waiting on someone or on someone's agenda.
 //   ordered containers: a sequential project (only its first open top-level item goes) and a
 //               task with "do steps in order" (only its first open step goes). Blocking is
 //               checked at every level up the tree.
 import { db, byId, isOpen, taskSort, onHoldTagFor } from './state.js';
 import { isDeferred } from './dates.js';
+import { makeWaiting } from './perspective-engine.js';
+
+// Waiting on someone / on an agenda (shared rule), cached until people or tag links change.
+let waitMemo = { key: null, fn: null };
+export function waitingRule() {
+  const key = `${(db.people || []).length}|${db.taskTags.length}|${(db.people || []).map((p) => `${p.id}:${p.tag_id}:${p.archived_at ? 1 : 0}`).join(',')}`;
+  if (waitMemo.key !== key) waitMemo = { key, fn: makeWaiting({ people: db.people || [], taskTags: db.taskTags }) };
+  return waitMemo.fn;
+}
 
 export const PROJECT_KINDS = [
   ['parallel', 'Parallel', 'Every action is available at once'],
@@ -67,6 +77,7 @@ export function isAvailable(t) {
   const p = projectOf(t);
   if (p && (p.status !== 'active' || isDeferred(p))) return false; // a deferred project hides its actions
   if (onHoldTagFor(t)) return false; // parked by an on-hold tag
+  if (waitingRule()(t)) return false; // someone else's move (Waiting For), or for a meeting (Agenda)
   return !isBlocked(t);
 }
 

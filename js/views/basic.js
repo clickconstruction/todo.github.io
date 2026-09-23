@@ -1,5 +1,6 @@
 // Inbox, Today, Tags and Tag views.
 import { db, esc, byId, isOpen, visible, taskSort, sortedTags, tagLabel, effectiveTagIds, tagStatus } from '../state.js';
+import { isTickled, ticklerItems } from '../gtd.js';
 import { taskList, treeList } from '../rows.js';
 import { flattenTree, descendants } from '../tree.js';
 import { filterBar, applyFilter, closedFor, withClosed, filterNote, sortTasks } from '../filter.js';
@@ -8,12 +9,14 @@ import { activePlace } from '../places.js';
 import { alertsNudge } from './alerts.js';
 
 export function viewInbox() {
-  const items = db.tasks.filter((t) => t.in_inbox && !t.parent_id && visible(t)).sort(taskSort);
+  // Tickled items wait (hidden) until their day, then come back marked 📆.
+  const items = db.tasks.filter((t) => t.in_inbox && !t.parent_id && visible(t) && !isTickled(t)).sort(taskSort);
   const open = items.filter(isOpen).length;
+  const waitingInTickler = ticklerItems().length;
   // Inbox items can be broken into steps before they're clarified: show them as a tree.
   const withSteps = items.flatMap((t) => [t, ...descendants(t).filter(visible)]);
-  return `${alertsNudge()}<div class="view-head"><h1 class="inbox">Inbox</h1></div>
-    <p class="view-sub">${open} item${open === 1 ? '' : 's'} to clarify</p>
+  return `${alertsNudge()}<div class="view-head"><h1 class="inbox">Inbox</h1>${open ? '<a class="btn small primary" href="#clarify">Process Inbox</a>' : ''}</div>
+    <p class="view-sub">${open} item${open === 1 ? '' : 's'} to clarify${waitingInTickler ? ` · <a href="#tickler">${waitingInTickler} in the tickler</a>` : ''}</p>
     <form class="capture" data-capture><input type="text" name="title" placeholder="Capture anything…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
     ${treeList(flattenTree(withSteps)) || '<p class="empty">Inbox zero. Nice.</p>'}`;
 }

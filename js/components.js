@@ -8,6 +8,7 @@ export const DATE_HINTS = {
   planned_at: 'When you intend to work on it',
   due_at: 'Hard deadline only',
   next_review_at: 'When it comes up in Review',
+  follow_up_at: 'When to check in',
 };
 
 let seq = 0; // unique ids: a sheet and the inspector can be on screen together

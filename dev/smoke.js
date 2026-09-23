@@ -18,14 +18,15 @@ async function reload() {
   const insp = await import('/js/state.js'); insp.app.selected = null;
   try { localStorage.removeItem('todo.filter'); localStorage.removeItem('todo.collapsed'); } catch { /* ignore */ }
   const { app } = await import('/js/state.js');
-  app.review = null; app.reviewStats = null; app.here = null; app.locationState = null;
+  app.review = null; app.reviewStats = null; app.here = null; app.locationState = null; app.clarify = null; app.refQuery = '';
+  window.__openLink = (url) => { window.__opened = url; };
   window.__noMaps = true; // never call Google from tests
   window.__noRefresh = true; // no background reloads mid-suite (the pane's visibility flips)
   (await import('/js/alerts.js')).resetAlertState();
   window.__geo = { state: 'prompt', position: { lat: 29.7610, lng: -95.3705, accuracy: 20 } }; // ~400 ft from mock Home Depot
   try { ['todo.here', 'todo.nearby.within', 'todo.geo.alerts', 'todo.geo.key', 'todo.geo.done', 'todo.alerts.nudge', 'todo.alerts.seen'].forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ }
   const { setFilter } = await import('/js/filter.js');
-  setFilter({ show: 'remaining', fits: 0 });
+  setFilter({ show: 'remaining', fits: 0, energy: '' });
   const [{ loadAll }, { render }] = await Promise.all([import('/js/data.js'), import('/js/router.js')]);
   await loadAll();
   location.hash = '#inbox';
@@ -38,7 +39,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -49,6 +50,247 @@ export async function run({ only } = {}) {
   const failed = results.filter((r) => !r.ok);
   console.log(`smoke: ${results.length - failed.length}/${results.length} passed`, failed);
   return { passed: results.length - failed.length, total: results.length, failed, results };
+}
+
+const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Clarify: one item at a time, each decision recorded and undoable.
+async function clarify(check) {
+  await go('#inbox');
+  check('Inbox offers Process Inbox', !!$('a[href="#clarify"]'));
+  const cap = async (title) => { const i = $('[data-capture] input'); i.value = title; i.closest('form').requestSubmit(); await wait(150); };
+  await cap('Order more fittings for plumbing');
+  await cap('Reply to Jodi: yes to Thursday');
+  await cap('Old flyer');
+  await cap('Gate code 4411');
+  await go('#clarify');
+  check('shows the first item, 1 of N, and 8 choices', has(undefined, 'process inbox', '1 of 6', 'frog pond ein', 'what is it?') && $$('.cl-choice').length === 8, text());
+  $('[data-clarify="skip"]').click(); await wait(120);
+  check('Skip moves to the next item', has(undefined, 'build a 2m telescope', '1 of 6'), text());
+  key('5'); await wait(250);
+  const tele = byTitle('Build a 2m telescope');
+  const someday = T().tags.find((g) => g.name === 'Someday');
+  check('5 = Someday: an on-hold Someday tag, out of the Inbox', someday && someday.status === 'on_hold' && !tele.in_inbox && T().task_tags.some((x) => x.task_id === tele.id && x.tag_id === someday.id));
+  check('progress advances', has(undefined, '2 of 6', 'order more fittings'), text());
+  check('suggests the project from similar items', has('.cl-sug', 'click plumbing'), text('.cl-sug'));
+  key('1'); await wait(150);
+  const form = $('[data-clarify-form="next"]');
+  check('1 = Next action form, suggested project preselected', form && form.elements.project_id.value === 'p1');
+  form.querySelector('input[name=energy][value=low]').checked = true;
+  form.querySelectorAll('input[name=when]')[1].checked = true; // Today
+  form.requestSubmit(); await wait(300);
+  const fit = byTitle('Order more fittings for plumbing');
+  check('saves project, energy, planned today; leaves the Inbox', fit.project_id === 'p1' && fit.energy === 'low' && fit.planned_at && new Date(fit.planned_at).toDateString() === new Date().toDateString() && !fit.in_inbox, JSON.stringify({ p: fit.project_id, e: fit.energy, i: fit.in_inbox }));
+  $('[data-clarify="undo"]').click(); await wait(300);
+  check('Undo puts it back in the Inbox as it was', byTitle('Order more fittings for plumbing').in_inbox && !byTitle('Order more fittings for plumbing').project_id && !byTitle('Order more fittings for plumbing').energy && has(undefined, 'order more fittings'));
+  key('1'); await wait(150);
+  const f2 = $('[data-clarify-form="next"]');
+  f2.elements.project_id.value = '';
+  f2.requestSubmit(); await wait(200);
+  check('a next action needs a project or a tag', !$('[data-cl-error]').hidden && byTitle('Order more fittings for plumbing').in_inbox);
+  key('Escape'); await wait(100);
+  check('Esc goes back to the choices', $$('.cl-choice').length === 8);
+  key('2'); await wait(150);
+  check('2 = Do it now shows a 2:00 timer', has('[data-clarify-timer]', '2:00') || has('[data-clarify-timer]', '1:5'));
+  $('[data-clarify="longer"]').click(); await wait(150);
+  check('“Taking longer” turns it into the next-action form', !!$('[data-clarify-form="next"]'));
+  key('Escape'); await wait(100);
+  $('[data-clarify="skip"]').click(); await wait(120);
+  check('now on the Jodi reply', has(undefined, 'reply to jodi'));
+  key('2'); await wait(120);
+  key('Enter'); await wait(250);
+  check('Done (⏎) completes it', !!byTitle('Reply to Jodi: yes to Thursday').completed_at);
+  key('7'); await wait(250);
+  check('7 = Trash drops it (not deleted)', !!byTitle('Old flyer').dropped_at);
+  key('8'); await wait(150);
+  const rf = $('[data-clarify-form="reference"]');
+  rf.elements.topic.value = 'Smith job';
+  rf.requestSubmit(); await wait(300);
+  const ref = T().reference_items.find((r) => r.title === 'Gate code 4411');
+  check('8 = Reference files it under a topic; the item is dropped with a note', ref && ref.topic === 'Smith job' && byTitle('Gate code 4411').dropped_at && byTitle('Gate code 4411').reference_id === ref.id);
+  check('done screen: skipped remain, with a summary', has(undefined, 'done, except', 'skipped', '1 do it now', '1 trash', '1 reference'), text());
+  $('[data-clarify="unskip"]').click(); await wait(120);
+  check('Go through the skipped ones', has(undefined, 'frog pond ein'));
+  key('4'); await wait(150);
+  const pf = $('[data-clarify-form="project"]');
+  pf.elements.name.value = 'Frog Pond LLC setup';
+  pf.elements.first.value = 'Apply for the EIN online';
+  pf.requestSubmit(); await wait(400);
+  const proj = T().projects.find((x) => x.name === 'Frog Pond LLC setup');
+  check('4 = Project: creates the project and its first action', proj && T().tasks.some((t) => t.project_id === proj.id && t.title === 'Apply for the EIN online'), JSON.stringify(proj));
+  $('[data-clarify="undo"]').click(); await wait(400);
+  check('undoing a project drops it and restores the item', T().projects.find((x) => x.name === 'Frog Pond LLC setup').status === 'dropped' && T().tasks.find((t) => t.id === 't12').in_inbox && !T().tasks.find((t) => t.id === 't12').dropped_at && T().tasks.find((t) => t.id === 't12').title === 'Frog Pond EIN');
+}
+
+// Tickler: items wait out of sight, then come back to the Inbox.
+async function tickler(check) {
+  const { tickle, tickleNew, dayKey } = await import('/js/gtd.js');
+  const { db } = await import('/js/state.js');
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+  const t13 = db.tasks.find((t) => t.id === 't13');
+  const { openTickle } = await import('/js/editors/gtd.js');
+  openTickle(t13);
+  await wait(80);
+  $('#sheet [data-day]').click(); // Tomorrow
+  $('#sheet form').requestSubmit(); await wait(250);
+  const row = T().tasks.find((t) => t.id === 't13');
+  check('tickling sets tickler + defer 6am, stays an Inbox item', row.tickler && row.in_inbox && new Date(row.defer_at).getHours() === 6 && dayKey(new Date(row.defer_at)) === dayKey(tomorrow), JSON.stringify(row));
+  await go('#inbox');
+  check('hidden from the Inbox, with a link to the tickler', !has(undefined, 'build a 2m telescope') && has(undefined, '1 in the tickler') && $('#badge-inbox').textContent === '1');
+  await go('#tickler');
+  check('tickler: 31 days + 12 months, tomorrow selected with the item', $$('.tk-grid:not(.months) .tk-cell').length === 31 && $$('.tk-grid.months .tk-cell').length === 12 && has(undefined, 'build a 2m telescope') && $('.tk-cell.on i') && $('.tk-cell.on i').textContent === '1');
+  const inMonth = new Date(); inMonth.setMonth(inMonth.getMonth() + 3, 10);
+  await tickleNew('Renew the boat registration', dayKey(inMonth));
+  await go(`#tickler/${dayKey(inMonth).slice(0, 7)}`);
+  check('month folder lists items later in the year', has(undefined, 'renew the boat registration'));
+  const add = $('[data-tickle-add] input'); add.value = 'Concert tickets'; add.closest('form').requestSubmit(); await wait(250);
+  const conc = byTitle('Concert tickets');
+  check('adding in a folder tickles it for that day', conc && conc.tickler && dayKey(new Date(conc.defer_at)) === `${dayKey(inMonth).slice(0, 7)}-01`);
+  await go(`#tickler/${dayKey(tomorrow)}`);
+  $('[data-gtd="untickle"]').click(); await wait(250);
+  await go('#inbox');
+  check('Bring back now: in the Inbox, marked from the tickler', has(undefined, 'build a 2m telescope', 'from the tickler'), text());
+  // A past tickle date = returned; the rows say so and Clarify counts it.
+  await go('#clarify');
+  check('returned items are clarified like any other', has(undefined, 'of 2') || has(undefined, 'of 3'), text());
+  // Filing it as a next action clears the tickler flag.
+  key('1'); await wait(150); const f = $('[data-clarify-form="next"]'); if (f) { f.elements.project_id.value = 'p3'; f.requestSubmit(); await wait(300); }
+  const fr = T().tasks.find((t) => t.id === 't12' || t.id === 't13');
+  check('clarified out of the Inbox → tickler flag cleared', T().tasks.filter((t) => ['t12', 't13'].includes(t.id)).some((t) => !t.in_inbox && !t.tickler), JSON.stringify(fr));
+}
+
+// Reference: filing cabinet with hidden values and project support material.
+async function reference(check) {
+  await go('#reference');
+  check('empty Reference explains itself', has(undefined, 'reference', 'nothing filed yet'));
+  $('[data-gtd="new-ref"]').click(); await wait(80);
+  const f = $('#sheet form');
+  f.elements.title.value = 'Gate code';
+  f.elements.topic.value = 'Smith job';
+  f.elements.project_id.value = 'p1';
+  f.elements.secret_value.value = '4411#';
+  f.elements.body.value = 'Side gate on Elm St.';
+  f.requestSubmit(); await wait(300);
+  const r = T().reference_items.find((x) => x.title === 'Gate code');
+  check('saved with topic, project and hidden value', r && r.topic === 'Smith job' && r.project_id === 'p1' && r.secret_value === '4411#');
+  check('opens the item page', location.hash === `#reference/${r.id}` && has(undefined, 'gate code', 'smith job', 'side gate on elm st.'));
+  check('the value is hidden until Show', $('[data-secret]').hidden && !text().includes('4411#'));
+  $('[data-gtd="show-secret"]').click(); await wait(50);
+  check('Show reveals it', !$('[data-secret]').hidden && text().includes('4411#'));
+  check('attachments field is on the page', !!$('[data-ref-files] .attach-field'));
+  await go('#project/p1');
+  check('project shows its Reference box', has('.ref-box', 'reference · 1', 'gate code'));
+  await go('#reference');
+  const s = $('#ref-search'); s.value = 'elm'; s.dispatchEvent(new Event('input', { bubbles: true })); await wait(100);
+  check('search finds by notes, keeps focus', has(undefined, 'gate code') && document.activeElement.id === 'ref-search');
+  const s2 = $('#ref-search'); s2.value = 'zzz'; s2.dispatchEvent(new Event('input', { bubbles: true })); await wait(100);
+  check('search: nothing matches', has(undefined, 'nothing matches'));
+  const s3 = $('#ref-search'); s3.value = ''; s3.dispatchEvent(new Event('input', { bubbles: true })); await wait(100);
+  await go(`#reference/${r.id}`);
+  $('[data-gtd="tickle-ref"]').click(); await wait(80);
+  $('#sheet [data-day]').click(); $('#sheet form').requestSubmit(); await wait(250);
+  const rem = T().tasks.find((t) => t.reference_id === r.id && t.tickler);
+  check('Remind me on… tickles a “Look at” item linked to it', rem && rem.title === 'Look at: Gate code');
+  $('[data-gtd="archive-ref"]').click(); await wait(250);
+  check('Archive (not delete) returns to the list', T().reference_items.find((x) => x.id === r.id).archived_at && location.hash === '#reference' && !has(undefined, 'gate code'));
+  let err = null; try { await window.sb.from('reference_items').delete().eq('id', r.id); } catch (e) { err = e; }
+  const del = await window.sb.from('reference_items').delete().eq('id', r.id);
+  check('reference items can’t be deleted', del.error || err);
+}
+
+// Delegation: people, Waiting For with follow-ups, nudges, agendas.
+async function delegation(check) {
+  const { db } = await import('/js/state.js');
+  const { isAvailable } = await import('/js/availability.js');
+  await go('#waiting');
+  check('Waiting For offers people from Waiting tags', has(undefined, 'waiting for', 'make people from 1 waiting tag', 'hiro'));
+  $('[data-gtd="people-from-tags"]').click(); await wait(250);
+  const hiro = T().people.find((p) => p.name === 'Hiro');
+  check('Hiro is a person linked to the Waiting : Hiro tag', hiro && hiro.tag_id === 'g4');
+  check('the tagged item counts as waiting on Hiro (not available)', has(undefined, 'pick up cp33') && !isAvailable(db.tasks.find((t) => t.id === 't10')));
+  // Delegate a project action to someone new, with an email.
+  const t = db.tasks.find((x) => x.id === 't2');
+  const { openDelegate } = await import('/js/editors/gtd.js');
+  openDelegate(t);
+  await wait(80);
+  const f = $('#sheet form');
+  f.elements.person.value = 'Jodi Park'; f.elements.person.dispatchEvent(new Event('input', { bubbles: true }));
+  f.elements.email.value = 'jodi@example.com'; f.elements.email.dispatchEvent(new Event('input', { bubbles: true }));
+  check('the message is drafted for Jodi', f.elements.message.value.startsWith('Hi Jodi,') && f.elements.message.value.includes('Order fittings for Jodi'));
+  check('Email button appears once there is an address', !$('#sheet [data-via=email]').hidden && has('#sheet [data-via=email]', 'email jodi'));
+  window.__opened = null;
+  $('#sheet [data-via=email]').click(); await wait(350);
+  const row = T().tasks.find((x) => x.id === 't2');
+  const jodi = T().people.find((p) => p.name === 'Jodi Park');
+  const week = new Date(); week.setDate(week.getDate() + 7);
+  check('waiting on Jodi, follow up in a week, delegated now', jodi && jodi.email === 'jodi@example.com' && row.waiting_on === jodi.id && row.delegated_at && new Date(row.follow_up_at).toDateString() === week.toDateString());
+  check('opens your mail app with the message (nothing sent for you)', String(window.__opened).startsWith('mailto:jodi%40example.com?subject=Order%20fittings%20for%20Jodi&body=Hi%20Jodi'), window.__opened);
+  check('stays in its project but isn’t a next action', row.project_id === 'p1' && !isAvailable(db.tasks.find((x) => x.id === 't2')));
+  await go('#project/p1');
+  check('row shows ⏳ Jodi Park · follow up', has(undefined, '⏳ jodi park · follow up'));
+  // Make the follow-up due: shows red, in Forecast Today and in the badge.
+  T().tasks.find((x) => x.id === 't2').follow_up_at = new Date(Date.now() - 86400000).toISOString();
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  await go('#waiting');
+  check('overdue follow-up is flagged and counted', has(undefined, '1 to follow up', 'follow up was') && $('#badge-waiting').textContent === '1');
+  await go('#forecast');
+  check('Forecast Today lists it under Follow up', has(undefined, 'follow up · 1', 'order fittings for jodi'));
+  await go('#waiting');
+  window.__opened = null;
+  $('[data-gtd="nudge"]').click(); await wait(100);
+  check('Nudge drafts a check-in in your mail app', String(window.__opened).includes('Following%20up') && String(window.__opened).includes('just%20checking%20in'), window.__opened);
+  $$('[data-gtd="snooze"]').find((b) => b.dataset.id === 't2').click(); await wait(250);
+  check('+3d snoozes the follow-up', new Date(T().tasks.find((x) => x.id === 't2').follow_up_at) > new Date());
+  $$('[data-gtd="take-back"]').find((b) => b.dataset.id === 't2').click(); await wait(250);
+  const back = T().tasks.find((x) => x.id === 't2');
+  check('Take back: yours again, follow-up cleared', !back.waiting_on && !back.follow_up_at && isAvailable(db.tasks.find((x) => x.id === 't2')));
+  // Agenda on a person's page.
+  await go(`#person/${jodi.id}`);
+  const a = $('[data-agenda-add] input'); a.value = 'Budget for fixtures'; a.closest('form').requestSubmit(); await wait(250);
+  const ag = byTitle('Budget for fixtures');
+  check('agenda item added for Jodi, not in the Inbox, not a next action', ag && ag.agenda_for === jodi.id && !ag.in_inbox && !isAvailable(db.tasks.find((x) => x.id === ag.id)) && has(undefined, 'agenda · 1', 'budget for fixtures'));
+  // Agenda under a calendar event naming Jodi.
+  const d = new Date(); const k = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  window.__calendarFetch = async () => `BEGIN:VCALENDAR\r\nX-WR-CALNAME:Work\r\nBEGIN:VEVENT\r\nUID:a1\r\nSUMMARY:1:1 with Jodi\r\nDTSTART:${k}T235800Z\r\nDTEND:${k}T235900Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
+  T().calendars.push({ id: 'cal1', user_id: 'u1', name: 'Work', url: 'https://x/y.ics', color: '#1D9E75', enabled: true, sort: 0, archived_at: null, created_at: new Date().toISOString() });
+  await loadAll();
+  await go('#forecast/today'); await wait(300); await go('#forecast'); await wait(200);
+  check('Forecast shows Jodi’s agenda under “1:1 with Jodi”', has('.cal-list', '1:1 with jodi', 'jodi park: budget for fixtures'), text('.cal-list'));
+  window.__calendarFetch = undefined;
+  // Editor: the Waiting on row saves and defaults the follow-up to a week.
+  const { openEditor } = await import('/js/editors/task.js');
+  openEditor(db.tasks.find((x) => x.id === 't9'));
+  await wait(80);
+  const ef = $('#editor');
+  ef.elements.waiting_on.value = hiro.id; ef.elements.waiting_on.dispatchEvent(new Event('change', { bubbles: true }));
+  check('choosing a person fills the follow-up (a week)', ef.elements.follow_up_at.value && !$('[data-follow-box]', ef).hidden);
+  ef.requestSubmit(); await wait(300);
+  const t9 = T().tasks.find((x) => x.id === 't9');
+  check('editor saves waiting_on + follow_up_at', t9.waiting_on === hiro.id && t9.follow_up_at);
+  let blocked = false; try { const r = await window.sb.from('people').delete().eq('id', hiro.id); blocked = !!r.error; } catch { blocked = true; }
+  check('people can’t be deleted', blocked);
+}
+
+// Energy: set it, see it, filter by it.
+async function energy(check) {
+  const { openEditor } = await import('/js/editors/task.js');
+  const { db } = await import('/js/state.js');
+  openEditor(db.tasks.find((x) => x.id === 't11'));
+  await wait(80);
+  const f = $('#editor');
+  f.elements.energy.value = 'low';
+  f.requestSubmit(); await wait(300);
+  check('editor saves energy', T().tasks.find((x) => x.id === 't11').energy === 'low');
+  await go('#project/p4');
+  check('row shows 🔋', has(undefined, 'buy fuel filter') && $('[data-task="t11"] .meta-energy'));
+  const sel = $('[data-filter="energy"]'); sel.value = 'low'; sel.dispatchEvent(new Event('change', { bubbles: true })); await wait(150);
+  check('energy filter: only low-energy actions, with a note', has(undefined, 'buy fuel filter', 'without an energy level hidden') && !has(undefined, 'pick up cp33'));
+  const { setFilter } = await import('/js/filter.js'); setFilter({ energy: '' });
+  const { evaluate } = await import('/js/perspective-engine.js');
+  const { perspectiveData } = await import('/js/perspectives.js');
+  const res = evaluate({ rules: { v: 1, match: 'all', rules: [{ type: 'energy', max: 'low' }] }, options: { show: 'remaining' } }, perspectiveData(), { available: () => true });
+  check('perspective rule “energy ≤ low”', res.tasks.map((t) => t.id).join() === 't11', res.tasks.map((t) => t.id).join());
 }
 
 // Behaviour that existed before the feature phases; must never regress.

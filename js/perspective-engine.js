@@ -14,6 +14,7 @@
 //             when: 'overdue'|'today'|'next'|'past'|'none'|'any'|'before'|'after', days?: n, date?: 'YYYY-MM-DD' }
 //         | { type: 'duration', op: 'max' | 'min', minutes: n }
 //         | { type: 'text', contains: 'words' }               every word in the title or notes
+//         | { type: 'energy', max: 'low'|'medium'|'high' }      needs at most that much energy
 // options = { show: 'available'|'remaining'|'completed'|'dropped'|'all',
 //             group_by: 'none'|'project'|'folder'|'tag'|'due'|'flagged',
 //             sort_by: 'project'|'due'|'planned'|'defer'|'added'|'changed'|'title'|'duration'|'completed',
@@ -26,7 +27,7 @@ export const FLAG_RULES = [
   ['flagged', 'Flagged'], ['available', 'Available now'], ['overdue', 'Overdue'], ['inbox', 'In the Inbox'],
   ['repeating', 'Repeating'], ['has_notes', 'Has notes'], ['has_steps', 'Has steps'], ['is_step', 'Is a step'],
   ['untagged', 'Has no tags'], ['no_project', 'Not in a project'], ['has_place', 'Has a place'], ['has_estimate', 'Has a duration'],
-  ['on_hold', 'On hold (tag)'],
+  ['on_hold', 'On hold (tag)'], ['waiting', 'Waiting on someone'],
 ];
 export const DATE_FIELDS = [['due', 'Due'], ['planned', 'Planned'], ['defer', 'Defer'], ['completed', 'Completed'], ['added', 'Added'], ['changed', 'Changed']];
 export const DATE_WHEN = [['overdue', 'is past'], ['today', 'is today'], ['next', 'is within the next'], ['past', 'was in the last'], ['before', 'is before'], ['after', 'is after'], ['any', 'is set'], ['none', 'is not set']];
@@ -71,6 +72,20 @@ export function makeOnHold(data) {
   };
 }
 
+// Waiting on someone (delegated) or on someone's agenda: not a next action for you. A person can
+// be linked to a tag ("Waiting : Hiro"), so items with that tag count too. Shared with the MCP server.
+export function makeWaiting(data) {
+  const people = (data.people || []).filter((p) => !p.archived_at);
+  const tagPeople = new Map(people.filter((p) => p.tag_id).map((p) => [p.tag_id, p]));
+  const byTask = new Map();
+  if (tagPeople.size) (data.taskTags || []).forEach((l) => { const p = tagPeople.get(l.tag_id); if (p && !byTask.has(l.task_id)) byTask.set(l.task_id, p); });
+  const byId = new Map(people.map((p) => [p.id, p]));
+  const personFor = (t) => (t.waiting_on && byId.get(t.waiting_on)) || byTask.get(t.id) || null;
+  const fn = (t) => !!(t.waiting_on || t.agenda_for || byTask.has(t.id));
+  fn.personFor = personFor;
+  return fn;
+}
+
 // ---------- context ----------
 // data: { tasks, projects, folders, tags, taskTags, projectTags }
 // ctx:  { now: Date, tz, available(t) → bool, keep(t) → bool (always include, e.g. just completed) }
@@ -95,7 +110,8 @@ function prepare(data, ctx) {
     return out;
   };
   const onHold = makeOnHold(data);
-  return { now, tz, today, taskById, projectById, tagsOfTask, tagSet, hasKids, onHold, available: ctx.available || (() => true), keep: ctx.keep || (() => false), warnings: new Set(), data };
+  const waiting = makeWaiting(data);
+  return { now, tz, today, taskById, projectById, tagsOfTask, tagSet, hasKids, onHold, waiting, available: ctx.available || (() => true), keep: ctx.keep || (() => false), warnings: new Set(), data };
 }
 
 // ---------- matching ----------
@@ -137,6 +153,8 @@ function matchRule(rule, t, c) {
     case 'has_place': return !!t.place_id;
     case 'has_estimate': return !!t.estimate_minutes;
     case 'on_hold': return isOpen(t) && c.onHold(t);
+    case 'waiting': return isOpen(t) && c.waiting(t);
+    case 'energy': { const L = { low: 1, medium: 2, high: 3 }; return !!t.energy && L[t.energy] <= (L[rule.max] || 3); }
     case 'tag': {
       const want = rule.tags || [];
       if (!want.length) { c.warnings.add('Choose a tag for the “Tagged” rule.'); return false; }
@@ -280,6 +298,7 @@ export function describe(perspective, data = {}) {
       case 'folder': return (r.folders || []).length ? `in folder ${or(r.folders.map((id) => name(data.folders, id)))}` : 'in (choose a folder)';
       case 'duration': return r.op === 'min' ? `${r.minutes} min or more` : `${r.minutes} min or less`;
       case 'text': return `contains “${r.contains || ''}”`;
+      case 'energy': return `${r.max || 'any'} energy or less`;
       case 'date': {
         const f = (DATE_FIELDS.find(([k]) => k === r.field) || [0, r.field])[1].toLowerCase();
         const d = r.days || 7;
@@ -301,7 +320,7 @@ export function describe(perspective, data = {}) {
 // Shape check for rules and options (used before saving, and to answer agents clearly).
 export function validate({ rules, options } = {}) {
   const errors = [];
-  const types = new Set([...FLAG_RULES.map(([k]) => k), 'tag', 'project', 'folder', 'date', 'duration', 'text']);
+  const types = new Set([...FLAG_RULES.map(([k]) => k), 'tag', 'project', 'folder', 'date', 'duration', 'text', 'energy']);
   const walk = (r, path, depth) => {
     if (!r || typeof r !== 'object') { errors.push(`${path}: must be an object`); return; }
     if (Array.isArray(r.rules)) {
