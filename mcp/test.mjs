@@ -8,6 +8,11 @@ let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, 
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
 globalThis.fetch = async (url, init = {}) => {
+  if (String(url).startsWith('https://places.googleapis.com')) {
+    const q = JSON.parse(init.body).textQuery;
+    if (init.headers['X-Goog-Api-Key'] !== 'server-key' || /nowhere/i.test(q)) return new Response(JSON.stringify({}), { status: 200 });
+    return new Response(JSON.stringify({ places: [{ id: 'gp1', displayName: { text: 'The Home Depot' }, formattedAddress: '5445 W Alabama St, Houston, TX', location: { latitude: 29.7351, longitude: -95.4710 } }] }), { status: 200 });
+  }
   if (String(url).startsWith('https://push.example')) { pushed.push({ url: String(url), init }); return new Response(null, { status: String(url).includes('gone') ? 410 : 201 }); }
   const u = new URL(url); const table = u.pathname.split('/').pop();
   const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','or'].includes(k));
@@ -40,7 +45,7 @@ globalThis.fetch = async (url, init = {}) => {
   const body = init.body ? JSON.parse(init.body) : null;
   const res = (d, s = 200) => new Response(d === null ? null : JSON.stringify(d), { status: s });
   if (m === 'GET') return res(rows.filter((r) => match(r) && orMatch(r)));
-  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
+  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
   if (m === 'PATCH') { rows.filter(match).forEach(r => Object.assign(r, body)); return res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
 };
@@ -60,7 +65,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 20 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 20 tools, no internals leaked');
+assert(list.body.result.tools.length === 25 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 25 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -245,4 +250,44 @@ assert((await geo(`t=${GEO}&place=${PL}&event=teleport`)).status === 400, 'geo: 
 assert((await geo(`t=tt_${'x'.repeat(30)}&place=${PL}&event=arrive`)).status === 401, 'geo: unknown key -> 401');
 assert((await call('initialize', { protocolVersion: '2025-06-18' }, GEO)).status === 401, 'location key cannot use MCP');
 assert((await geo(`t=${TOKEN}&place=${PL}&event=arrive`)).status === 200, 'full token also works at /geo');
+
+// ---------- places via MCP ----------
+db.places = db.places.filter((p) => p.id === PL || p.id === PL2); // keep the /geo fixtures
+let e = null; try { await tool('create_place', { name: 'Lumber yard', address: 'somewhere' }); } catch (x) { e = x.message; }
+assert(/Couldn't find/.test(e || ''), 'create_place by address needs the server key (clear error without it)');
+env.GOOGLE_SERVER_KEY = 'server-key';
+const hd = await tool('create_place', { name: 'HD Galleria', address: 'Home Depot W Alabama Houston', radius_m: 152 });
+assert(hd.name === 'HD Galleria' && hd.lat === 29.7351 && hd.address.includes('Alabama') && hd.radius_m === 152, 'create_place looks up an address, keeps the user\'s name');
+const office = await tool('create_place', { name: 'Office', lat: 29.80, lng: -95.37 });
+assert(office.radius_m === 402, 'create_place with lat/lng, default ¼ mi radius');
+const placed = await tool('update_task', { id: oneShot.id, place: 'hd galleria', location_alert: 'arrive' });
+assert(placed.place && placed.place.name === 'HD Galleria' && placed.place.alert === 'arrive' && placed.place.radius_m === 152, 'update_task sets place (by name) and alert');
+const looked = await tool('capture', { title: 'Buy PEX crimp rings', place: 'Ferguson plumbing supply Houston', location_alert: 'nearby', location_radius_m: 805 });
+assert(looked.place && looked.place.name === 'The Home Depot' && looked.place.radius_m === 805, 'capture with an unknown place looks it up and saves it');
+e = null; try { await tool('update_task', { id: looked.id, place: 'nowhere at all' }); } catch (x) { e = x.message; }
+assert(/No saved place/.test(e || ''), 'unfindable place -> clear error');
+e = null; try { await tool('update_task', { id: looked.id, location_alert: 'teleport' }); } catch (x) { e = x.message; }
+assert(/location_alert/.test(e || ''), 'bad alert value rejected');
+const tg = await tool('update_tag', { tag: 'Phone', place: 'Office', location_alert: 'nearby' });
+assert(tg.place.name === 'Office' && tg.place.alert === 'nearby', 'update_tag gives a tag a place');
+const inherited = await tool('get_task', { id: cap.id }); // tagged Phone
+assert(inherited.place && inherited.place.name === 'Office' && /tag Phone/.test(inherited.place.inherited_from), 'tasks show a place inherited from a tag');
+const proj = await tool('update_project', { project: oneShot.project_id, place: 'Office' });
+assert(proj.place && proj.place.name === 'Office', 'update_project sets a place');
+const near = await tool('list_nearby', { lat: 29.7352, lng: -95.4711, available_only: false });
+const hdg = near.places.find((g) => g.place === 'HD Galleria');
+assert(hdg && hdg.distance_m < 30 && hdg.inside_radius && hdg.actions.some((t) => t.title === 'Schedule backflow test'), 'list_nearby: place inside radius, with its actions');
+const availOnly = await tool('list_nearby', { lat: 29.7352, lng: -95.4711 });
+assert(!availOnly.places.some((g) => g.actions.some((t) => t.title === 'Schedule backflow test')), 'list_nearby hides actions not available now (queued in a sequential project)');
+assert(near.places.every((g, i, arr) => !i || arr[i - 1].distance_m <= g.distance_m), 'list_nearby sorted by distance');
+const far = await tool('list_nearby', { lat: 40.71, lng: -74.0 });
+assert(far.count === 0, 'list_nearby: nothing within 25 mi of New York');
+const pl = await tool('list_places', { lat: 29.80, lng: -95.37 });
+assert(pl[0].name === 'Office' && pl[0].distance_m === 0 && pl.find((x) => x.name === 'HD Galleria').open_actions === 1 && !pl.some((x) => x.name === 'Old unit'), 'list_places: distances, counts, archived hidden');
+const archivedPlace = await tool('update_place', { place: 'HD Galleria', archived: true, radius_m: 300 });
+assert(archivedPlace.archived && archivedPlace.radius_m === 300, 'update_place archives (never deletes) and edits radius');
+const fallback = (await tool('get_task', { id: oneShot.id })).place;
+assert(fallback && fallback.name === 'Office' && fallback.inherited_from === 'tag Phone', 'archived own place stops applying; falls back to an inherited place (tag before project)');
+const cleared = await tool('update_task', { id: looked.id, place: null });
+assert(!cleared.place && db.tasks.find((t) => t.id === looked.id).location_trigger === null, 'place: null clears place and alert');
 console.log('ALL PASSED');

@@ -7,7 +7,7 @@
 // below is explicitly scoped to the token owner's user_id.
 
 import PostalMime from 'postal-mime';
-import { handleGeo } from './geo.js';
+import { handleGeo, makePlaceResolver, loadPlaceData } from './geo.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -16,7 +16,8 @@ Clarify inbox items with update_task: give each a project and/or tags (contexts 
 Use planned for when the user intends to work on something and due only for hard deadlines; flagged means "important now". Dates are YYYY-MM-DD in the user's timezone.
 Never complete, reschedule or re-file tasks the user did not ask you to change.
 For a weekly review: call list_review, go through each project with the user (use its hints), make the changes they want, then mark_reviewed.
-Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.`;
+Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
+Places: an action, tag or project can have a place (a saved location) plus an optional location_alert (arrive, leave or nearby) and radius. Actions inherit a place from their tags, group, project or project tags. Pass place as a saved place's name or id, or as an address/business to look up (it is saved as a new place). Use list_nearby with the user's coordinates to find what can be done nearby. Places are archived, never deleted.`;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -248,6 +249,10 @@ class Api {
 
   async shape(tasks) {
     if (!tasks.length) return [];
+    const placeData = await loadPlaceData((path) => this.q(path), this.userId);
+    const known = new Set(placeData.tasks.map((t) => t.id));
+    placeData.tasks.push(...tasks.filter((t) => !known.has(t.id))); // closed tasks too
+    const placeOf = makePlaceResolver(placeData);
     const projectIds = [...new Set(tasks.map((t) => t.project_id).filter(Boolean))];
     const [{ projects, tags, tagLabel }, links, pLinks] = await Promise.all([
       this.lookups(),
@@ -263,6 +268,7 @@ class Api {
       tags: links.filter((l) => l.task_id === t.id).map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel),
       project_tags: pLinks.filter((l) => l.project_id === t.project_id).map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel),
       estimate_minutes: t.estimate_minutes ?? undefined,
+      place: placeSummary(placeOf(t)),
       in_inbox: t.in_inbox,
       status: t.completed_at ? 'completed' : t.dropped_at ? 'dropped' : 'open',
       flagged: t.flagged,
@@ -314,6 +320,32 @@ class Api {
       parentId = row.id;
     }
     return parentId;
+  }
+
+  // Place by id or saved name; otherwise look the text up with Google (address or business) and save it.
+  async resolvePlace(ref) {
+    if (ref === null || ref === '') return null;
+    const key = String(ref).trim();
+    const places = await this.q(`places?${this.u}&archived_at=is.null&select=id,name,address`);
+    const hit = places.find((p) => p.id === key) || places.find((p) => p.name.toLowerCase() === key.toLowerCase());
+    if (hit) return hit.id;
+    const found = await geocode(this.env, key);
+    if (!found) throw new Error(`No saved place "${key}" and it couldn't be looked up. Use list_places, or create_place with lat/lng.`);
+    const [row] = await this.q('places', { method: 'POST', prefer: 'return=representation', body: { user_id: this.userId, ...found } });
+    return row.id;
+  }
+
+  // place / location_alert / location_radius_m arguments → column patch (shared by tasks, tags, projects).
+  async locationPatch(a) {
+    const patch = {};
+    if (a.place !== undefined) patch.place_id = await this.resolvePlace(a.place);
+    if (a.location_alert !== undefined) {
+      if (a.location_alert !== null && !['arrive', 'leave', 'nearby'].includes(a.location_alert)) throw new Error('location_alert must be arrive, leave, nearby or null');
+      patch.location_trigger = a.location_alert || null;
+    }
+    if (a.location_radius_m !== undefined) patch.location_radius_m = a.location_radius_m === null ? null : Math.min(80467, Math.max(25, Math.round(Number(a.location_radius_m))));
+    if (patch.place_id === null) { patch.location_trigger = null; patch.location_radius_m = null; }
+    return patch;
   }
 
   async setTags(taskId, labels) {
@@ -380,6 +412,9 @@ const TOOLS = [
         due: { type: 'string', description: 'YYYY-MM-DD hard deadline only' },
         defer: { type: 'string', description: 'YYYY-MM-DD (hidden until then)' },
         estimate_minutes: { type: 'integer', description: 'How long it takes, in minutes' },
+        place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
+        location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
+        location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
       },
       required: ['title'],
     },
@@ -393,7 +428,7 @@ const TOOLS = [
         body.sort = sib.length ? (sib[0].sort || 0) + 1 : 0;
       }
       const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body });
-      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes'].includes(k) && v !== undefined));
+      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m'].includes(k) && v !== undefined));
       if (!Object.keys(fields).length) return (await api.shape([row]))[0];
       return TOOLS.find((t) => t.name === 'update_task').run(api, { id: row.id, ...fields });
     },
@@ -635,6 +670,9 @@ const TOOLS = [
         completion_note: { type: 'string' },
         estimate_minutes: { type: ['integer', 'null'], description: 'How long it takes, in minutes; null to clear' },
         move: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'Reorder among its siblings (same project and parent). Order decides the next action in sequential projects.' },
+        place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
+        location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
+        location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
       },
       required: ['id'],
     },
@@ -650,6 +688,7 @@ const TOOLS = [
       if (a.project !== undefined) patch.project_id = await api.resolveProject(a.project);
       if (a.completion_note !== undefined) patch.completion_note = String(a.completion_note).trim();
       if (a.estimate_minutes !== undefined) patch.estimate_minutes = a.estimate_minutes === null ? null : Math.max(0, Math.round(Number(a.estimate_minutes)));
+      Object.assign(patch, await api.locationPatch(a));
       if (a.status !== undefined) {
         patch.completed_at = a.status === 'completed' ? (task.completed_at || new Date().toISOString()) : null;
         patch.dropped_at = a.status === 'dropped' ? (task.dropped_at || new Date().toISOString()) : null;
@@ -779,12 +818,15 @@ const TOOLS = [
         name: { type: 'string' }, folder: { type: 'string' }, notes: { type: 'string' },
         kind: { type: 'string', enum: ['parallel', 'sequential', 'single_actions'], description: 'parallel (default): all actions available; sequential: only the next one; single_actions: a list of unrelated actions' },
         complete_with_last: { type: 'boolean', description: 'Complete the project automatically when its last action is done' },
+        place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
+        location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
+        location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
       },
       required: ['name'],
     },
-    async run(api, { name, folder, notes = '', kind = 'parallel', complete_with_last = false }) {
+    async run(api, { name, folder, notes = '', kind = 'parallel', complete_with_last = false, ...loc }) {
       const folder_id = folder ? await api.resolveFolder(folder) : null;
-      const [row] = await api.q('projects', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name: String(name).trim(), notes, folder_id, kind, complete_with_last: !!complete_with_last } });
+      const [row] = await api.q('projects', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name: String(name).trim(), notes, folder_id, kind, complete_with_last: !!complete_with_last, ...(await api.locationPatch(loc)) } });
       return { id: row.id, name: row.name, folder: folder || null, status: row.status, kind: row.kind, complete_with_last: row.complete_with_last };
     },
   },
@@ -804,6 +846,9 @@ const TOOLS = [
         flagged: { type: 'boolean', description: 'Flagged projects put all their actions in the Flagged list' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Replaces the project tags; its actions inherit them' },
         review_every_days: { type: 'integer', description: 'Review interval in days (7 = weekly, 30 = monthly)' },
+        place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
+        location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
+        location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
       },
       required: ['project'],
     },
@@ -817,6 +862,7 @@ const TOOLS = [
       if (a.kind !== undefined) patch.kind = a.kind;
       if (a.complete_with_last !== undefined) patch.complete_with_last = !!a.complete_with_last;
       if (a.flagged !== undefined) patch.flagged = !!a.flagged;
+      Object.assign(patch, await api.locationPatch(a));
       if (a.review_every_days !== undefined) patch.review_every_days = Math.min(3650, Math.max(1, Math.round(Number(a.review_every_days))));
       if (Array.isArray(a.tags)) {
         const tagIds = [];
@@ -829,7 +875,9 @@ const TOOLS = [
       const folder = p.folder_id ? (await api.q(`folders?${api.u}&id=eq.${p.folder_id}&select=name`))[0] : null;
       const { tags: allTags, tagLabel } = await api.lookups();
       const pt = (await api.q(`project_tags?${api.u}&project_id=eq.${id}&select=tag_id`)).map((l) => allTags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel);
-      return { id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, flagged: p.flagged, tags: pt, folder: folder ? folder.name : null, notes: p.notes || undefined };
+      const place = p.place_id ? (await api.q(`places?${api.u}&id=eq.${p.place_id}&select=*`))[0] : null;
+      return { id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, flagged: p.flagged, tags: pt, folder: folder ? folder.name : null, notes: p.notes || undefined,
+        place: place ? { name: place.name, alert: p.location_trigger, radius_m: p.location_radius_m || place.radius_m } : null };
     },
   },
   {
@@ -911,7 +959,176 @@ const TOOLS = [
         .sort((a, b) => a.label.localeCompare(b.label));
     },
   },
+  {
+    name: 'update_tag',
+    description: 'Rename a tag, or give it a place: every action with the tag inherits that place (and its alert) unless the action has its own.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tag: { type: 'string', description: 'Tag label ("Errands" or "Waiting : Hiro") or id' },
+        name: { type: 'string', description: 'New name (just this level, not the parent)' },
+        place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
+        location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
+        location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
+      },
+      required: ['tag'],
+    },
+    async run(api, a) {
+      const { tags, tagLabel } = await api.lookups();
+      const key = String(a.tag).trim().toLowerCase();
+      const tag = tags.find((t) => t.id === a.tag) || tags.find((t) => tagLabel(t).toLowerCase() === key) || tags.find((t) => t.name.toLowerCase() === key);
+      if (!tag) throw new Error(`No tag "${a.tag}". Use list_tags or create_tag.`);
+      const patch = await api.locationPatch(a);
+      if (a.name !== undefined) patch.name = String(a.name).trim();
+      if (Object.keys(patch).length) await api.q(`tags?${api.u}&id=eq.${tag.id}`, { method: 'PATCH', body: patch });
+      const [row] = await api.q(`tags?${api.u}&id=eq.${tag.id}&select=*`);
+      const place = row.place_id ? (await api.q(`places?${api.u}&id=eq.${row.place_id}&select=*`))[0] : null;
+      return { id: row.id, label: tagLabel(row), place: place ? { name: place.name, alert: row.location_trigger, radius_m: row.location_radius_m || place.radius_m } : null };
+    },
+  },
+  {
+    name: 'list_places',
+    description: 'List saved places with address, radius and how many open actions are at each (directly or inherited). Pass lat/lng to add distances and sort nearest first.',
+    inputSchema: { type: 'object', properties: { lat: { type: 'number' }, lng: { type: 'number' }, include_archived: { type: 'boolean', default: false } } },
+    async run(api, { lat, lng, include_archived = false }) {
+      const data = await loadPlaceData((path) => api.q(path), api.userId);
+      const resolve = makePlaceResolver(data);
+      const counts = new Map();
+      data.tasks.forEach((t) => { const loc = resolve(t); if (loc) counts.set(loc.place.id, (counts.get(loc.place.id) || 0) + 1); });
+      const here = typeof lat === 'number' && typeof lng === 'number' ? { lat, lng } : null;
+      return data.places.filter((p) => include_archived || !p.archived_at).map((p) => ({
+        id: p.id, name: p.name, address: p.address || undefined, lat: p.lat, lng: p.lng, radius_m: p.radius_m, notes: p.notes || undefined,
+        archived: !!p.archived_at, open_actions: counts.get(p.id) || 0,
+        distance_m: here ? Math.round(metersBetween(here, p)) : undefined,
+      })).sort((a, b) => (a.distance_m ?? 0) - (b.distance_m ?? 0) || a.name.localeCompare(b.name));
+    },
+  },
+  {
+    name: 'create_place',
+    description: 'Save a place. Give an address or business to look up (e.g. "Home Depot, Chimney Rock Rd, Houston"), or exact lat/lng. Radius defaults to ¼ mile (402 m).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'What the user calls it, e.g. "Home Depot" or "Office"' },
+        address: { type: 'string', description: 'Address or business to look up (ignored if lat/lng are given)' },
+        lat: { type: 'number' }, lng: { type: 'number' },
+        radius_m: { type: 'integer', description: '152 = 500 ft, 402 = ¼ mi, 805 = ½ mi, 1609 = 1 mi' },
+        notes: { type: 'string' },
+      },
+      required: ['name'],
+    },
+    async run(api, a) {
+      const body = { user_id: api.userId, name: String(a.name || '').trim(), notes: a.notes || '' };
+      if (!body.name) throw new Error('name is required');
+      if (typeof a.lat === 'number' && typeof a.lng === 'number') Object.assign(body, { lat: a.lat, lng: a.lng, address: a.address || '' });
+      else if (a.address) {
+        const found = await geocode(api.env, a.address);
+        if (!found) throw new Error(`Couldn't find "${a.address}". Try a fuller address, or pass lat/lng.`);
+        Object.assign(body, found, { name: body.name });
+      } else throw new Error('Give an address to look up, or lat and lng');
+      if (a.radius_m !== undefined) body.radius_m = Math.min(80467, Math.max(25, Math.round(Number(a.radius_m))));
+      const [row] = await api.q('places', { method: 'POST', prefer: 'return=representation', body });
+      return placeOut(row);
+    },
+  },
+  {
+    name: 'update_place',
+    description: 'Rename a place, move it (new address or lat/lng), change its radius or notes, or archive/unarchive it (archived: true/false). Places are never deleted; archived places stop applying to actions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        place: { type: 'string', description: 'Place name or id' },
+        name: { type: 'string' }, address: { type: 'string' }, lat: { type: 'number' }, lng: { type: 'number' },
+        radius_m: { type: 'integer' }, notes: { type: 'string' }, archived: { type: 'boolean' },
+      },
+      required: ['place'],
+    },
+    async run(api, a) {
+      const all = await api.q(`places?${api.u}&select=*`);
+      const key = String(a.place).trim().toLowerCase();
+      const matches = all.filter((p) => p.id === a.place || p.name.toLowerCase() === key);
+      const place = matches.find((p) => !p.archived_at) || matches[0];
+      if (!place) throw new Error(`No place "${a.place}". Use list_places.`);
+      const patch = {};
+      if (a.name !== undefined) patch.name = String(a.name).trim();
+      if (typeof a.lat === 'number' && typeof a.lng === 'number') Object.assign(patch, { lat: a.lat, lng: a.lng, google_place_id: null }, a.address !== undefined ? { address: a.address } : {});
+      else if (a.address !== undefined) {
+        const found = await geocode(api.env, a.address);
+        if (!found) throw new Error(`Couldn't find "${a.address}".`);
+        Object.assign(patch, { lat: found.lat, lng: found.lng, address: found.address, google_place_id: found.google_place_id });
+      }
+      if (a.radius_m !== undefined) patch.radius_m = Math.min(80467, Math.max(25, Math.round(Number(a.radius_m))));
+      if (a.notes !== undefined) patch.notes = a.notes;
+      if (a.archived !== undefined) patch.archived_at = a.archived ? new Date().toISOString() : null;
+      if (Object.keys(patch).length) await api.q(`places?${api.u}&id=eq.${place.id}`, { method: 'PATCH', body: patch });
+      const [row] = await api.q(`places?${api.u}&id=eq.${place.id}&select=*`);
+      return placeOut(row);
+    },
+  },
+  {
+    name: 'list_nearby',
+    description: 'Actions at places near a point (the user\'s current location), nearest place first, grouped by place. By default only actions that can be done now and places within 25 miles.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        lat: { type: 'number' }, lng: { type: 'number' },
+        within_m: { type: 'integer', description: 'Max distance in meters (default 40234 = 25 mi)' },
+        available_only: { type: 'boolean', default: true },
+      },
+      required: ['lat', 'lng'],
+    },
+    async run(api, { lat, lng, within_m = 40234, available_only = true }) {
+      const here = { lat: Number(lat), lng: Number(lng) };
+      if (!Number.isFinite(here.lat) || !Number.isFinite(here.lng)) throw new Error('lat and lng are required numbers');
+      const data = await loadPlaceData((path) => api.q(path), api.userId);
+      const resolve = makePlaceResolver(data);
+      const full = await api.q(`tasks?${api.u}&${OPEN}&select=*`);
+      const { available } = availabilityOf(full, await api.q(`projects?${api.u}&select=id,status,kind`));
+      const byPlace = new Map();
+      full.forEach((t) => {
+        if (available_only && !available(t)) return;
+        const loc = resolve(t);
+        if (!loc) return;
+        const d = metersBetween(here, loc.place);
+        if (d > within_m) return;
+        if (!byPlace.has(loc.place.id)) byPlace.set(loc.place.id, { place: loc.place, distance_m: Math.round(d), tasks: [] });
+        byPlace.get(loc.place.id).tasks.push(t);
+      });
+      const groups = [...byPlace.values()].sort((a, b) => a.distance_m - b.distance_m);
+      const out = [];
+      for (const g of groups) {
+        out.push({ place: g.place.name, place_id: g.place.id, address: g.place.address || undefined, distance_m: g.distance_m,
+          inside_radius: g.distance_m <= g.place.radius_m, actions: await api.shape(g.tasks) });
+      }
+      return { count: out.reduce((n, g) => n + g.actions.length, 0), places: out };
+    },
+  },
 ];
+
+// ---------- places ----------
+function metersBetween(a, b) {
+  const R = 6371000; const rad = (d) => (d * Math.PI) / 180;
+  const h = Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+const placeOut = (p) => ({ id: p.id, name: p.name, address: p.address || undefined, lat: p.lat, lng: p.lng, radius_m: p.radius_m, notes: p.notes || undefined, archived: !!p.archived_at });
+const placeSummary = (loc) => (loc ? { name: loc.place.name, id: loc.place.id, alert: loc.trigger, radius_m: loc.radius, ...(loc.via ? { inherited_from: `${loc.via.kind} ${loc.via.label}` } : {}) } : undefined);
+
+// Address or business → { name, address, lat, lng, google_place_id } via Places Text Search.
+export async function geocode(env, text) {
+  const key = (env.GOOGLE_SERVER_KEY || '').trim();
+  if (!key) return null;
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location' },
+    body: JSON.stringify({ textQuery: String(text), maxResultCount: 1 }),
+  });
+  if (!res.ok) return null;
+  const { places } = await res.json();
+  const p = places && places[0];
+  if (!p || !p.location) return null;
+  return { name: (p.displayName && p.displayName.text) || String(text), address: p.formattedAddress || '', lat: p.location.latitude, lng: p.location.longitude, google_place_id: p.id || null };
+}
 
 // ---------- responses ----------
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
