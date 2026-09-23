@@ -258,6 +258,7 @@ class Api {
       due: localDate(t.due_at, this.tz),
       defer: localDate(t.defer_at, this.tz),
       completed_at: t.completed_at,
+      completion_note: t.completion_note || undefined,
       parent_id: t.parent_id || undefined,
       created_at: t.created_at,
     }));
@@ -448,12 +449,51 @@ const TOOLS = [
   },
   {
     name: 'complete_task',
-    description: 'Mark a task complete (or pass completed:false to reopen it). Only do this when the user says it is done.',
-    inputSchema: { type: 'object', properties: { id: { type: 'string' }, completed: { type: 'boolean', default: true } }, required: ['id'] },
-    async run(api, { id, completed = true }) {
+    description: 'Mark a task complete (or pass completed:false to reopen it). Only do this when the user says it is done. Optionally record a completion note (outcome, who, what happened).',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, completed: { type: 'boolean', default: true }, note: { type: 'string', description: 'Completion note' } },
+      required: ['id'],
+    },
+    async run(api, { id, completed = true, note }) {
       const task = await api.task(id);
-      await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: { completed_at: completed ? new Date().toISOString() : null } });
+      const patch = { completed_at: completed ? (task.completed_at || new Date().toISOString()) : null };
+      if (note !== undefined) patch.completion_note = String(note).trim();
+      await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: patch });
       return (await api.shape([await api.task(task.id)]))[0];
+    },
+  },
+  {
+    name: 'list_completed',
+    description: 'Review what was completed, newest first, filtered by date range (YYYY-MM-DD, inclusive, user timezone) and/or project. Returns items with completion time and note, plus counts per project and per day. Great for weekly reviews and "what did I get done" questions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        since: { type: 'string', description: 'YYYY-MM-DD (default: 7 days ago)' },
+        until: { type: 'string', description: 'YYYY-MM-DD inclusive (default: today)' },
+        project: { type: 'string', description: 'Project name or id; "none" for items with no project' },
+        limit: { type: 'integer', default: 200 },
+      },
+    },
+    async run(api, a) {
+      const today = localDate(new Date().toISOString(), api.tz);
+      const weekAgo = localDate(new Date(Date.now() - 6 * 86400000).toISOString(), api.tz);
+      const since = a.since || weekAgo;
+      const until = a.until || today;
+      const f = [api.u, 'completed_at=not.is.null', 'order=completed_at.desc', 'select=*', `limit=${Math.min(+a.limit || 200, 1000)}`,
+        `completed_at=gte.${zonedToIso(since, 0, api.tz)}`, `completed_at=lt.${zonedToIso(until, 24, api.tz)}`];
+      if (a.project === 'none') f.push('project_id=is.null');
+      else if (a.project) f.push(`project_id=eq.${await api.resolveProject(a.project)}`);
+      const rows = await api.q(`tasks?${f.join('&')}`);
+      const items = await api.shape(rows);
+      const byProject = {}; const byDay = {};
+      items.forEach((t, i) => {
+        const pk = t.project || 'No project';
+        byProject[pk] = (byProject[pk] || 0) + 1;
+        const dk = localDate(rows[i].completed_at, api.tz);
+        byDay[dk] = (byDay[dk] || 0) + 1;
+      });
+      return { since, until, count: items.length, by_project: byProject, by_day: byDay, items };
     },
   },
   {

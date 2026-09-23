@@ -214,3 +214,15 @@ textarea { min-height: 80px; resize: vertical; }
 .toast button { background: none; border: none; color: var(--accent); font-weight: 700; cursor: pointer; }
 
 .folder-title.muted { color: var(--muted); }
+
+/* Done (completed review) */
+.view-head h1.done { color: var(--ok); }
+.done-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+.done-filters select, .done-filters input { width: auto; padding: 8px 12px; }
+.tally { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.tally .chip { text-decoration: none; }
+.completed-row .check { cursor: default; }
+.done-note { margin-top: 6px; padding: 6px 10px; border-left: 3px solid var(--ok); background: var(--surface-2); border-radius: 0 8px 8px 0; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.done-box { display: grid; gap: 8px; padding: 12px; border-radius: 10px; background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.done-box b { color: var(--ok); font-size: 14px; }
+@media (max-width: 420px) { .tabs a { font-size: 11px; } .tab-icon { font-size: 20px; } }
