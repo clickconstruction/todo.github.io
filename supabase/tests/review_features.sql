@@ -49,5 +49,19 @@ insert into public.tags (id, name) values ('00000000-0000-0000-0000-00000000dd01
 insert into public.project_tags (project_id, tag_id) values ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-00000000dd01');
 insert into r (test, ok, detail) select 'project tag insert + read', count(*) = 1, count(*)::text from public.project_tags;
 
+-- review cadence in natural units (20260925000001_inspector_parity)
+insert into public.projects (id, name, review_every_days) values ('00000000-0000-0000-0000-0000000000a4', 'Fortnight', 14);
+insert into r (test, ok, detail) select 'insert with 14 days -> every 2 weeks', review_every = 2 and review_unit = 'week' and review_every_days = 14, review_every || ' ' || review_unit from public.projects where id = '00000000-0000-0000-0000-0000000000a4';
+update public.projects set review_every = 1, review_unit = 'month', last_reviewed_at = '2026-01-31T12:00:00Z' where id = '00000000-0000-0000-0000-0000000000a4';
+insert into r (test, ok, detail) select 'monthly uses calendar months (Jan 31 -> Feb 28)', next_review_at = '2026-02-28T12:00:00Z' and review_every_days = 30, next_review_at::text from public.projects where id = '00000000-0000-0000-0000-0000000000a4';
+update public.projects set next_review_at = '2026-06-01T00:00:00Z' where id = '00000000-0000-0000-0000-0000000000a4';
+insert into r (test, ok, detail) select 'next review date can be set directly', next_review_at = '2026-06-01T00:00:00Z', next_review_at::text from public.projects where id = '00000000-0000-0000-0000-0000000000a4';
+update public.projects set notes = 'touch' where id = '00000000-0000-0000-0000-0000000000a4';
+insert into r (test, ok, detail) select 'unrelated edits keep the chosen review date', next_review_at = '2026-06-01T00:00:00Z', next_review_at::text from public.projects where id = '00000000-0000-0000-0000-0000000000a4';
+update public.projects set review_every_days = 365 where id = '00000000-0000-0000-0000-0000000000a4';
+insert into r (test, ok, detail) select 'old clients sending days still work (365 -> 1 year)', review_every = 1 and review_unit = 'year', review_every || ' ' || review_unit from public.projects where id = '00000000-0000-0000-0000-0000000000a4';
+update public.projects set status = 'completed', completed_at = '2026-03-01T15:00:00Z', due_at = '2026-03-05T22:00:00Z', estimate_minutes = 90 where id = '00000000-0000-0000-0000-0000000000a4';
+insert into r (test, ok, detail) select 'backdated completion kept; project due + duration stored', completed_at = '2026-03-01T15:00:00Z' and due_at is not null and estimate_minutes = 90, completed_at::text from public.projects where id = '00000000-0000-0000-0000-0000000000a4';
+
 select test, ok, detail from r order by n;
 rollback;
