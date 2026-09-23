@@ -18,6 +18,8 @@
 <script>
   if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
     document.write('<script src="config.local.js" onerror="this.remove()"><\/script>');
+    // ?mock swaps Supabase for the in-memory test harness (dev/mock-supabase.js).
+    if (/[?&]mock\b/.test(location.search)) document.write('<script src="dev/mock-supabase.js"><\/script>');
   }
 </script>
 <script src="supabase-client.js"></script>
@@ -53,6 +55,6 @@
 <dialog id="sheet" class="sheet"></dialog>
 <div id="toast" class="toast" role="status" hidden></div>
 
-<script src="app.js"></script>
+<script type="module" src="js/main.js"></script>
 </body>
 </html>

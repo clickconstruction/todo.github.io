@@ -4,3 +4,4 @@
 exclude:
   - mcp/
   - supabase/
+  - dev/
