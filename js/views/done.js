@@ -46,8 +46,8 @@ export function viewDone(range = 'week', projectId = 'all', from = '', to = '') 
     .map((p) => `<option value="${p.id}" ${p.id === projectId ? 'selected' : ''}>${esc(p.name)}${p.status === 'active' ? '' : ' (' + p.status.replace('_', ' ') + ')'}</option>`).join('');
   let html = `<div class="view-head"><h1 class="done">Done</h1></div>
     <div class="done-filters">
-      <select data-done="range">${RANGES.map(([v, l]) => `<option value="${v}" ${v === range ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <select data-done="project"><option value="all">All projects</option><option value="none" ${projectId === 'none' ? 'selected' : ''}>No project</option>${projectOpts}</select>
+      <select data-done="range" aria-label="When">${RANGES.map(([v, l]) => `<option value="${v}" ${v === range ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select data-done="project" aria-label="Project"><option value="all">All projects</option><option value="none" ${projectId === 'none' ? 'selected' : ''}>No project</option>${projectOpts}</select>
       ${range === 'custom' ? `<input type="date" data-done="from" value="${esc(from)}"><input type="date" data-done="to" value="${esc(to)}">` : ''}
     </div>`;
   if (!rows) return html + '<p class="empty">Loading…</p>';

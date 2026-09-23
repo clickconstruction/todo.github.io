@@ -843,3 +843,22 @@ kbd { display: inline-block; min-width: 1.6em; padding: 1px 6px; border-radius: 
 .cal-help summary { cursor: pointer; color: var(--accent); }
 .cal-help p { margin: 6px 0; }
 .cal-check { padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, #22c55e 12%, transparent); font-size: 14px; }
+
+/* Final viewport pass: nothing may push a sheet or card wider than the screen */
+.sheet form, .settings-card, .persp-editor, .tpl-editor, .import-card { grid-template-columns: minmax(0, 1fr); }
+.sheet { overflow-x: hidden; }
+.template { min-width: 0; }
+.done-filters select, .done-filters input { max-width: 100%; min-width: 0; }
+.cal-row { flex-wrap: wrap; }
+.cal-row .set-text { min-width: 0; flex: 1 1 160px; }
+.cal-row .hint { overflow-wrap: anywhere; }
+/* Bigger touch targets on phones */
+.back { display: inline-flex; align-items: center; min-height: 36px; padding: 4px 0; }
+.chip-x { padding: 4px 6px; margin: -4px -4px -4px 0; min-width: 24px; min-height: 24px; }
+label.focus-item input, .sheet .flag-toggle input, .settings-card input[type=checkbox] { width: 22px; height: 22px; }
+.part-of-row .btn, .insp-sec .part-of-row .btn { min-height: 32px; }
+.template-list, .rule-list, .tpl-rows, .import-notes, .import-tree, .tpl-preview, .persp-preview-list { grid-template-columns: minmax(0, 1fr); }
+.template-list > li { min-width: 0; }
+label.flag-toggle { min-height: 32px; }
+label.flag-toggle input { width: 22px; height: 22px; flex: none; }
+@media (max-width: 520px) { .kbd { padding: 8px 6px; } .kbd-key { min-width: 0; } .kbd-row { padding-left: calc(var(--indent, 0) * 5px); } .kbd-key.wide { font-size: 12px; } }

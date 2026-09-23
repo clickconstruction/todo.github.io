@@ -237,7 +237,7 @@ export function viewTemplate(id) {
         <label>Dates count from <select data-tpl-body="anchor"><option value="start" ${anchor === 'start' ? 'selected' : ''}>the start</option><option value="due" ${anchor === 'due' ? 'selected' : ''}>the due date</option></select></label>
         <label>Project due <span class="tpl-off"><input type="number" step="1" data-tpl-body="project_due" value="${b.project_due ?? ''}" placeholder="—" class="tpl-min"> <span class="hint">days</span></span></label>
         <label>Review every <span class="tpl-off"><input type="number" min="1" step="1" data-tpl-body="review_every" value="${b.review_every || 1}" class="tpl-min">
-          <select data-tpl-body="review_unit">${['day', 'week', 'month', 'year'].map((u) => `<option value="${u}" ${(b.review_unit || 'week') === u ? 'selected' : ''}>${u}s</option>`).join('')}</select></span></label>
+          <select data-tpl-body="review_unit" aria-label="Review unit">${['day', 'week', 'month', 'year'].map((u) => `<option value="${u}" ${(b.review_unit || 'week') === u ? 'selected' : ''}>${u}s</option>`).join('')}</select></span></label>
       </div>
       ${blanks.length ? `<fieldset class="rules-box"><legend>Blanks</legend>${blanks.map((bl) => `<label class="prop prop-inline">«${esc(bl.name)}» default
         <input type="text" data-tpl-blank="${esc(bl.name)}" value="${esc(bl.default)}" placeholder="asked each time"></label>`).join('')}</fieldset>` : ''}
@@ -249,7 +249,7 @@ export function viewTemplate(id) {
       <fieldset class="rules-box"><legend>Automatically</legend>
         <label class="flag-toggle"><input type="checkbox" data-tpl-sched-on ${t.schedule ? 'checked' : ''}> Create a project on a schedule</label>
         ${t.schedule ? `<div class="tpl-settings"><label>Every <span class="tpl-off"><input type="number" min="1" step="1" data-tpl-sched="every" value="${t.schedule.every}" class="tpl-min">
-          <select data-tpl-sched="unit">${['day', 'week', 'month', 'year'].map((u) => `<option value="${u}" ${t.schedule.unit === u ? 'selected' : ''}>${u}s</option>`).join('')}</select></span></label>
+          <select data-tpl-sched="unit" aria-label="Schedule unit">${['day', 'week', 'month', 'year'].map((u) => `<option value="${u}" ${t.schedule.unit === u ? 'selected' : ''}>${u}s</option>`).join('')}</select></span></label>
           <label>Starting <input type="date" data-tpl-sched="start" value="${esc(t.schedule.start || '')}"></label></div>
           <p class="hint">${t.next_run_at ? `Next: ${esc(new Date(t.next_run_at).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}, using the blanks’ defaults.` : 'Saving…'}</p>` : ''}
       </fieldset>
