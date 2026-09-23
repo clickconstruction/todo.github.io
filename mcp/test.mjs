@@ -52,7 +52,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 15 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 15 tools, no internals leaked');
+assert(list.body.result.tools.length === 16 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 16 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -87,6 +87,8 @@ const pTagged = await tool('update_project', { project: 'Seq', flagged: true, ta
 assert(pTagged.flagged && pTagged.tags.join() === 'Errands', 'update_project: flag + tags');
 const viaTag = await tool('list_tasks', { tag: 'Errands' });
 assert(viaTag.count === 2 && viaTag.items[0].project_tags.includes('Errands'), 'tag filter includes actions inherited from project tags');
+const fl = await tool('list_flagged', {});
+assert(fl.count >= 2 && fl.by_project.Seq && fl.by_project.Seq.length === 2, 'list_flagged includes actions of flagged projects');
 const kindChange = await tool('update_project', { project: 'Seq', kind: 'parallel', complete_with_last: false });
 assert(kindChange.kind === 'parallel' && kindChange.complete_with_last === false, 'update_project: kind + complete_with_last');
 assert((await tool('list_tasks', { project: 'Seq', available_only: true })).count === 2, 'parallel: all available');

@@ -13,6 +13,9 @@ const T = () => window.__mock.tables;
 // Reset mock data and reload it through the app's own modules (same instances the page uses).
 async function reload() {
   window.__mock.reset();
+  try { localStorage.removeItem('todo.filter'); localStorage.removeItem('todo.collapsed'); } catch { /* ignore */ }
+  const { setFilter } = await import('/js/filter.js');
+  setFilter({ show: 'remaining', fits: 0 });
   const [{ loadAll }, { render }] = await Promise.all([import('/js/data.js'), import('/js/router.js')]);
   await loadAll();
   location.hash = '#inbox';
@@ -25,7 +28,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals };
+  const suites = { core, planned, projectTypes, groups, signals, filters };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -296,4 +299,53 @@ async function signals(check) {
   check('tag counts include inherited actions', laptopRow && Number(laptopRow.querySelector('.count').textContent) >= 4, laptopRow && laptopRow.textContent);
   await go('#projects');
   check('project row shows flag + tags', has(undefined, 'Laptop') && $$('#view a.group-row .meta-flag').length >= 1);
+}
+
+// P5: view filter + Flagged view + More.
+async function filters(check) {
+  const setSel = async (name, value) => {
+    const sel = $(`[data-filter="${name}"]`);
+    sel.value = String(value);
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await wait(150);
+  };
+  const ids = () => $$('#view [data-task]').map((el) => el.dataset.task);
+
+  await go('#project/p2');
+  check('filter bar on project view', $('[data-filter="show"]') !== null && $('[data-filter="fits"]') !== null);
+  check('remaining shows all open', ['t4', 't5', 't6', 't7', 't8'].every((id) => ids().includes(id)), ids().join(','));
+  await setSel('show', 'available');
+  check('available: sequential shows only the head', ids().join(',') === 't4', ids().join(','));
+  check('filter remembered', JSON.parse(localStorage.getItem('todo.filter')).show === 'available');
+
+  await go('#project/p1');
+  await setSel('show', 'remaining');
+  await setSel('fits', 15);
+  check('fits ≤15 keeps estimated ≤15 only', ids().join(',') === 't1', ids().join(','));
+  check('explains hidden unestimated', has('.filter-note', '2 without an estimate'), text('.filter-note'));
+  await setSel('fits', 0);
+
+  await go('#project/p3');
+  await setSel('show', 'all');
+  await wait(250);
+  check('all includes dropped items (fetched)', ids().includes('d1'), ids().join(','));
+  await setSel('show', 'remaining');
+  check('remaining hides dropped', !ids().includes('d1'));
+
+  await go('#flagged');
+  check('flagged: flagged actions + flagged project actions', ['t3', 't10', 't11'].every((id) => ids().includes(id)), ids().join(','));
+  check('flagged grouped by project', has(undefined, 'Click Plumbing', 'Errands'));
+  await setSel('show', 'available');
+  check('flagged available hides deferred', ids().includes('t11') && !ids().includes('t10'), ids().join(','));
+  check('flagged badge = available count', $('#badge-flagged').textContent === '2', $('#badge-flagged').textContent);
+  await setSel('show', 'remaining');
+
+  const more = $('#more-tab');
+  check('More tab exists', !!more);
+  more.click();
+  await wait(100);
+  check('More sheet lists Review, Tags, Done, Search, Settings', has('#sheet', 'Review', 'Tags', 'Done', 'Search', 'Settings'), text('#sheet'));
+  $('#sheet [href="#tags"]').click();
+  await wait(150);
+  check('More link navigates and closes', location.hash === '#tags' && !$('#sheet').open);
 }

@@ -1,7 +1,8 @@
 // Projects list (by folder) and the single-project view.
-import { db, app, esc, byId, visible, taskSort, bySort, isCollapsed, projectTagsFor, tagLabel, PROJECT_STATUSES } from '../state.js';
+import { db, app, esc, byId, isOpen, taskSort, bySort, isCollapsed, projectTagsFor, tagLabel, PROJECT_STATUSES } from '../state.js';
 import { taskList, projectRow } from '../rows.js';
 import { PROJECT_KINDS, nextAction } from '../availability.js';
+import { filterBar, applyFilter, closedFor, withClosed, filterNote } from '../filter.js';
 
 export function viewProjects() {
   const isLive = (p) => p.status === 'active' || p.status === 'on_hold';
@@ -27,7 +28,9 @@ export function viewProjects() {
 export function viewProject(id) {
   const p = byId(db.projects, id);
   if (!p) return '<a class="back" href="#projects">‹ Projects</a><p class="empty">Project not found.</p>';
-  const tasks = db.tasks.filter((t) => t.project_id === p.id && visible(t)).sort(taskSort);
+  const local = db.tasks.filter((t) => t.project_id === p.id);
+  const all = withClosed(local, closedFor(`project:${p.id}`, (q) => q.eq('project_id', p.id)));
+  const tasks = applyFilter(all).sort(taskSort);
   const top = tasks.filter((t) => !t.parent_id);
   const ordered = top.flatMap((t) => [t, ...(isCollapsed(t.id) ? [] : tasks.filter((s) => s.parent_id === t.id))]);
   const folder = p.folder_id && byId(db.folders, p.folder_id);
@@ -40,7 +43,8 @@ export function viewProject(id) {
       <button class="flag-btn ${p.flagged ? 'on' : ''}" data-flag-project="${p.id}" aria-pressed="${!!p.flagged}" title="${p.flagged ? 'Unflag project' : 'Flag project'}">⚑</button>
       ${projectTagsFor(p.id).map((tg) => `<a class="chip" href="#tag/${tg.id}">🏷️ ${esc(tagLabel(tg))}</a>`).join('')}
       ${ordered.filter((t) => !t.completed_at).length > 1 ? `<button class="btn small" data-act="toggle-reorder">${app.reorder === p.id ? 'Done reordering' : 'Reorder'}</button>` : ''}</p>
+    ${filterBar()}${filterNote(local)}
     <form class="capture" data-capture data-project="${p.id}"><input type="text" name="title" placeholder="Add an action to ${esc(p.name)}…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
-    ${taskList(ordered, { showProject: false, hierarchy: true, hasGroups: top.some((t) => tasks.some((c) => c.parent_id === t.id)), markNext: p.status === 'active' ? nextAction(p) : null, reorder: app.reorder === p.id }) || '<p class="empty">No actions. What is the very next physical step?</p>'}
+    ${taskList(ordered, { showProject: false, hierarchy: true, hasGroups: top.some((t) => all.some((c) => c.parent_id === t.id)), markNext: p.status === 'active' ? nextAction(p) : null, reorder: app.reorder === p.id }) || (local.some(isOpen) ? '<p class="empty">Nothing matches this filter.</p>' : '<p class="empty">No actions. What is the very next physical step?</p>')}
     <p class="view-sub" style="margin-top:20px"><a href="#done/all/${p.id}">✓ Completed in this project →</a></p>`;
 }

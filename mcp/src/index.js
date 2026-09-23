@@ -498,6 +498,24 @@ const TOOLS = [
     },
   },
   {
+    name: 'list_flagged',
+    description: 'The Flagged list: flagged actions plus every open action in a flagged project, grouped by project. Pass available_only to hide deferred/queued items.',
+    inputSchema: { type: 'object', properties: { available_only: { type: 'boolean', default: false } } },
+    async run(api, { available_only = false }) {
+      const [open, projects] = await Promise.all([
+        api.q(`tasks?${api.u}&${OPEN}&select=*`),
+        api.q(`projects?${api.u}&select=id,name,kind,status,flagged`),
+      ]);
+      const flaggedProjects = new Set(projects.filter((p) => p.flagged).map((p) => p.id));
+      const { available } = availabilityOf(open, projects);
+      const rows = open.filter((t) => (t.flagged || flaggedProjects.has(t.project_id)) && (!available_only || available(t)));
+      const items = await api.shape(rows);
+      const byProject = {};
+      items.forEach((t) => { const k = t.project || 'No project'; (byProject[k] = byProject[k] || []).push(t); });
+      return { count: items.length, by_project: byProject };
+    },
+  },
+  {
     name: 'get_task',
     description: 'Get one task with its notes, project, tags, dates and (for an action group) its sub-actions.',
     inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },

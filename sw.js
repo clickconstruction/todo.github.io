@@ -1,7 +1,7 @@
 // App-shell service worker: precache the shell, serve it cache-first, and
 // leave Supabase API traffic to the network. Bump VERSION on every deploy
 // that changes a shell file so clients pick up the new copy.
-const VERSION = 'v14';
+const VERSION = 'v15';
 const SHELL = [
   './',
   'index.html',
@@ -13,6 +13,7 @@ const SHELL = [
   'js/rows.js',
   'js/components.js',
   'js/availability.js',
+  'js/filter.js',
   'js/router.js',
   'js/views/basic.js',
   'js/views/projects.js',

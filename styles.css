@@ -296,3 +296,19 @@ input[type=search]:focus { border-color: var(--accent); }
 .hint { font-weight: 400; color: var(--muted); opacity: .8; font-size: 12px; }
 a.chip { text-decoration: none; }
 a.chip:hover { color: var(--text); }
+
+/* View filter, Flagged, More */
+.filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+.filter-bar label { display: inline-flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 0 0 0 10px; }
+.filter-bar select { border: none; background: transparent; padding: 7px 10px 7px 2px; width: auto; }
+.filter-note { font-size: 13px; }
+.view-head h1.flagged { color: var(--flag); }
+.badge.flag { background: var(--flag); }
+.section-title a { color: inherit; text-decoration: none; }
+.mobile-only { display: none; }
+@media (max-width: 899px) { .mobile-only { display: flex; } }
+.more-tab { flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: none; background: none; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.more-tab.active { color: var(--accent); }
+.more-links { display: grid; gap: 4px; }
+.more-links a { display: flex; gap: 12px; align-items: center; padding: 14px 12px; border-radius: 10px; color: var(--text); text-decoration: none; font-size: 17px; background: var(--surface-2); }
+.more-links a span { font-size: 20px; width: 28px; text-align: center; }

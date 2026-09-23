@@ -6,6 +6,8 @@ import { openEditor, openQuickEntry } from './editors/task.js';
 import { openProjectEditor, openFolderEditor } from './editors/project.js';
 import { onSearchInput } from './views/search.js';
 import { onDoneFilterChange } from './views/done.js';
+import { setFilter } from './filter.js';
+import { openSheet } from './state.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings } from './views/settings.js';
 
 const view = $('#view');
@@ -78,6 +80,8 @@ view.addEventListener('submit', async (e) => {
 view.addEventListener('change', (e) => {
   const doneCtl = e.target.closest('[data-done]');
   if (doneCtl) { onDoneFilterChange(doneCtl); return; }
+  const filterCtl = e.target.closest('[data-filter]');
+  if (filterCtl) { setFilter({ [filterCtl.dataset.filter]: filterCtl.dataset.filter === 'fits' ? Number(filterCtl.value) : filterCtl.value }); render(); return; }
   const sel = e.target.closest('[data-project-status]');
   if (sel) updateProject(byId(db.projects, sel.dataset.projectStatus), { status: sel.value });
 });
@@ -87,6 +91,15 @@ view.addEventListener('input', (e) => {
 });
 
 $('#fab').onclick = openQuickEntry;
+// Phones: views that don't fit the tab bar live in a "More" sheet.
+$('#more-tab').onclick = () => {
+  const links = [['#review', '🔁', 'Review'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
+  const sheet = openSheet(`<form method="dialog" class="more-sheet"><h2>More</h2>
+    <nav class="more-links">${links.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}</nav>
+    <div class="actions"><div class="right"><button class="btn">Close</button></div></div></form>`);
+  sheet.querySelectorAll('[data-more-link]').forEach((a) => { a.onclick = () => sheet.close(); });
+  sheet.showModal();
+};
 window.addEventListener('hashchange', render);
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || $('#sheet').open || typing()) return;

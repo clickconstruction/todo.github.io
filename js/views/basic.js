@@ -2,6 +2,8 @@
 import { db, esc, byId, isOpen, visible, taskSort, sortedTags, tagLabel, effectiveTagIds } from '../state.js';
 import { isOverdue, isDueToday, isDeferred, isPlannedByToday } from '../dates.js';
 import { taskList } from '../rows.js';
+import { filterBar, applyFilter, closedFor, withClosed, filterNote } from '../filter.js';
+import { isAvailable } from '../availability.js';
 
 export function viewInbox() {
   const items = db.tasks.filter((t) => t.in_inbox && !t.parent_id && visible(t)).sort(taskSort);
@@ -42,10 +44,40 @@ export function viewTag(id) {
   const tag = byId(db.tags, id);
   if (!tag) return '<a class="back" href="#tags">‹ Tags</a><p class="empty">Tag not found.</p>';
   const ids = new Set([tag.id, ...db.tags.filter((t) => t.parent_id === tag.id).map((t) => t.id)]);
-  const tasks = db.tasks.filter((t) => visible(t) && [...effectiveTagIds(t)].some((id) => ids.has(id))).sort(taskSort);
   const projects = db.projects.filter((p) => ['active', 'on_hold'].includes(p.status) && db.projectTags.some((x) => x.project_id === p.id && ids.has(x.tag_id)));
+  const tagged = (t) => [...effectiveTagIds(t)].some((x) => ids.has(x));
+  const local = db.tasks.filter(tagged);
+  const directIds = db.taskTags.filter((x) => ids.has(x.tag_id)).map((x) => x.task_id);
+  const taggedProjectIds = db.projectTags.filter((x) => ids.has(x.tag_id)).map((x) => x.project_id);
+  const conds = [directIds.length && `id.in.(${directIds.slice(0, 300).join(',')})`, taggedProjectIds.length && `project_id.in.(${taggedProjectIds.join(',')})`].filter(Boolean);
+  const closed = conds.length ? closedFor(`tag:${id}`, (q) => q.or(conds.join(','))) : [];
+  const tasks = applyFilter(withClosed(local, closed)).sort(taskSort);
   return `<a class="back" href="#tags">‹ Tags</a>
     <div class="view-head"><h1 class="tags">${esc(tagLabel(tag))}</h1></div>
-    <p class="view-sub">${tasks.filter(isOpen).length} open${projects.length ? ` · includes actions from ${projects.map((p) => `<a href="#project/${p.id}">${esc(p.name)}</a>`).join(', ')} (tagged project)` : ''}</p>
-    ${taskList(tasks) || '<p class="empty">Nothing tagged here.</p>'}`;
+    ${filterBar()}${filterNote(local)}
+    <p class="view-sub">${local.filter(isOpen).length} open${projects.length ? ` · includes actions from ${projects.map((p) => `<a href="#project/${p.id}">${esc(p.name)}</a>`).join(', ')} (tagged project)` : ''}</p>
+    ${taskList(tasks) || (local.some(isOpen) ? '<p class="empty">Nothing matches this filter.</p>' : '<p class="empty">Nothing tagged here.</p>')}`;
+}
+
+// Flagged: flagged actions plus every action in a flagged project, grouped by project.
+export const isFlaggedTask = (t) => t.flagged || !!(t.project_id && (byId(db.projects, t.project_id) || {}).flagged);
+export const flaggedBadgeCount = () => db.tasks.filter((t) => isFlaggedTask(t) && isAvailable(t)).length;
+
+export function viewFlagged() {
+  const local = db.tasks.filter(isFlaggedTask);
+  const flaggedProjects = db.projects.filter((p) => p.flagged).map((p) => p.id);
+  const closed = closedFor('flagged', (q) => q.or(['flagged.is.true', flaggedProjects.length && `project_id.in.(${flaggedProjects.join(',')})`].filter(Boolean).join(',')));
+  const tasks = applyFilter(withClosed(local, closed)).sort(taskSort);
+  const groups = new Map();
+  tasks.forEach((t) => { const k = t.project_id || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); });
+  const sections = [...groups.entries()].sort(([a], [b]) => (!a) - (!b) || ((byId(db.projects, a) || {}).name || '').localeCompare((byId(db.projects, b) || {}).name || ''))
+    .map(([pid, list]) => {
+      const p = pid && byId(db.projects, pid);
+      const title = p ? `<a href="#project/${p.id}">${p.flagged ? '⚑ ' : ''}${esc(p.name)}</a>` : 'No project';
+      return `<h2 class="section-title">${title} · ${list.length}</h2>${taskList(list, { showProject: false })}`;
+    }).join('');
+  return `<div class="view-head"><h1 class="flagged">Flagged</h1></div>
+    ${filterBar()}${filterNote(local)}
+    <p class="view-sub">${local.filter(isOpen).length} open · flag an action, or a whole project, to bring it here</p>
+    ${sections || (local.some(isOpen) ? '<p class="empty">Nothing matches this filter.</p>' : '<p class="empty">Nothing flagged. Tap ⚑ on anything that matters now.</p>')}`;
 }

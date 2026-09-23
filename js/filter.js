@@ -1,0 +1,71 @@
+// View filter (the "eye"): which actions a list shows, remembered per viewer.
+//   show: available (can do now) | remaining (all open) | all (open, completed, dropped)
+//   fits: 0 (any) or a number of minutes; only actions estimated at or under it
+import { sb, app, run, isOpen, visible } from './state.js';
+import { isAvailable } from './availability.js';
+
+const KEY = 'todo.filter';
+const DEFAULT = { show: 'remaining', fits: 0 };
+let filter;
+try { filter = { ...DEFAULT, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { filter = { ...DEFAULT }; }
+export const getFilter = () => filter;
+
+export function setFilter(patch) {
+  filter = { ...filter, ...patch };
+  try { localStorage.setItem(KEY, JSON.stringify(filter)); } catch { /* private mode */ }
+  app.closedCache = null;
+}
+
+const SHOW = [['available', 'Available'], ['remaining', 'Remaining'], ['all', 'All']];
+const FITS = [[0, 'Any time'], [5, '≤ 5 min'], [15, '≤ 15 min'], [30, '≤ 30 min'], [60, '≤ 1 hour']];
+
+export const filterBar = () => `<div class="filter-bar" role="group" aria-label="View filter">
+  <label><span aria-hidden="true">👁</span><select data-filter="show" aria-label="Show">${SHOW.map(([v, l]) => `<option value="${v}" ${filter.show === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+  <label><span aria-hidden="true">⏱</span><select data-filter="fits" aria-label="Fits in">${FITS.map(([v, l]) => `<option value="${v}" ${Number(filter.fits) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+</div>`;
+
+export function passes(t) {
+  // Just-completed items stay visible (struck through) until reload so Undo has context.
+  if (!isOpen(t)) return filter.show === 'all' || visible(t);
+  if (filter.show === 'available' && !isAvailable(t)) return false;
+  const fits = Number(filter.fits);
+  if (fits && !(t.estimate_minutes && t.estimate_minutes <= fits)) return false;
+  return true;
+}
+
+// Keep a group visible (as context) when any of its sub-actions pass.
+export function applyFilter(tasks) {
+  const shown = new Set(tasks.filter(passes).map((t) => t.id));
+  tasks.forEach((t) => { if (t.parent_id && shown.has(t.id)) shown.add(t.parent_id); });
+  return tasks.filter((t) => shown.has(t.id));
+}
+
+// How many were hidden only because they have no estimate (so "fits in" isn't silently lossy).
+export function hiddenForNoEstimate(tasks) {
+  if (!Number(filter.fits)) return 0;
+  return tasks.filter((t) => isOpen(t) && !t.estimate_minutes).length;
+}
+
+export const filterNote = (tasks) => {
+  const n = hiddenForNoEstimate(tasks);
+  return n ? `<p class="view-sub filter-note">${n} without an estimate hidden by “fits in”.</p>` : '';
+};
+
+// "All" includes completed and dropped items, which aren't all loaded locally.
+// key identifies the list; query builds the Supabase request for closed rows.
+export function closedFor(key, query) {
+  if (filter.show !== 'all') return [];
+  const cached = app.closedCache;
+  if (cached && cached.key === key) return cached.rows;
+  app.closedCache = { key, rows: [] }; // placeholder while loading, so we fetch once
+  run(query(sb.from('tasks').select('*').or('completed_at.not.is.null,dropped_at.not.is.null').order('updated_at', { ascending: false }).limit(300)))
+    .then((rows) => { if (app.closedCache && app.closedCache.key === key) { app.closedCache.rows = rows; app.render(); } })
+    .catch(() => { app.closedCache = null; });
+  return [];
+}
+
+// Merge closed rows into a local list without duplicates.
+export const withClosed = (tasks, closed) => {
+  const ids = new Set(tasks.map((t) => t.id));
+  return [...tasks, ...closed.filter((t) => !ids.has(t.id))];
+};
