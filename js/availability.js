@@ -1,8 +1,10 @@
 // What can be worked on right now. The MCP server mirrors these rules (mcp/src/index.js).
-//   available = open, not deferred, its project is active and not deferred, and not blocked.
-//   blocked   = it's a group with open children (do the children instead), or it sits
-//               in a sequential project behind the first open top-level item.
-// Groups themselves are parallel: every open child of an unblocked group is available.
+//   available = open, not deferred (nor any ancestor), its project is active and not
+//               deferred, it has no open steps of its own, and nothing ahead of it in an
+//               ordered container blocks it.
+//   ordered containers: a sequential project (only its first open top-level item goes) and a
+//               task with "do steps in order" (only its first open step goes). Blocking is
+//               checked at every level up the tree.
 import { db, byId, isOpen, taskSort } from './state.js';
 import { isDeferred } from './dates.js';
 
@@ -13,7 +15,7 @@ export const PROJECT_KINDS = [
 ];
 
 export const projectOf = (t) => (t.project_id ? byId(db.projects, t.project_id) : null);
-const openChildren = (t) => db.tasks.filter((c) => c.parent_id === t.id && isOpen(c));
+const openSteps = (t) => db.tasks.filter((c) => c.parent_id === t.id && isOpen(c));
 export const isGroup = (t) => db.tasks.some((c) => c.parent_id === t.id);
 
 // First open top-level item in a sequential project (null if none).
@@ -22,31 +24,60 @@ export function sequentialHead(project) {
   return top[0] || null;
 }
 
-// Waiting its turn in a sequential project (behind the first open top-level item).
+// Waiting its turn: somewhere up the tree an ordered container has an earlier open item.
 export function isSequenceBlocked(t) {
-  const p = projectOf(t);
-  if (!p || p.kind !== 'sequential') return false;
-  const head = sequentialHead(p);
-  const top = t.parent_id ? byId(db.tasks, t.parent_id) : t;
-  return !!head && !!top && top.id !== head.id;
+  let node = t;
+  for (let i = 0; i < 10 && node; i++) {
+    const parent = node.parent_id && byId(db.tasks, node.parent_id);
+    if (parent) {
+      if (parent.steps_in_order) {
+        const first = openSteps(parent).sort(taskSort)[0];
+        if (first && first.id !== node.id) return true;
+      }
+      node = parent;
+    } else {
+      const p = projectOf(node);
+      if (p && p.kind === 'sequential') {
+        const head = sequentialHead(p);
+        if (head && head.id !== node.id) return true;
+      }
+      return false;
+    }
+  }
+  return false;
 }
 
 export function isBlocked(t) {
-  if (openChildren(t).length) return true; // groups: do the children
+  if (openSteps(t).length) return true; // has steps: do the steps
   return isSequenceBlocked(t);
 }
 
+function ancestorDeferred(t) {
+  let p = t.parent_id && byId(db.tasks, t.parent_id);
+  for (let i = 0; i < 10 && p; i++) {
+    if (isDeferred(p)) return true;
+    p = p.parent_id && byId(db.tasks, p.parent_id);
+  }
+  return false;
+}
+
 export function isAvailable(t) {
-  if (!isOpen(t) || isDeferred(t)) return false;
+  if (!isOpen(t) || isDeferred(t) || ancestorDeferred(t)) return false;
   const p = projectOf(t);
   if (p && (p.status !== 'active' || isDeferred(p))) return false; // a deferred project hides its actions
   return !isBlocked(t);
 }
 
-// The project's next available action, in project order (groups contribute their first child).
+// The project's next available action, in project order (depth-first through steps).
 export function nextAction(project) {
-  const tasks = db.tasks.filter((t) => t.project_id === project.id && isOpen(t));
-  const ordered = tasks.filter((t) => !t.parent_id).sort(taskSort)
-    .flatMap((t) => [t, ...tasks.filter((c) => c.parent_id === t.id).sort(taskSort)]);
-  return ordered.find(isAvailable) || null;
+  const open = db.tasks.filter((t) => t.project_id === project.id && isOpen(t));
+  const walk = (list) => {
+    for (const t of list.sort(taskSort)) {
+      if (isAvailable(t)) return t;
+      const hit = walk(open.filter((c) => c.parent_id === t.id));
+      if (hit) return hit;
+    }
+    return null;
+  };
+  return walk(open.filter((t) => !t.parent_id));
 }

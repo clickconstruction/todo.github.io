@@ -37,7 +37,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, planned, projectTypes, groups, steps, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -221,29 +221,16 @@ async function groups(check) {
   const task = (id) => db.tasks.find((t) => t.id === id);
   try { localStorage.removeItem('todo.collapsed'); } catch { /* ignore */ }
   await go('#project/p2');
-  check('group row has disclosure + count', $('[data-toggle-group="t6"]') !== null && has('[data-task="t6"]', '2 of 2 left'), text('[data-task="t6"]'));
+  check('group row has disclosure + progress', $('[data-toggle-group="t6"]') !== null && has('[data-task="t6"]', '0 of 2 done') && !!$('[data-task="t6"] .step-progress'), text('[data-task="t6"]'));
   check('children visible when expanded', $('[data-task="t7"]') !== null && $('[data-task="t8"]') !== null);
   $('[data-toggle-group="t6"]').click();
   await wait(100);
-  check('collapse hides children', $('[data-task="t7"]') === null && $('[data-toggle-group="t6"]').textContent === '▸');
+  check('collapse hides children and shows Next', $('[data-task="t7"]') === null && $('[data-toggle-group="t6"]').textContent === '▸' && has('[data-task="t6"]', 'next: asset holdings list'));
   check('collapse remembered', JSON.parse(localStorage.getItem('todo.collapsed') || '[]').includes('t6'));
   $('[data-toggle-group="t6"]').click();
   await wait(100);
   check('expand shows children', $('[data-task="t7"]') !== null);
-
-  window.prompt = () => 'Smoke sub-action';
   check('row + only on groups', $('[data-add-sub="t6"]') !== null && $('[data-add-sub="t4"]') === null);
-  $('[data-task="t4"]').click();
-  await wait(100);
-  $('[data-sub]').click();
-  await wait(250);
-  const sub = db.tasks.find((t) => t.title === 'Smoke sub-action');
-  check('editor + Sub-action makes a group', sub && sub.parent_id === 't4' && sub.project_id === 'p2' && $('[data-toggle-group="t4"]') !== null);
-
-  $('[data-task="t6"]').click();
-  await wait(100);
-  check('group editor: parent disabled', $('#editor').elements.parent_id.disabled && has('#editor', 'This is a group'));
-  $('#sheet').close();
 
   $('[data-check="t7"]').click();
   await wait(200);
@@ -251,14 +238,147 @@ async function groups(check) {
   $('[data-check="t8"]').click();
   await wait(250);
   check('group completes with its last child', !!task('t6').completed_at);
+}
 
-  let asked = '';
-  window.confirm = (m) => { asked = m; return true; };
-  $('[data-check="t4"]').click();
+// Steps ("eat the elephant"): break down, in order, progress, move, depth, cascade, convert.
+async function steps(check) {
+  const { db } = await import('/js/state.js');
+  const task = (id) => db.tasks.find((t) => t.id === id);
+  const find = (title) => db.tasks.find((t) => t.title === title);
+  const { openEditor } = await import('/js/editors/task.js');
+  const { splitSteps } = await import('/js/editors/breakdown.js');
+  check('pasted lists are cleaned', JSON.stringify(splitSteps('- [ ] Buy screws\n2) Measure\n\n• Clear shelves\n* [x] Sweep')) === '["Buy screws","Measure","Clear shelves","Sweep"]');
+
+  // Break down an Inbox item from its editor: paste a list, type one more, do in order.
+  await go('#inbox');
+  openEditor(task('t13'));
+  await wait(100);
+  check('editor offers Break it down', has('#editor .steps-field', 'too big to do in one go') && !!$('#editor [data-breakdown]'));
+  $('#editor [data-breakdown]').click();
+  await wait(100);
+  const dlg = $('#sheet2');
+  check('breakdown sheet opens on top', dlg.open && has('#sheet2', 'break it down', 'build a 2m telescope'));
+  const dt = new DataTransfer();
+  dt.setData('text/plain', '- [ ] Research mirror grinding\n2) Order a 16-inch mirror blank\n• Build the grinding stand');
+  $('[name=step]', dlg).dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  await wait(50);
+  const inp = $('[name=step]', dlg);
+  inp.value = 'Build the tube and mount';
+  inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await wait(50);
+  check('paste adds one step per line; Enter adds one more', $$('#sheet2 .breakdown-list li').length === 4 && has('#sheet2 [type=submit]', 'add 4 steps'), text('#sheet2'));
+  $$('#sheet2 [data-bd-move]').find((b) => b.dataset.bdMove === '3' && b.dataset.dir === '-1').click(); // tube above stand
+  $('#sheet2 [name=in_order]').click();
+  $('#sheet2 [name=step]').value = 'Grind and polish the mirror'; // typed but not added: kept on submit
+  $('#sheet2 form').requestSubmit();
+  await wait(400);
+  const kids = db.tasks.filter((t) => t.parent_id === 't13').sort((a, b) => a.sort - b.sort).map((t) => t.title);
+  check('steps saved in order, typed text kept', JSON.stringify(kids) === JSON.stringify(['Research mirror grinding', 'Order a 16-inch mirror blank', 'Build the tube and mount', 'Build the grinding stand', 'Grind and polish the mirror']), kids.join(' | '));
+  check('do in order saved; steps left the Inbox', task('t13').steps_in_order && db.tasks.filter((t) => t.parent_id === 't13').every((t) => !t.in_inbox));
+  check('editor Steps section redraws in place', has('#editor .steps-field', '0 of 5 done', 'grind and polish the mirror') && $('#editor [name=steps_in_order]').checked);
+  $('#sheet').close();
+
+  // Inbox shows the tree; in order: first step is Next, the rest wait.
+  await go('#inbox');
+  const first = find('Research mirror grinding'); const second = find('Order a 16-inch mirror blank');
+  check('inbox shows the item with its steps', !!$(`[data-task="${first.id}"]`) && has('[data-task="t13"]', '0 of 5 done', 'in order'));
+  check('in order: first step is Next, later ones wait', has(`[data-task="${first.id}"]`, 'next') && $(`[data-task="${second.id}"]`).classList.contains('blocked'));
+  const { isAvailable } = await import('/js/availability.js');
+  check('availability follows the order', isAvailable(first) && !isAvailable(second) && !isAvailable(task('t13')));
+
+  // Break a step down further (+ on the row opens the sheet for that step).
+  const grind = find('Grind and polish the mirror');
+  const { breakDown } = await import('/js/data.js');
+  await breakDown(grind, ['Rough grind', 'Fine grind', 'Polish']);
+  await wait(100);
+  check('progress counts the smallest steps', has('[data-task="t13"]', '0 of 7 done'), text('[data-task="t13"]'));
+  $(`[data-add-sub="${grind.id}"]`).click();
+  await wait(100);
+  check('row + opens Break it down for that step', $('#sheet2').open && has('#sheet2', 'grind and polish the mirror', 'rough grind'));
+  $('#sheet2 [data-bd-cancel]').click();
+  await wait(50);
+
+  // Complete a step: progress moves, Next moves on.
+  $(`[data-check="${first.id}"]`).click();
   await wait(250);
-  check('completing a group asks first', asked.includes('1 open action'), asked);
-  check('group completion closes its open children', !!task('t4').completed_at && !!db.tasks.find((t) => t.title === 'Smoke sub-action').completed_at);
-  window.confirm = () => true;
+  check('completing a step advances Next', has('[data-task="t13"]', '1 of 7 done') && has(`[data-task="${second.id}"]`, 'next'));
+
+  // Depth: 4 levels max (the database refuses deeper).
+  const rough = find('Rough grind');
+  const [lvl4] = await breakDown(rough, ['Buy grit']);
+  let err = '';
+  try { await breakDown(lvl4, ['Too deep']); } catch (e) { err = e.message || String(e); }
+  check('a 5th level is refused', !find('Too deep') && /4 levels/.test(err), err);
+  openEditor(lvl4);
+  await wait(100);
+  check('deepest step says so, no Break it down', has('#editor .steps-field', 'deepest') && !$('#editor [data-breakdown]'));
+  $('#sheet').close();
+
+  // Part of: move a project action under another task; it follows that task's project.
+  openEditor(task('t11'));
+  await wait(100);
+  $('#editor [data-part-of]').click();
+  await wait(100);
+  check('Part of picker lists tasks grouped by project', $('#sheet2').open && has('#sheet2', 'make it a step of', 'click plumbing'));
+  const search = $('#sheet2 [data-po-search]');
+  search.value = 'fittings'; search.dispatchEvent(new Event('input'));
+  check('picker search narrows', $$('#sheet2 [data-po]').filter((b) => b.dataset.po).length === 1);
+  $('#sheet2 [data-po="t2"]').click();
+  await wait(50);
+  check('picking sets the label and locks the project', has('#editor .part-of', 'order fittings for jodi') && $('#editor').elements.project_id.disabled && $('#editor').elements.project_id.value === 'p1');
+  $('#editor').requestSubmit();
+  await wait(300);
+  check('moved under, into its project', task('t11').parent_id === 't2' && task('t11').project_id === 'p1');
+  const { openPartOfPicker } = await import('/js/editors/steps.js');
+  openPartOfPicker(task('t2'), () => {});
+  check('the picker never offers the task itself or its steps', !$('#sheet2 [data-po="t2"]') && !$('#sheet2 [data-po="t11"]') && !!$('#sheet2 [data-po="t1"]'));
+  $('#sheet2').close();
+  // Moving the parent to another project takes its steps along.
+  const { updateTask } = await import('/js/data.js');
+  await updateTask(task('t2'), { project_id: 'p3' });
+  await wait(150);
+  check('steps follow their parent to another project', task('t11').project_id === 'p3');
+
+  // Reorder mode: ⇥ under the item above, ⇤ back out.
+  await go('#project/p2');
+  $('[data-act="toggle-reorder"]').click();
+  await wait(100);
+  $('[data-indent="t5"]').click();
+  await wait(250);
+  check('⇥ makes it a step of the item above', task('t5').parent_id === 't4');
+  $('[data-outdent="t5"]').click();
+  await wait(250);
+  check('⇤ moves it back up a level, after its old parent', !task('t5').parent_id && task('t5').sort > task('t4').sort && task('t5').sort < task('t6').sort);
+  $('[data-act="toggle-reorder"]').click();
+  await wait(100);
+
+  // Finish every step: the elephant completes and we celebrate it.
+  await go('#inbox');
+  const open = () => db.tasks.filter((t) => t.parent_id && !t.completed_at && !t.dropped_at).filter((t) => {
+    let p = t; for (let i = 0; i < 6 && p.parent_id; i++) p = task(p.parent_id); return p.id === 't13';
+  });
+  let toastText = '';
+  for (let i = 0; i < 12 && open().length; i++) {
+    const leaf = open().find((t) => !db.tasks.some((c) => c.parent_id === t.id && !c.completed_at && !c.dropped_at));
+    const { setCompleted } = await import('/js/data.js');
+    await setCompleted(leaf, true);
+    await wait(60);
+    toastText = text('#toast') || toastText;
+  }
+  check('last step completes the whole task', !!task('t13').completed_at);
+  check('and celebrates it', toastText.includes('last step done') && toastText.includes('build a 2m telescope'), toastText);
+
+  // Convert to project.
+  await breakDown(task('t12'), ['Fill SS-4', 'Submit to IRS']);
+  await wait(50);
+  openEditor(task('t12'));
+  await wait(100);
+  $('#editor [data-to-project]').click();
+  await wait(500);
+  const proj = db.projects.find((p) => p.name === 'Frog Pond EIN');
+  check('turn into a project: steps become its actions', proj && find('Fill SS-4').project_id === proj.id && !find('Fill SS-4').parent_id);
+  const was = T().tasks.find((t) => t.id === 't12');
+  check('the task is dropped with a note (not deleted)', !!was.dropped_at && /became the project/i.test(was.completion_note || '') && location.hash === `#project/${proj.id}`);
 }
 
 // P4: estimates, row signals, project flags and tags.

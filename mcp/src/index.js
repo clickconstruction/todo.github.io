@@ -22,6 +22,7 @@ Attachments: add_attachment attaches text, base64 or a URL's file to an action o
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 For a weekly review: call list_review, go through each project with the user (use its hints), make the changes they want, then mark_reviewed.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
+Big tasks: break_down splits a task into steps (in_order for one at a time); steps can have steps, up to 4 levels. get_task shows the steps tree and progress. Move a task under another with update_task parent. If a task grows into a real project, offer convert_to_project.
 Places: an action, tag or project can have a place (a saved location) plus an optional location_alert (arrive, leave or nearby) and radius. Actions inherit a place from their tags, group, project or project tags. Pass place as a saved place's name or id, or as an address/business to look up (it is saved as a new place). Use list_nearby with the user's coordinates to find what can be done nearby. Places are archived, never deleted.`;
 
 const CORS = {
@@ -327,6 +328,7 @@ class Api {
       completed_at: t.completed_at,
       completion_note: t.completion_note || undefined,
       parent_id: t.parent_id || undefined,
+      steps_in_order: t.steps_in_order || undefined,
       dropped_at: t.dropped_at || undefined,
       created_at: t.created_at,
       changed_at: t.updated_at,
@@ -469,51 +471,85 @@ class Api {
 
 const OPEN = 'completed_at=is.null&dropped_at=is.null';
 
-// Mirror of the app's js/availability.js. available = open, not deferred, project active,
-// not a group with open children, and not queued behind the head of a sequential project.
+// Mirror of the app's js/availability.js. available = open, not deferred (nor any ancestor),
+// project active and not deferred, no open steps of its own, and not waiting its turn in an
+// ordered container (a sequential project, or a task with steps_in_order) at any level up the tree.
 function availabilityOf(tasks, projects, nowIso = new Date().toISOString()) {
   const isOpenT = (t) => !t.completed_at && !t.dropped_at;
   const byIdT = new Map(tasks.map((t) => [t.id, t]));
   const projectById = new Map(projects.map((p) => [p.id, p]));
-  const sortT = (a, b) => (a.sort - b.sort) || (a.created_at < b.created_at ? -1 : 1);
-  const heads = new Map();
-  for (const p of projects) {
-    if (p.kind !== 'sequential') continue;
-    const top = tasks.filter((t) => t.project_id === p.id && !t.parent_id && isOpenT(t)).sort(sortT);
-    if (top[0]) heads.set(p.id, top[0].id);
-  }
-  const hasOpenKids = new Set(tasks.filter((t) => t.parent_id && isOpenT(t)).map((t) => t.parent_id));
+  const sortT = (a, b) => ((a.sort || 0) - (b.sort || 0)) || (a.created_at < b.created_at ? -1 : 1);
+  const kidsOf = new Map();
+  tasks.filter(isOpenT).forEach((t) => { const k = t.parent_id || `p:${t.project_id}`; if (!kidsOf.has(k)) kidsOf.set(k, []); kidsOf.get(k).push(t); });
+  kidsOf.forEach((list) => list.sort(sortT));
+  const firstOpen = (key) => (kidsOf.get(key) || []).filter((t) => key.startsWith('p:') ? !t.parent_id : true)[0];
+  const deferred = (t) => t.defer_at && t.defer_at > nowIso;
+  const waiting = (t) => {
+    let node = t;
+    for (let i = 0; i < 10 && node; i++) {
+      const parent = node.parent_id && byIdT.get(node.parent_id);
+      if (parent) {
+        if (deferred(parent)) return true;
+        if (parent.steps_in_order) { const f = firstOpen(parent.id); if (f && f.id !== node.id) return true; }
+        node = parent;
+      } else {
+        const p = node.project_id && projectById.get(node.project_id);
+        if (p && p.kind === 'sequential') { const f = firstOpen(`p:${p.id}`); if (f && f.id !== node.id) return true; }
+        return false;
+      }
+    }
+    return false;
+  };
   const available = (t) => {
-    if (!isOpenT(t) || (t.defer_at && t.defer_at > nowIso)) return false;
+    if (!isOpenT(t) || deferred(t)) return false;
     const p = t.project_id && projectById.get(t.project_id);
     if (p && (p.status !== 'active' || (p.defer_at && p.defer_at > nowIso))) return false; // deferred project hides its actions
-    if (hasOpenKids.has(t.id)) return false;
-    if (p && heads.has(p.id)) {
-      const top = t.parent_id ? byIdT.get(t.parent_id) : t;
-      if (!top || top.id !== heads.get(p.id)) return false;
-    }
-    return true;
+    if ((kidsOf.get(t.id) || []).length) return false; // has open steps: do the steps
+    return !waiting(t);
   };
   const nextFor = (projectId) => {
-    const open = tasks.filter((t) => t.project_id === projectId && isOpenT(t));
-    const ordered = open.filter((t) => !t.parent_id).sort(sortT).flatMap((t) => [t, ...open.filter((c) => c.parent_id === t.id).sort(sortT)]);
-    return ordered.find(available) || null;
+    const walk = (list) => {
+      for (const t of list) {
+        if (available(t)) return t;
+        const hit = walk(kidsOf.get(t.id) || []);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    return walk((kidsOf.get(`p:${projectId}`) || []).filter((t) => !t.parent_id));
   };
   return { available, nextFor };
+}
+
+// A task's steps as a nested tree, with progress counted over the smallest steps (leaves).
+async function stepsTree(api, rootId) {
+  const all = [];
+  let level = [rootId];
+  for (let d = 0; d < 5 && level.length; d++) {
+    const rows = await api.q(`tasks?${api.u}&parent_id=${inList(level)}&order=sort.asc&select=*`);
+    all.push(...rows);
+    level = rows.map((r) => r.id);
+  }
+  if (!all.length) return null;
+  const shaped = new Map((await api.shape(all)).map((x) => [x.id, x]));
+  const kids = (id) => all.filter((t) => t.parent_id === id).sort((a, b) => (a.sort || 0) - (b.sort || 0));
+  const build = (id) => kids(id).map((t) => { const x = shaped.get(t.id); const k = build(t.id); if (k.length) x.steps = k; return x; });
+  const leaves = all.filter((t) => !all.some((c) => c.parent_id === t.id) && (!t.dropped_at || t.completed_at));
+  return { steps: build(rootId), progress: { done: leaves.filter((t) => t.completed_at).length, total: leaves.length } };
 }
 
 // ---------- tools ----------
 const TOOLS = [
   {
     name: 'capture',
-    description: 'Add a new item. With just a title it lands in the Inbox to clarify later; you can also set project, tags, parent, flag, due/defer dates and notes in the same call (it then skips the Inbox).',
+    description: 'Add a new item. With just a title it lands in the Inbox to clarify later; you can also set project, tags, parent (make it a step of a task), flag, due/defer dates and notes in the same call (it then skips the Inbox). To split a task into several steps at once, use break_down.',
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', description: "What it is, in the user's words" },
         notes: { type: 'string' },
         project: { type: 'string', description: 'Project name or id' },
-        parent: { type: 'string', description: 'Id of an open action in that project, to make this a subtask' },
+        parent: { type: 'string', description: 'Id of an open task to make this a step of (it joins that task\'s project; steps go 4 levels deep)' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Labels like "Laptop" or "Waiting : Hiro"; missing tags are created' },
         flagged: { type: 'boolean' },
         planned: { type: 'string', description: 'YYYY-MM-DD when the user intends to do it' },
@@ -546,7 +582,7 @@ const TOOLS = [
         body.sort = sib.length ? (sib[0].sort || 0) + 1 : 0;
       }
       const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body });
-      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m', 'repeat', 'notifications'].includes(k) && v !== undefined));
+      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'steps_in_order', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m', 'repeat', 'notifications'].includes(k) && v !== undefined));
       if (!Object.keys(fields).length) return (await api.shape([row]))[0];
       return TOOLS.find((t) => t.name === 'update_task').run(api, { id: row.id, ...fields });
     },
@@ -648,8 +684,8 @@ const TOOLS = [
       let rows = await api.q(`tasks?${f.join('&')}`);
       if (a.available_only) {
         const [allOpen, projects] = await Promise.all([
-          api.q(`tasks?${api.u}&${OPEN}&select=id,project_id,parent_id,sort,created_at,defer_at,completed_at,dropped_at`),
-          api.q(`projects?${api.u}&select=id,kind,status`),
+          api.q(`tasks?${api.u}&${OPEN}&select=id,project_id,parent_id,steps_in_order,sort,created_at,defer_at,completed_at,dropped_at`),
+          api.q(`projects?${api.u}&select=id,kind,status,defer_at`),
         ]);
         const { available } = availabilityOf(allOpen, projects);
         const ok = new Set(allOpen.filter(available).map((t) => t.id));
@@ -700,7 +736,7 @@ const TOOLS = [
       const nowIso = new Date().toISOString();
       const [projects, open, folders] = await Promise.all([
         api.q(`projects?${api.u}&status=in.(active,on_hold)&order=next_review_at.asc&select=*`),
-        api.q(`tasks?${api.u}&${OPEN}&select=id,title,project_id,parent_id,sort,created_at,defer_at,due_at,planned_at,completed_at,dropped_at`),
+        api.q(`tasks?${api.u}&${OPEN}&select=id,title,project_id,parent_id,steps_in_order,sort,created_at,defer_at,due_at,planned_at,completed_at,dropped_at`),
         api.q(`folders?${api.u}&select=id,name`),
       ]);
       const due = projects.filter((p) => include_not_due || (p.next_review_at && p.next_review_at <= nowIso));
@@ -752,7 +788,7 @@ const TOOLS = [
     async run(api, { available_only = false }) {
       const [open, projects] = await Promise.all([
         api.q(`tasks?${api.u}&${OPEN}&select=*`),
-        api.q(`projects?${api.u}&select=id,name,kind,status,flagged`),
+        api.q(`projects?${api.u}&select=id,name,kind,status,flagged,defer_at`),
       ]);
       const flaggedProjects = new Set(projects.filter((p) => p.flagged).map((p) => p.id));
       const { available } = availabilityOf(open, projects);
@@ -765,13 +801,16 @@ const TOOLS = [
   },
   {
     name: 'get_task',
-    description: 'Get one task with its notes, project, tags, dates, repeat, notifications, attachments (with download links valid for an hour) and (for an action group) its sub-actions.',
+    description: 'Get one task with its notes, project, tags, dates, repeat, notifications, attachments (with download links valid for an hour), the tasks it is part of (part_of, nearest first) and its steps as a nested tree with progress (done/total over the smallest steps).',
     inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
     async run(api, { id }) {
       const task = await api.task(id);
       const [shaped] = await api.shape([task]);
-      const kids = await api.q(`tasks?${api.u}&parent_id=eq.${task.id}&order=sort.asc&select=*`);
-      if (kids.length) shaped.sub_actions = await api.shape(kids);
+      const tree = await stepsTree(api, task.id);
+      if (tree) Object.assign(shaped, tree);
+      const up = [];
+      for (let p = task.parent_id; p && up.length < 6;) { const [r] = await api.q(`tasks?${api.u}&id=eq.${p}&select=id,title,parent_id`); if (!r) break; up.push({ id: r.id, title: r.title }); p = r.parent_id; }
+      if (up.length) shaped.part_of = up;
       if (shaped.attachments) shaped.attachments = await api.withLinks('task_id', task.id);
       return shaped;
     },
@@ -786,7 +825,8 @@ const TOOLS = [
         title: { type: 'string' },
         notes: { type: 'string' },
         project: { type: ['string', 'null'], description: 'Project name or id; null to remove' },
-        parent: { type: ['string', 'null'], description: 'Id of an open action in the same project to make this a subtask of; null for top-level' },
+        parent: { type: ['string', 'null'], description: 'Id of an open task to make this a step of (it and its own steps move into that task\'s project; max 4 levels, no loops); null to make it stand on its own' },
+        steps_in_order: { type: 'boolean', description: 'Do this task\'s steps in order: only the first open step is available' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Replaces all tags. Labels like "Laptop" or "Waiting : Hiro"; missing tags are created.' },
         add_tags: { type: 'array', items: { type: 'string' }, description: 'Tags to add, keeping existing ones' },
         remove_tags: { type: 'array', items: { type: 'string' }, description: 'Tags to remove' },
@@ -823,6 +863,7 @@ const TOOLS = [
       if (a.title !== undefined) patch.title = String(a.title).trim();
       if (a.notes !== undefined) patch.notes = a.notes;
       if (a.flagged !== undefined) patch.flagged = !!a.flagged;
+      if (a.steps_in_order !== undefined) patch.steps_in_order = !!a.steps_in_order;
       if (a.due !== undefined) patch.due_at = zonedToIso(a.due, 17, api.tz);
       if (a.planned !== undefined) patch.planned_at = zonedToIso(a.planned, 9, api.tz);
       if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, 0, api.tz);
@@ -843,9 +884,9 @@ const TOOLS = [
         if (a.parent === null || a.parent === '') patch.parent_id = null;
         else {
           const parent = await api.task(a.parent);
-          if (parent.id === task.id || parent.parent_id) throw new Error('Parent must be a different top-level action');
-          if (parent.project_id !== projectId) throw new Error('Parent must be in the same project');
-          patch.parent_id = parent.id;
+          if (parent.completed_at || parent.dropped_at) throw new Error('Parent must be an open task');
+          patch.parent_id = parent.id; // the database checks loops and depth and sets the project
+          delete patch.project_id;
         }
       } else if (patch.project_id !== undefined && patch.project_id !== task.project_id) {
         patch.parent_id = null; // moving projects detaches from the old parent
@@ -873,7 +914,8 @@ const TOOLS = [
         await api.q('rpc/repeat_skip', { method: 'POST', body: { task_id: task.id, owner: api.userId } });
       }
       if (a.move) {
-        const sibs = await api.q(`tasks?${api.u}&${OPEN}&project_id=${projectId ? `eq.${projectId}` : 'is.null'}&parent_id=${parentId ? `eq.${parentId}` : 'is.null'}&select=id,sort,created_at`);
+        const now = await api.task(task.id); // after a move under another task, its project may have changed
+        const sibs = await api.q(`tasks?${api.u}&${OPEN}&project_id=${now.project_id ? `eq.${now.project_id}` : 'is.null'}&parent_id=${now.parent_id ? `eq.${now.parent_id}` : 'is.null'}&select=id,sort,created_at`);
         sibs.sort((x, y) => (x.sort - y.sort) || (x.created_at < y.created_at ? -1 : 1));
         const i = sibs.findIndex((x) => x.id === task.id);
         if (i >= 0) {
@@ -888,7 +930,7 @@ const TOOLS = [
   },
   {
     name: 'complete_task',
-    description: 'Mark a task complete (or pass completed:false to reopen it). Only do this when the user says it is done. Optionally record a completion note. Rules: completing an action group also completes its open sub-actions; completing the last sub-action completes the group; a project set to complete-with-last-action completes when its last action does.',
+    description: 'Mark a task complete (or pass completed:false to reopen it). Only do this when the user says it is done. Optionally record a completion note. Rules: completing a task with steps also completes its open steps; completing the last step completes the task (at every level); a project set to complete-with-last-action completes when its last action does.',
     inputSchema: {
       type: 'object',
       properties: { id: { type: 'string' }, completed: { type: 'boolean', default: true }, note: { type: 'string', description: 'Completion note' } },
@@ -905,6 +947,47 @@ const TOOLS = [
         if (next) done.next_occurrence = (await api.shape([next]))[0];
       }
       return done;
+    },
+  },
+  {
+    name: 'break_down',
+    description: 'Break a big task into smaller steps ("eat the elephant"). Adds the steps, in order, after any it already has; they live in the task\'s project. in_order: true makes only the first open step available. Steps can have steps (up to 4 levels). Completing the last step completes the task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The task to break down' },
+        steps: { type: 'array', items: { type: 'string' }, description: 'Step titles, first to last' },
+        in_order: { type: 'boolean', description: 'Do the steps in order (only the next one is available)' },
+      },
+      required: ['id', 'steps'],
+    },
+    async run(api, { id, steps = [], in_order }) {
+      const task = await api.task(id);
+      if (task.completed_at || task.dropped_at) throw new Error('Only open tasks can be broken down');
+      const titles = (Array.isArray(steps) ? steps : []).map((x) => String(x || '').trim()).filter(Boolean);
+      if (!titles.length && in_order === undefined) throw new Error('steps is required');
+      const sibs = await api.q(`tasks?${api.u}&parent_id=eq.${task.id}&select=sort`);
+      const base = Math.max(-1, ...sibs.map((x) => x.sort || 0)) + 1;
+      if (titles.length) {
+        await api.q('tasks', { method: 'POST', body: titles.map((title, i) => ({ user_id: api.userId, title, parent_id: task.id, project_id: task.project_id, in_inbox: false, sort: base + i, source: 'mcp' })) });
+      }
+      if (in_order !== undefined) await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: { steps_in_order: !!in_order } });
+      const [shaped] = await api.shape([await api.task(task.id)]);
+      return Object.assign(shaped, await stepsTree(api, task.id));
+    },
+  },
+  {
+    name: 'convert_to_project',
+    description: 'Turn a task that has grown too big into a project: its steps become the project\'s actions (with their own steps), in the same folder, sequential if its steps were in order; its tags become project tags. The task is dropped with a note pointing at the new project (nothing is deleted). Ask the user first.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    async run(api, { id }) {
+      const task = await api.task(id);
+      const pid = await api.q('rpc/convert_to_project', { method: 'POST', body: { task_id: task.id, owner: api.userId } });
+      const projectId = Array.isArray(pid) ? pid[0] : pid;
+      const [p] = await api.q(`projects?${api.u}&id=eq.${mustUuid(projectId, 'project')}&select=*`);
+      const actions = await api.q(`tasks?${api.u}&project_id=eq.${p.id}&parent_id=is.null&order=sort.asc&select=*`);
+      const folders = await api.q(`folders?${api.u}&select=id,name`);
+      return { ...projectOut(api, p, folders), actions: await api.shape(actions) };
     },
   },
   {
@@ -948,7 +1031,7 @@ const TOOLS = [
       const [projects, folders, open] = await Promise.all([
         api.q(`projects?${api.u}${include_inactive ? '' : '&status=in.(active,on_hold)'}&order=sort.asc&select=*`),
         api.q(`folders?${api.u}&select=id,name`),
-        api.q(`tasks?${api.u}&${OPEN}&select=id,title,project_id,parent_id,sort,created_at,defer_at,completed_at,dropped_at`),
+        api.q(`tasks?${api.u}&${OPEN}&select=id,title,project_id,parent_id,steps_in_order,sort,created_at,defer_at,completed_at,dropped_at`),
       ]);
       const { nextFor } = availabilityOf(open, projects);
       return projects.map((p) => {

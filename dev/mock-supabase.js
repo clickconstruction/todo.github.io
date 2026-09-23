@@ -130,7 +130,8 @@
         const anchor = t.due_at || t.planned_at || t.defer_at;
         const shift = anchor ? next.next - new Date(anchor) : 0;
         const c = cloneTask(t, shift, t.parent_id, t.project_id, rule, anchor ? null : next.defer_at);
-        tables.tasks.filter((x) => x.parent_id === t.id && !x.dropped_at && x.id !== c.id).forEach((k) => cloneTask(k, shift, c.id, k.project_id, k.repeat_rule || null));
+        const cloneSteps = (src, dst) => tables.tasks.filter((x) => x.parent_id === src && !x.dropped_at && x.id !== dst).forEach((k) => cloneSteps(k.id, cloneTask(k, shift, dst, k.project_id, k.repeat_rule || null).id));
+        cloneSteps(t.id, c.id);
       }
     }
     t.repeat_rule = null;
@@ -150,9 +151,8 @@
     reviewSchedule(np);
     tables.projects.push(np);
     tables.project_tags.filter((x) => x.project_id === p.id).forEach((x) => tables.project_tags.push({ ...x, project_id: np.id }));
-    const map = {};
-    tables.tasks.filter((t) => t.project_id === p.id && !t.parent_id && !t.dropped_at).forEach((t) => { map[t.id] = cloneTask(t, shift, null, np.id, t.repeat_rule || null).id; });
-    tables.tasks.filter((t) => t.project_id === p.id && t.parent_id && map[t.parent_id] && !t.dropped_at).forEach((t) => cloneTask(t, shift, map[t.parent_id], np.id, t.repeat_rule || null));
+    const cloneSteps = (src, dst) => tables.tasks.filter((x) => x.parent_id === src && !x.dropped_at).forEach((k) => cloneSteps(k.id, cloneTask(k, shift, dst, np.id, k.repeat_rule || null).id));
+    tables.tasks.filter((t) => t.project_id === p.id && !t.parent_id && !t.dropped_at).forEach((t) => cloneSteps(t.id, cloneTask(t, shift, null, np.id, t.repeat_rule || null).id));
   }
 
   // Mirrors notifications_fire_at(): fire time follows the item's dates; moving it re-arms.
@@ -182,9 +182,11 @@
   function taskRules(t, before) {
     const wasOpen = !before || isOpen(before);
     if (wasOpen && t.completed_at && !t.dropped_at && t.repeat_rule) repeatTask(t); // runs first, like tasks_0_repeat
-    if (wasOpen && !isOpen(t)) {
+    if (wasOpen && !isOpen(t)) { // closing a task closes its open steps, all the way down
       tables.tasks.filter((c) => c.parent_id === t.id && isOpen(c)).forEach((c) => {
+        const b = { ...c };
         if (t.completed_at) c.completed_at = t.completed_at; else c.dropped_at = t.dropped_at;
+        taskRules(c, b);
       });
     }
     if (t.parent_id) {
@@ -193,7 +195,7 @@
       if (parent && !isOpen(t) && !kids.some(isOpen) && kids.some((k) => k.completed_at) && isOpen(parent)) {
         const b = { ...parent }; parent.completed_at = now(); taskRules(parent, b);
       } else if (parent && isOpen(t) && parent.completed_at) {
-        parent.completed_at = null;
+        const b = { ...parent }; parent.completed_at = null; taskRules(parent, b); // reopen upwards
       }
     }
     if (t.project_id && t.completed_at && (!before || !before.completed_at)) {
@@ -204,10 +206,27 @@
       }
     }
   }
+  // Mirrors tasks_tree_guard(): steps live in their parent's project, no loops, max 4 levels.
+  const byTask = (id) => tables.tasks.find((x) => x.id === id);
+  function treeGuard(t) {
+    if (!t.parent_id) return null;
+    if (t.parent_id === t.id) return 'A task can’t be a step of itself.';
+    const p = byTask(t.parent_id);
+    if (!p) return 'Parent task not found.';
+    let depth = 1; let cur = p.parent_id;
+    while (cur) { if (cur === t.id) return 'A task can’t be a step of one of its own steps.'; depth++; cur = (byTask(cur) || {}).parent_id; if (depth > 10) break; }
+    const height = (id) => { const kids = tables.tasks.filter((x) => x.parent_id === id); return kids.length ? 1 + Math.max(...kids.map((k) => height(k.id))) : 0; };
+    if (depth + 1 + (t.id ? height(t.id) : 0) > 4) return 'Steps can go 4 levels deep. Turn the big step into a project instead.';
+    t.project_id = p.project_id; t.in_inbox = false;
+    return null;
+  }
+  // Mirrors tasks_tree_follow(): moving a task moves its steps.
+  function follow(t) { tables.tasks.filter((c) => c.parent_id === t.id).forEach((c) => { if (c.project_id !== t.project_id) { c.project_id = t.project_id; follow(c); } }); }
+
   // Column defaults the real database fills in (and returns) on insert.
   const DEFAULTS = {
     tasks: () => ({ project_id: null, parent_id: null, in_inbox: true, notes: '', completion_note: '', flagged: false, defer_at: null, planned_at: null,
-      due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null, repeat_rule: null }),
+      due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null, repeat_rule: null, steps_in_order: false }),
     projects: () => ({ folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
       review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null, defer_at: null, planned_at: null, due_at: null, estimate_minutes: null,
       place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null, repeat_rule: null }),
@@ -258,17 +277,22 @@
       const rows = tables[table];
       if (st.op === 'insert') {
         const add = [].concat(st.payload).map((p) => ({ id: id(), user_id: uid, created_at: now(), updated_at: now(), sort: 0, ...(DEFAULTS[table] ? DEFAULTS[table]() : {}), ...p }));
+        if (table === 'tasks') { for (const r of add) { const err = treeGuard(r); if (err) return { data: null, error: { message: err } }; } }
         rows.push(...add);
         add.forEach((r) => { if (table === 'projects') { reviewSchedule(r); projectStatusChange(r, null); } if (table === 'tasks') taskRules(r, null); if (table === 'notifications') { fireAt(r); history(r, 'notification', null, { kind: r.kind, offset_minutes: r.offset_minutes, at: r.at }); } });
         return { data: add.map(copy), error: null };
       }
       if (st.op === 'update') {
         const hit = rows.filter(match);
+        if (table === 'tasks' && ('parent_id' in st.payload || 'project_id' in st.payload)) {
+          for (const r of hit) { const trial = { ...r, ...st.payload }; const err = treeGuard(trial); if (err) return { data: null, error: { message: err } }; st.payload = { ...st.payload, project_id: trial.project_id, in_inbox: trial.in_inbox }; }
+        }
         hit.forEach((r) => {
           const before = { ...r };
           Object.assign(r, st.payload, { updated_at: now() });
           if (table === 'projects') { reviewSchedule(r, before); projectStatusChange(r, before.status); }
           if (table === 'tasks') taskRules(r, before);
+          if (table === 'tasks' && r.project_id !== before.project_id) follow(r);
           if (table === 'notifications') fireAt(r, before);
           if (table === 'tasks' || table === 'projects') logChanges(table, before, r);
           if ((table === 'tasks' || table === 'projects') && ['due_at', 'planned_at', 'defer_at'].some((k) => r[k] !== before[k])) {
@@ -341,6 +365,22 @@
           Object.assign(t, { defer_at: anchor ? move(t.defer_at) : next.toISOString(), planned_at: move(t.planned_at), due_at: move(t.due_at),
             repeat_rule: { ...t.repeat_rule, n: (t.repeat_rule.n || 1) + 1 }, updated_at: now() });
           return { data: JSON.parse(JSON.stringify(t)), error: null };
+        }
+        if (name === 'convert_to_project') {
+          const t = tables.tasks.find((x) => x.id === args.task_id);
+          if (!t || t.completed_at || t.dropped_at) return { data: null, error: { message: 'Only open tasks can become projects.' } };
+          const src = t.project_id && tables.projects.find((x) => x.id === t.project_id);
+          const pid = id();
+          const np = { id: pid, user_id: uid, folder_id: src ? src.folder_id : null, name: t.title, notes: t.notes, status: 'active', kind: t.steps_in_order ? 'sequential' : 'parallel',
+            complete_with_last: false, flagged: t.flagged, review_every_days: 7, review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null,
+            defer_at: t.defer_at, planned_at: t.planned_at, due_at: t.due_at, estimate_minutes: t.estimate_minutes, place_id: t.place_id, location_trigger: t.location_trigger,
+            location_radius_m: t.location_radius_m, next_review_at: null, repeat_rule: null, sort: tables.projects.length, created_at: now(), updated_at: now() };
+          reviewSchedule(np);
+          tables.projects.push(np);
+          tables.task_tags.filter((x) => x.task_id === t.id).forEach((x) => tables.project_tags.push({ project_id: pid, tag_id: x.tag_id, user_id: uid }));
+          tables.tasks.filter((c) => c.parent_id === t.id).forEach((c) => { c.parent_id = null; c.project_id = pid; follow(c); });
+          t.dropped_at = now(); t.completion_note = `Became the project “${t.title}”`;
+          return { data: pid, error: null };
         }
         return { data: null, error: { message: `function ${name} does not exist` } };
       },

@@ -1,6 +1,7 @@
 // Inbox, Today, Tags and Tag views.
 import { db, esc, byId, isOpen, visible, taskSort, sortedTags, tagLabel, effectiveTagIds } from '../state.js';
-import { taskList } from '../rows.js';
+import { taskList, treeList } from '../rows.js';
+import { flattenTree, descendants } from '../tree.js';
 import { filterBar, applyFilter, closedFor, withClosed, filterNote, sortTasks } from '../filter.js';
 import { isAvailable } from '../availability.js';
 import { activePlace } from '../places.js';
@@ -9,10 +10,12 @@ import { alertsNudge } from './alerts.js';
 export function viewInbox() {
   const items = db.tasks.filter((t) => t.in_inbox && !t.parent_id && visible(t)).sort(taskSort);
   const open = items.filter(isOpen).length;
+  // Inbox items can be broken into steps before they're clarified: show them as a tree.
+  const withSteps = items.flatMap((t) => [t, ...descendants(t).filter(visible)]);
   return `${alertsNudge()}<div class="view-head"><h1 class="inbox">Inbox</h1></div>
     <p class="view-sub">${open} item${open === 1 ? '' : 's'} to clarify</p>
     <form class="capture" data-capture><input type="text" name="title" placeholder="Capture anything…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
-    ${taskList(items) || '<p class="empty">Inbox zero. Nice.</p>'}`;
+    ${treeList(flattenTree(withSteps)) || '<p class="empty">Inbox zero. Nice.</p>'}`;
 }
 
 export function viewTags() {

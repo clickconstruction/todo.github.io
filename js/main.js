@@ -1,7 +1,9 @@
 // Todo Tooling entry point: event wiring, auth, service worker.
 import { sb, db, app, $, byId, isOpen, toggleCollapsed, toast } from './state.js';
 import { render } from './router.js';
-import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, addSubAction, bulkUpdate, markReviewed } from './data.js';
+import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, bulkUpdate, markReviewed, indentTask, outdentTask } from './data.js';
+import { openBreakdown } from './editors/breakdown.js';
+import { descendants } from './tree.js';
 import { reviewQueue, remainingIds, reviewDueCount } from './views/review.js';
 import { startOfToday } from './dates.js';
 import { forecastData } from './views/forecast.js';
@@ -61,9 +63,9 @@ const CLICKS = [
     e.stopPropagation();
     const t = byId(db.tasks, el.dataset.check);
     if (!t) return;
-    // Completing a group completes its open actions too (database rule), so confirm first.
-    const openKids = db.tasks.filter((c) => c.parent_id === t.id && isOpen(c)).length;
-    if (!t.completed_at && openKids && !confirm(`Complete “${t.title}” and its ${openKids} open action${openKids === 1 ? '' : 's'}?`)) return;
+    // Completing a task with open steps completes those steps too (database rule), so confirm first.
+    const openKids = descendants(t).filter(isOpen).length;
+    if (!t.completed_at && openKids && !confirm(`Complete “${t.title}” and its ${openKids} open step${openKids === 1 ? '' : 's'}?`)) return;
     setCompleted(t, !t.completed_at);
   }],
   ['[data-flag]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.flag); if (t) updateTask(t, { flagged: !t.flagged }); }],
@@ -105,12 +107,9 @@ const CLICKS = [
     if (status && (status === 'active' || status === 'on_hold' || confirm(`Mark “${p.name}” ${status}?`))) updateProject(p, { status });
   }],
   ['[data-toggle-group]', (el, e) => { e.stopPropagation(); toggleCollapsed(el.dataset.toggleGroup); render(); }],
-  ['[data-add-sub]', (el, e) => {
-    e.stopPropagation();
-    const parent = byId(db.tasks, el.dataset.addSub);
-    const title = parent && prompt(`New sub-action under “${parent.title}”`);
-    if (title) addSubAction(parent, title);
-  }],
+  ['[data-add-sub]', (el, e) => { e.stopPropagation(); const parent = byId(db.tasks, el.dataset.addSub); if (parent) openBreakdown(parent); }],
+  ['[data-indent]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.indent); if (t) indentTask(t); }],
+  ['[data-outdent]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.outdent); if (t) outdentTask(t); }],
   ['[data-move]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.move); if (t) moveTask(t, Number(el.dataset.dir)); }],
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],

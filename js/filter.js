@@ -40,10 +40,14 @@ export function passes(t) {
   return true;
 }
 
-// Keep a group visible (as context) when any of its sub-actions pass.
+// Keep every ancestor visible (as context) when any of its steps pass.
 export function applyFilter(tasks) {
+  const byIdMap = new Map(tasks.map((t) => [t.id, t]));
   const shown = new Set(tasks.filter(passes).map((t) => t.id));
-  tasks.forEach((t) => { if (t.parent_id && shown.has(t.id)) shown.add(t.parent_id); });
+  [...shown].forEach((id) => {
+    let p = byIdMap.get(id);
+    for (let i = 0; i < 10 && p && p.parent_id; i++) { shown.add(p.parent_id); p = byIdMap.get(p.parent_id); }
+  });
   return tasks.filter((t) => shown.has(t.id));
 }
 

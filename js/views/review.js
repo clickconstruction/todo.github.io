@@ -1,9 +1,10 @@
 // Review: step through projects that are due for review (the GTD Weekly Review).
 // Each project shows its properties inline, health hints with one-tap fixes, and its
 // actions. "Mark Reviewed" sets last_reviewed_at; the database derives next_review_at.
-import { sb, db, app, esc, byId, run, isOpen, taskSort, isCollapsed, projectTagsFor, tagLabel, PROJECT_STATUSES } from '../state.js';
+import { sb, db, app, esc, byId, run, isOpen, taskSort, projectTagsFor, tagLabel, PROJECT_STATUSES } from '../state.js';
 import { fmtDate, startOfToday, addDays, isDeferred } from '../dates.js';
-import { taskList } from '../rows.js';
+import { treeList } from '../rows.js';
+import { flattenTree } from '../tree.js';
 import { PROJECT_KINDS, nextAction } from '../availability.js';
 
 export const REVIEW_INTERVALS = [[1, 'Daily'], [7, 'Weekly'], [14, 'Every 2 weeks'], [30, 'Monthly'], [90, 'Quarterly'], [180, 'Every 6 months'], [365, 'Yearly']];
@@ -87,8 +88,7 @@ export function viewReview(which) {
   app.review.current = p.id;
   const folder = p.folder_id && byId(db.folders, p.folder_id);
   const tasks = db.tasks.filter((t) => t.project_id === p.id && (isOpen(t) || (t.completed_at && new Date(t.completed_at) > addDays(new Date(), -1)))).sort(taskSort);
-  const top = tasks.filter((t) => !t.parent_id);
-  const ordered = top.flatMap((t) => [t, ...(isCollapsed(t.id) ? [] : tasks.filter((c) => c.parent_id === t.id))]);
+  const entries = flattenTree(tasks);
   const hints = healthHints(p);
   const interval = REVIEW_INTERVALS.find(([d]) => d === p.review_every_days) ? p.review_every_days : 'custom';
 
@@ -115,5 +115,5 @@ export function viewReview(which) {
     </div>
     <label class="review-notes">Notes<textarea data-review-notes="${p.id}" placeholder="Purpose, what done looks like…">${esc(p.notes)}</textarea></label>
     <form class="capture" data-capture data-project="${p.id}"><input type="text" name="title" id="review-capture" placeholder="Add an action to ${esc(p.name)}…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
-    ${taskList(ordered, { showProject: false, hierarchy: true, hasGroups: top.some((t) => tasks.some((c) => c.parent_id === t.id)), markNext: p.status === 'active' ? nextAction(p) : null }) || '<p class="empty">No actions.</p>'}`;
+    ${treeList(entries, { showProject: false, markNext: p.status === 'active' ? nextAction(p) : null }) || '<p class="empty">No actions.</p>'}`;
 }

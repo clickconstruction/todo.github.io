@@ -3,7 +3,7 @@
 import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, isOpen, taskSort, tagsFor } from '../state.js';
 import { fromDateInput, fromDateTimeInput, HOURS } from '../dates.js';
 import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
-import { saveTask, capture, addSubAction } from '../data.js';
+import { saveTask, capture } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { locationFieldHtml, wireLocationField } from './place.js';
 import { placeFor } from '../places.js';
@@ -12,6 +12,8 @@ import { notifyFieldHtml, wireNotifyField, remindersFor } from './notifyField.js
 import { attachFieldHtml, wireAttachField } from './attachField.js';
 import { historyFieldHtml, wireHistoryField } from './historyField.js';
 import { skipOccurrence } from '../data.js';
+import { stepsFieldHtml, partOfFieldHtml, wireStepsFields } from './steps.js';
+import { openBreakdown } from './breakdown.js';
 
 const notesAreLong = (text) => text.length > 280 || text.split('\n').length > 8;
 
@@ -20,10 +22,12 @@ function taskFieldsHtml(t, task) {
     .sort((a, b) => a.name.localeCompare(b.name));
   return `
     <input type="text" name="title" value="${esc(t.title)}" placeholder="What is it?" required autocomplete="off" aria-label="Title">
+    ${stepsFieldHtml(task)}
     <label>Project
       <select name="project_id"><option value="">${task && task.in_inbox ? 'None (stays in Inbox)' : 'None'}</option>
         ${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
       </select></label>
+    ${partOfFieldHtml(t)}
     ${tagPickerHtml()}
     ${dateField('defer_at', 'Defer until', t.defer_at)}
     ${dateField('planned_at', 'Planned', t.planned_at)}
@@ -32,7 +36,6 @@ function taskFieldsHtml(t, task) {
     ${repeatFieldHtml(t, { skippable: !!task && isOpen(task) })}
     ${notifyFieldHtml()}
     ${locationFieldHtml(t, { inherited: task ? placeFor({ ...task, place_id: null }) : null })}
-    <label>Subtask of<select name="parent_id"></select></label>
     <label class="flag-toggle"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}> Flagged</label>
     <label class="notes-field">Notes<textarea name="notes" placeholder="Links, details…">${esc(t.notes)}</textarea></label>
     ${attachFieldHtml()}
@@ -50,30 +53,14 @@ function taskFieldsHtml(t, task) {
 
 const secondaryButtons = (task) => `
   ${task && isOpen(task) ? '<button type="button" class="btn danger" data-drop>Drop</button>' : ''}
-  ${task && isOpen(task) && task.project_id && !task.parent_id ? '<button type="button" class="btn" data-sub>+ Sub-action</button>' : ''}`;
+`;
 
 // Wire behaviour shared by sheet and panel; returns collect() → { fields, tagIds } or null.
-function wireTaskForm(form, t, task, onTagsChange) {
+function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
   wireQuickButtons(form);
   const selectedTags = wireTagPicker(form, task ? tagsFor(task.id).map((x) => x.id) : [], onTagsChange);
 
-  // "Subtask of": top-level actions in the chosen project (not this item or its own subtasks).
-  const isGroupTask = task && db.tasks.some((c) => c.parent_id === task.id);
-  const drawParents = () => {
-    const pid = form.elements.project_id.value;
-    if (isGroupTask) { // one level deep: a group can't be a sub-action
-      form.elements.parent_id.innerHTML = '<option value="">This is a group (it has sub-actions)</option>';
-      form.elements.parent_id.disabled = true;
-      return;
-    }
-    const options = pid ? db.tasks.filter((x) => x.project_id === pid && !x.parent_id && (isOpen(x) || x.id === t.parent_id) && (!task || (x.id !== task.id && x.parent_id !== task.id))) : [];
-    const current = t.parent_id && options.some((x) => x.id === t.parent_id) ? t.parent_id : '';
-    form.elements.parent_id.innerHTML = `<option value="">${pid ? 'None (top-level action)' : 'Choose a project first'}</option>` +
-      options.sort(taskSort).map((x) => `<option value="${x.id}" ${x.id === current ? 'selected' : ''}>${esc(x.title)}</option>`).join('');
-    form.elements.parent_id.disabled = !pid;
-  };
-  drawParents();
-  form.elements.project_id.addEventListener('change', drawParents);
+  const collectSteps = wireStepsFields(form, t, task, { onChange: onTagsChange, ...stepsOpts });
   const collectLocation = wireLocationField(form, onTagsChange);
   const collectRepeat = wireRepeatField(form, t, onTagsChange);
   const collectReminders = wireNotifyField(form, remindersFor('task_id', task && task.id), onTagsChange);
@@ -93,8 +80,8 @@ function wireTaskForm(form, t, task, onTagsChange) {
     const fields = {
       title: (f.get('title') || '').trim(),
       notes: f.get('notes'),
-      project_id: f.get('project_id') || null,
-      parent_id: f.get('parent_id') || null,
+      project_id: form.elements.project_id.value || null, // read directly: it's disabled while it's a step
+      ...collectSteps(),
       flagged: f.get('flagged') === 'on',
       defer_at: fromDateInput(f.get('defer_at'), HOURS.defer_at),
       planned_at: fromDateInput(f.get('planned_at'), HOURS.planned_at),
@@ -135,15 +122,6 @@ async function saveWithDropUndo(task, fields, tagIds) {
   return row;
 }
 
-function wireSubAction(root, task, before) {
-  const sub = $('[data-sub]', root);
-  if (sub) sub.onclick = async () => {
-    const title = prompt(`New sub-action under “${task.title}”`);
-    if (!title) return;
-    if (before) before();
-    await addSubAction(byId(db.tasks, task.id) || task, title);
-  };
-}
 
 export function openEditor(task, defaults = {}) {
   const t = task || { title: '', notes: '', project_id: null, flagged: false, defer_at: null, due_at: null, ...defaults };
@@ -155,9 +133,9 @@ export function openEditor(task, defaults = {}) {
     </div>
   </form>`);
   const form = $('#editor', sheet);
-  const collect = wireTaskForm(form, t, task);
+  // A new item can be broken down right away: save it first, then open the steps sheet.
+  const collect = wireTaskForm(form, t, task, undefined, { onBeforeBreakdown: () => { form.dataset.thenBreakdown = '1'; form.requestSubmit(); } });
   $('[data-cancel]', sheet).onclick = () => sheet.close();
-  wireSubAction(sheet, task, () => sheet.close());
   // Items are dropped, never deleted: Drop saves the form with status "dropped" (restore via Status → Open).
   const drop = $('[data-drop]', sheet);
   if (drop) drop.onclick = () => { form.elements.status.value = 'dropped'; form.requestSubmit(); };
@@ -166,7 +144,8 @@ export function openEditor(task, defaults = {}) {
     const data = collect();
     if (!data) return;
     sheet.close();
-    await saveWithDropUndo(task, data.fields, data.tagIds);
+    const row = await saveWithDropUndo(task, data.fields, data.tagIds);
+    if (form.dataset.thenBreakdown && row) openBreakdown(byId(db.tasks, row.id) || row);
   };
   // Long notes (e.g. a forwarded email) earn the whole screen; re-check as the user types.
   const notes = $('[name=notes]', sheet);
@@ -205,7 +184,6 @@ export function renderTaskInspector(container, task) {
   form.addEventListener('change', soon);
   form.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); } });
   form.addEventListener('submit', (e) => { e.preventDefault(); save(); });
-  wireSubAction(form, task);
   const drop = $('[data-drop]', form);
   if (drop) drop.onclick = () => { form.elements.status.value = 'dropped'; save(); };
   form.flushSave = () => (timer ? save() : Promise.resolve());

@@ -7,13 +7,19 @@ import { placeFor, isInside } from './places.js';
 import { describe } from './repeat.js';
 import { distanceM, fmtDistance } from './geo.js';
 import { app } from './state.js';
+import { progress, nextStep, ancestors, rootOf, depthOf, heightOf, MAX_DEPTH } from './tree.js';
 
-export function taskRow(t, { showProject = true, markNext = null, reorder = false, hierarchy = false, hasGroups = false, showPlace = true } = {}) {
+export function taskRow(t, { showProject = true, markNext = null, reorder = false, hierarchy = false, hasGroups = false, showPlace = true, depth = 0 } = {}) {
   const done = !!t.completed_at;
   const project = t.project_id && byId(db.projects, t.project_id);
   const tags = tagsFor(t.id);
   const meta = [];
   if (showProject && project) meta.push(`<span>🗂️ ${esc(project.name)}</span>`);
+  // A step shown outside its tree (Flagged, Forecast, Nearby, search…) keeps its context.
+  if (!hierarchy && t.parent_id) {
+    const up = ancestors(t);
+    if (up.length) meta.unshift(`<span class="meta-parent" title="${esc(up.map((a) => a.title).reverse().join(' › '))}">↳ ${esc(up[0].title)}</span>`);
+  }
   tags.forEach((tag) => meta.push(`<span class="chip">${esc(tagLabel(tag))}</span>`));
   if (t.defer_at && isDeferred(t)) meta.push(`<span>⏸ ${esc(fmtDate(t.defer_at))}</span>`);
   if (t.planned_at && isOpen(t)) meta.push(`<span class="meta-planned ${isPlannedPast(t) ? 'past' : ''}" title="Planned">🗓 ${esc(fmtDate(t.planned_at))}</span>`);
@@ -30,21 +36,36 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   if (t.repeat_rule && isOpen(t)) meta.push(`<span class="meta-repeat" title="${esc(describe(t.repeat_rule))}">🔁</span>`);
   if (t.estimate_minutes) meta.push(`<span class="meta-estimate" title="Estimate">⏱ ${fmtMinutes(t.estimate_minutes)}</span>`);
   if (t.dropped_at && !t.completed_at) meta.push('<span class="chip">Dropped</span>');
-  if (markNext && markNext.id === t.id) meta.unshift('<span class="chip next">Next</span>');
-  const kids = hierarchy && !t.parent_id ? db.tasks.filter((c) => c.parent_id === t.id) : [];
-  const openKids = kids.filter(isOpen).length;
-  if (kids.length) meta.unshift(`<span class="chip group-count">${openKids ? `${openKids} of ${kids.length} left` : `${kids.length} done`}</span>`);
+  // "Next": the project's next action, or the step you're on inside a do-in-order task.
+  const parentTask = t.parent_id && byId(db.tasks, t.parent_id);
+  const nextInOrder = hierarchy && parentTask && parentTask.steps_in_order && isOpen(t) && !isSequenceBlocked(t) && !db.tasks.some((c) => c.parent_id === t.id && isOpen(c));
+  if ((markNext && markNext.id === t.id) || nextInOrder) meta.unshift('<span class="chip next">Next</span>');
+  const kids = db.tasks.filter((c) => c.parent_id === t.id);
+  const collapsed = isCollapsed(t.id);
+  let prog = '';
+  if (kids.length) {
+    const p = progress(t);
+    const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+    meta.unshift(`<span class="chip group-count">${p.done} of ${p.total} done</span>${t.steps_in_order ? '<span class="chip">in order</span>' : ''}`);
+    const next = isOpen(t) && (collapsed || !hierarchy) ? nextStep(t) : null;
+    prog = `<div class="step-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${p.total}" aria-valuenow="${p.done}" aria-label="${p.done} of ${p.total} steps done"><i style="width:${pct}%"></i></div>
+      ${next ? `<div class="step-next"><span>Next:</span> ${esc(next.title)}</div>` : ''}`;
+  }
   const checkCls = ['check', done && 'done', t.flagged && 'flagged', isOverdue(t) && 'overdue'].filter(Boolean).join(' ');
   const blocked = isOpen(t) && isSequenceBlocked(t);
-  const cls = [done || t.dropped_at ? 'completed' : '', t.parent_id ? 'row-sub' : '', blocked ? 'blocked' : ''].filter(Boolean).join(' ');
-  const handles = reorder && isOpen(t) ? `<span class="reorder"><button class="icon-btn" data-move="${t.id}" data-dir="-1" aria-label="Move up">▲</button><button class="icon-btn" data-move="${t.id}" data-dir="1" aria-label="Move down">▼</button></span>` : '';
-  const toggle = kids.length
-    ? `<button class="disclosure" data-toggle-group="${t.id}" aria-expanded="${!isCollapsed(t.id)}" aria-label="${isCollapsed(t.id) ? 'Expand' : 'Collapse'} group">${isCollapsed(t.id) ? '▸' : '▾'}</button>`
-    : hierarchy && hasGroups && !t.parent_id ? '<span class="disclosure-spacer"></span>' : '';
-  const addSub = kids.length && isOpen(t) ? `<button class="icon-btn add-sub" data-add-sub="${t.id}" aria-label="Add sub-action to ${esc(t.title)}" title="Add sub-action">＋</button>` : '';
-  return `<li class="row ${cls} ${kids.length ? 'group' : ''}" data-task="${t.id}">
+  const cls = [done || t.dropped_at ? 'completed' : '', hierarchy && depth ? 'row-sub' : '', blocked ? 'blocked' : ''].filter(Boolean).join(' ');
+  // Reorder mode: ▲▼ move among siblings; ⇥ makes it a step of the item above, ⇤ moves it up a level.
+  const handles = reorder && isOpen(t) ? `<span class="reorder">
+      <button class="icon-btn" data-move="${t.id}" data-dir="-1" aria-label="Move up">▲</button><button class="icon-btn" data-move="${t.id}" data-dir="1" aria-label="Move down">▼</button>
+      <button class="icon-btn" data-indent="${t.id}" aria-label="Make a step of the item above" title="Make a step of the item above" ${depthOf(t) + heightOf(t) >= MAX_DEPTH ? 'disabled' : ''}>⇥</button>
+      <button class="icon-btn" data-outdent="${t.id}" aria-label="Move up a level" title="Move up a level" ${t.parent_id ? '' : 'disabled'}>⇤</button></span>` : '';
+  const toggle = hierarchy && kids.length
+    ? `<button class="disclosure" data-toggle-group="${t.id}" aria-expanded="${!collapsed}" aria-label="${collapsed ? 'Show' : 'Hide'} steps">${collapsed ? '▸' : '▾'}</button>`
+    : hierarchy && hasGroups ? '<span class="disclosure-spacer"></span>' : '';
+  const addSub = kids.length && isOpen(t) ? `<button class="icon-btn add-sub" data-add-sub="${t.id}" aria-label="Add a step to ${esc(t.title)}" title="Add a step">＋</button>` : '';
+  return `<li class="row ${cls} ${kids.length ? 'group' : ''}" data-task="${t.id}" style="--depth:${hierarchy ? depth : 0}">
     ${toggle}<button class="${checkCls}" data-check="${t.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>
-    <div class="row-main"><div class="row-title">${esc(t.title)}</div>${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}</div>
+    <div class="row-main"><div class="row-title">${esc(t.title)}</div>${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}${prog}</div>
     <span class="row-signals">${t.notes ? '<span class="sig-note" title="Has notes" aria-label="Has notes">📝</span>' : ''}
       ${isOpen(t) ? `<button class="flag-btn ${t.flagged ? 'on' : ''}" data-flag="${t.id}" aria-pressed="${!!t.flagged}" aria-label="${t.flagged ? 'Unflag' : 'Flag'}" title="${t.flagged ? 'Unflag' : 'Flag'}">⚑</button>` : ''}</span>
     ${handles}${reorder ? '' : addSub}
@@ -52,6 +73,13 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
 }
 
 export const taskList = (tasks, opts) => (tasks.length ? `<ul class="list">${tasks.map((t) => taskRow(t, opts)).join('')}</ul>` : '');
+
+// A list shown as a tree: each task followed by its steps (unless collapsed), indented by level.
+export function treeList(entries, opts = {}) {
+  if (!entries.length) return '';
+  const hasGroups = entries.some(({ t }) => db.tasks.some((c) => c.parent_id === t.id));
+  return `<ul class="list">${entries.map(({ t, depth }) => taskRow(t, { ...opts, hierarchy: true, hasGroups, depth })).join('')}</ul>`;
+}
 
 export function projectCounts(p) {
   const tasks = db.tasks.filter((t) => t.project_id === p.id && isOpen(t));

@@ -3,6 +3,7 @@ import { sb, db, app, run, syncRow, toast, byId, isOpen, taskSort } from './stat
 import { openCompletionNote } from './editors/completion.js';
 import { saveReminders, refreshReminders } from './editors/notifyField.js';
 import { uploadFiles } from './editors/attachField.js';
+import { ancestors, descendants, stepsOf } from './tree.js';
 
 const OUTBOX_KEY = 'todo.outbox';
 
@@ -94,6 +95,7 @@ const fmtNext = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: 
 export async function setCompleted(task, done) {
   const completed_at = done ? new Date().toISOString() : null;
   const repeating = done && task.repeat_rule;
+  const openBefore = ancestors(task).filter(isOpen).map((a) => a.id);
   const since = new Date(Date.now() - 2000).toISOString();
   const project = task.project_id && byId(db.projects, task.project_id);
   const projectWasOpen = project && ['active', 'on_hold'].includes(project.status);
@@ -107,7 +109,10 @@ export async function setCompleted(task, done) {
   // The database may have completed the project too ("complete with last action").
   const projectDone = projectWasOpen && byId(db.projects, task.project_id).status === 'completed';
   const nextAt = next && (next.due_at || next.planned_at || next.defer_at);
-  const msg = projectDone ? `Completed · “${project.name}” is done too` : next ? `Completed · next one ${nextAt ? fmtNext(nextAt) : 'is ready'}` : 'Completed';
+  // Finishing the last step completes the level(s) above: celebrate the biggest one.
+  const finished = done ? ancestors(task).filter((a) => a.completed_at && openBefore.includes(a.id)) : [];
+  const elephant = finished[finished.length - 1];
+  const msg = elephant ? `🎉 Last step done · “${elephant.title}” is complete` : projectDone ? `Completed · “${project.name}” is done too` : next ? `Completed · next one ${nextAt ? fmtNext(nextAt) : 'is ready'}` : 'Completed';
   toast(msg, [{ label: 'Add note', run: () => openCompletionNote(task) },
     { label: 'Undo', run: () => undoComplete(task, projectDone && project, next, repeating) }]);
 }
@@ -126,14 +131,66 @@ async function undoComplete(task, reopenProject, next, rule) {
 
 // Add a sub-action under an action (making it a group). Children inherit the project.
 export async function addSubAction(parent, title) {
-  title = (title || '').trim();
-  if (!title) return null;
-  const sort = Math.max(-1, ...db.tasks.filter((t) => t.parent_id === parent.id).map((t) => t.sort || 0)) + 1;
-  const [row] = await run(sb.from('tasks').insert({ title, project_id: parent.project_id, parent_id: parent.id, in_inbox: false, sort }).select());
-  db.tasks.push(row);
-  await afterTaskWrite(row); // adding an open child reopens a completed group
+  const [row] = await breakDown(parent, [title]);
+  return row || null;
+}
+
+// ---------- steps ----------
+// Add steps to a task (the database puts them in the task's project and out of the Inbox).
+export async function breakDown(parent, titles, { inOrder } = {}) {
+  const clean = titles.map((t) => String(t || '').trim()).filter(Boolean);
+  const base = Math.max(-1, ...db.tasks.filter((t) => t.parent_id === parent.id).map((t) => t.sort || 0)) + 1;
+  let rows = [];
+  if (clean.length) {
+    rows = await run(sb.from('tasks').insert(clean.map((title, i) => ({ title, parent_id: parent.id, project_id: parent.project_id, in_inbox: false, sort: base + i }))).select());
+    db.tasks.push(...rows);
+  }
+  if (inOrder !== undefined && !!inOrder !== !!parent.steps_in_order) {
+    const [r] = await run(sb.from('tasks').update({ steps_in_order: !!inOrder }).eq('id', parent.id).select());
+    syncRow('tasks', parent, r);
+  }
+  if (rows.length) await afterTaskWrite(rows[0]); // new open steps reopen a finished parent
+  app.render();
+  return rows;
+}
+
+// Put a task under another (or at the top level with null). Steps come along; the database
+// checks loops and depth, and moves the task into the new parent's project.
+export async function moveUnder(task, parent, { sort } = {}) {
+  const oldAncestors = ancestors(task);
+  const fields = { parent_id: parent ? parent.id : null };
+  fields.sort = sort ?? (parent ? Math.max(-1, ...stepsOf(parent).map((t) => t.sort || 0)) + 1 : task.sort);
+  if (!parent) fields.in_inbox = !task.project_id && !db.taskTags.some((x) => x.task_id === task.id);
+  const [row] = await run(sb.from('tasks').update(fields).eq('id', task.id).select());
+  syncRow('tasks', task, row);
+  await Promise.all([afterTaskWrite(task), oldAncestors.length ? refreshTasks(oldAncestors.map((a) => a.id)) : null]);
   app.render();
   return row;
+}
+
+// Reorder mode ⇥: become the last step of the open sibling just above.
+export async function indentTask(task) {
+  const sibs = db.tasks.filter((t) => t.project_id === task.project_id && (t.parent_id || null) === (task.parent_id || null) && isOpen(t)
+    && (task.project_id || t.in_inbox === task.in_inbox)).sort(taskSort);
+  const above = sibs[sibs.findIndex((t) => t.id === task.id) - 1];
+  if (!above) { toast('Nothing above to put it under'); return; }
+  try { await moveUnder(task, above); } catch { /* the database explains (depth) in a toast */ }
+}
+
+// Reorder mode ⇤: move up a level, just after its old parent.
+export async function outdentTask(task) {
+  const parent = task.parent_id && byId(db.tasks, task.parent_id);
+  if (!parent) return;
+  const grand = parent.parent_id ? byId(db.tasks, parent.parent_id) : null;
+  await moveUnder(task, grand, { sort: (parent.sort || 0) + 0.5 });
+}
+
+// The steps become a project's actions; the task is dropped with a note (nothing is deleted).
+export async function convertToProject(task) {
+  const pid = await run(sb.rpc('convert_to_project', { task_id: task.id }));
+  await loadAll();
+  app.render();
+  return Array.isArray(pid) ? pid[0] : pid;
 }
 
 // Review: stamp the project as reviewed now; the database derives next_review_at.
@@ -172,10 +229,11 @@ export async function moveTask(task, dir) {
   app.render();
 }
 
-// Refresh what database triggers may have changed: the parent group (completes with its
-// last child), the children (closed with their group) and the project (complete with last action).
+// Refresh what database triggers may have changed: every ancestor (a finished last step completes
+// the level above, all the way up), every step below (closed with their parent, or moved with it
+// to another project) and the project (complete with last action).
 export async function afterTaskWrite(task) {
-  const ids = [task.parent_id, ...db.tasks.filter((c) => c.parent_id === task.id).map((c) => c.id)].filter(Boolean);
+  const ids = [...ancestors(task), ...descendants(task)].map((t) => t.id);
   await Promise.all([
     ids.length ? refreshTasks(ids) : null,
     task.project_id ? refreshProject(task.project_id) : null,

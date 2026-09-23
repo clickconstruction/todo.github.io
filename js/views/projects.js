@@ -1,6 +1,7 @@
 // Projects list (by folder) and the single-project view.
-import { db, app, esc, byId, isOpen, taskSort, bySort, isCollapsed, projectTagsFor, tagLabel, PROJECT_STATUSES } from '../state.js';
-import { taskList, projectRow } from '../rows.js';
+import { db, app, esc, byId, isOpen, taskSort, bySort, projectTagsFor, tagLabel, PROJECT_STATUSES } from '../state.js';
+import { projectRow, treeList } from '../rows.js';
+import { flattenTree } from '../tree.js';
 import { PROJECT_KINDS, nextAction } from '../availability.js';
 import { filterBar, applyFilter, closedFor, withClosed, filterNote } from '../filter.js';
 
@@ -31,8 +32,8 @@ export function viewProject(id) {
   const local = db.tasks.filter((t) => t.project_id === p.id);
   const all = withClosed(local, closedFor(`project:${p.id}`, (q) => q.eq('project_id', p.id)));
   const tasks = applyFilter(all).sort(taskSort);
-  const top = tasks.filter((t) => !t.parent_id);
-  const ordered = top.flatMap((t) => [t, ...(isCollapsed(t.id) ? [] : tasks.filter((s) => s.parent_id === t.id))]);
+  const entries = flattenTree(tasks);
+  const ordered = entries.map((e) => e.t);
   const folder = p.folder_id && byId(db.folders, p.folder_id);
   return `<a class="back" href="#projects">‹ Projects${folder ? ` / 📁 ${esc(folder.name)}` : ''}</a>
     <div class="view-head"><h1>${esc(p.name)}</h1><button class="btn small" data-edit-project="${p.id}">Edit</button></div>
@@ -45,6 +46,6 @@ export function viewProject(id) {
       ${ordered.filter((t) => !t.completed_at).length > 1 ? `<button class="btn small" data-act="toggle-reorder">${app.reorder === p.id ? 'Done reordering' : 'Reorder'}</button>` : ''}</p>
     ${filterBar()}${filterNote(local)}
     <form class="capture" data-capture data-project="${p.id}"><input type="text" name="title" placeholder="Add an action to ${esc(p.name)}…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
-    ${taskList(ordered, { showProject: false, hierarchy: true, hasGroups: top.some((t) => all.some((c) => c.parent_id === t.id)), markNext: p.status === 'active' ? nextAction(p) : null, reorder: app.reorder === p.id }) || (local.some(isOpen) ? '<p class="empty">Nothing matches this filter.</p>' : '<p class="empty">No actions. What is the very next physical step?</p>')}
+    ${treeList(entries, { showProject: false, markNext: p.status === 'active' ? nextAction(p) : null, reorder: app.reorder === p.id }) || (local.some(isOpen) ? '<p class="empty">Nothing matches this filter.</p>' : '<p class="empty">No actions. What is the very next physical step?</p>')}
     <p class="view-sub" style="margin-top:20px"><a href="#done/all/${p.id}">✓ Completed in this project →</a></p>`;
 }

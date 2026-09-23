@@ -28,6 +28,16 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (String(url).startsWith('https://push.example')) { pushed.push({ url: String(url), init }); return String(url).includes('gone') ? new Response(null, { status: 410 }) : String(url).includes('badjwt') ? new Response('{"reason":"BadJwtToken"}', { status: 403 }) : new Response(null, { status: 201 }); }
   const rpcCalls = globalThis.rpcCalls = globalThis.rpcCalls || [];
+  if (String(url).includes('/rest/v1/rpc/convert_to_project')) { // mirror of the SQL function
+    const b = JSON.parse(init.body); const t = db.tasks.find((x) => x.id === b.task_id && x.user_id === b.owner);
+    if (!t) return new Response(JSON.stringify({ message: 'Task not found.' }), { status: 400 });
+    const pid = id(); db.projects.push({ id: pid, user_id: t.user_id, name: t.title, kind: t.steps_in_order ? 'sequential' : 'parallel', status: 'active', folder_id: null, sort: 99, created_at: new Date().toISOString() });
+    db.tasks.filter((x) => x.parent_id === t.id).forEach((x) => { x.parent_id = null; x.project_id = pid; });
+    const follow = (pidOf) => db.tasks.filter((x) => x.parent_id && db.tasks.find((y) => y.id === x.parent_id)?.project_id === pid).forEach((x) => { x.project_id = pid; });
+    follow(); follow(); follow();
+    Object.assign(t, { dropped_at: new Date().toISOString(), completion_note: `Became the project “${t.title}”` });
+    return new Response(JSON.stringify(pid), { status: 200 });
+  }
   if (String(url).includes('/rest/v1/rpc/')) { rpcCalls.push({ fn: String(url).split('/rpc/')[1], body: JSON.parse(init.body) }); return new Response('{}', { status: 200 }); }
   const u = new URL(url); const table = u.pathname.split('/').pop();
   const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','or'].includes(k));
@@ -60,6 +70,20 @@ globalThis.fetch = async (url, init = {}) => {
   const body = init.body ? JSON.parse(init.body) : null;
   const res = (d, s = 200) => new Response(d === null ? null : JSON.stringify(d), { status: s });
   if (m === 'GET') return res(rows.filter((r) => match(r) && orMatch(r)));
+  // Mirror of tasks_tree_guard / tasks_tree_follow: loops, 4 levels, steps live in their parent's project.
+  const depth = (tid) => { let d = 0; for (let p = tid; p && d < 12; d++) p = db.tasks.find((x) => x.id === p)?.parent_id; return d; };
+  const height = (tid) => { const k = db.tasks.filter((x) => x.parent_id === tid); return k.length ? 1 + Math.max(...k.map((x) => height(x.id))) : 0; };
+  const guard = (row, patch) => {
+    if (table !== 'tasks' || !patch || !('parent_id' in patch || 'project_id' in patch) || !(patch.parent_id ?? row.parent_id)) return null;
+    const pid = patch.parent_id ?? row.parent_id;
+    for (let p = pid, i = 0; p && i < 12; i++) { if (p === row.id) return 'A task can’t be a step of one of its own steps.'; p = db.tasks.find((x) => x.id === p)?.parent_id; }
+    if (depth(pid) + 1 + (row.id ? height(row.id) : 0) > 4) return 'Steps can go 4 levels deep. Turn the big step into a project instead.';
+    patch.project_id = db.tasks.find((x) => x.id === pid).project_id; patch.in_inbox = false;
+    return null;
+  };
+  const follow = (r) => db.tasks.filter((x) => x.parent_id === r.id && x.project_id !== r.project_id).forEach((x) => { x.project_id = r.project_id; follow(x); });
+  if (m === 'POST' && table === 'tasks') for (const b of (Array.isArray(body) ? body : [body])) { const e = guard({}, b); if (e) return res({ message: e }, 400); }
+  if (m === 'PATCH' && table === 'tasks') for (const r of rows.filter(match)) { const b = { ...body }; const e = guard(r, b); if (e) return res({ message: e }, 400); Object.assign(r, b); follow(r); }
   if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
   if (m === 'PATCH') { rows.filter(match).forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); return res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
@@ -80,7 +104,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 29 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 29 tools, no internals leaked');
+assert(list.body.result.tools.length === 31 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 31 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -154,7 +178,7 @@ const sub = await tool('capture', { title: 'Get meter number' });
 const subbed = await tool('update_task', { id: sub.id, project: 'Click Plumbing Co', parent: cap.id, add_tags: ['Phone'] });
 assert(subbed.parent_id === cap.id && subbed.project === 'Click Plumbing Co' && !subbed.in_inbox && subbed.tags.join() === 'Phone', 'update_task: subtask + add_tags');
 const groupView = await tool('get_task', { id: cap.id });
-assert(groupView.sub_actions && groupView.sub_actions[0].id === sub.id, 'get_task lists sub-actions of a group');
+assert(groupView.steps && groupView.steps[0].id === sub.id && groupView.progress.total === 1, 'get_task lists steps with progress');
 const pruned = await tool('update_task', { id: sub.id, remove_tags: ['phone'], project: null });
 assert(pruned.tags.length === 0 && !pruned.parent_id && pruned.in_inbox, 'update_task: removing project+tags returns item to Inbox (and detaches parent)');
 const dropped = await tool('update_task', { id: sub.id, status: 'dropped' });
@@ -406,6 +430,53 @@ assert(rm.archived && db.attachments.find((x) => x.id === att3.id).archived_at, 
 assert((await tool('get_task', { id: oneShot.id })).attachments.length === 1, 'archived attachment hidden');
 await tool('remove_attachment', { id: att3.id, restore: true });
 assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'restore brings it back');
+
+// ---------- steps ("eat the elephant") ----------
+{
+  const big = await tool('capture', { title: 'Build a 2m telescope' });
+  const bd = await tool('break_down', { id: big.id, steps: ['Research mirror grinding', ' ', 'Order a mirror blank', 'Grind the mirror'], in_order: true });
+  assert(bd.steps.length === 3 && bd.steps.map((x) => x.title).join('|') === 'Research mirror grinding|Order a mirror blank|Grind the mirror' && bd.steps_in_order && bd.progress.total === 3, 'break_down adds steps in order (blank lines skipped)');
+  assert(bd.steps.every((x) => !x.in_inbox), 'steps are not Inbox items');
+  const grind = bd.steps[2];
+  const bd2 = await tool('break_down', { id: grind.id, steps: ['Rough grind', 'Polish'] });
+  const tree = await tool('get_task', { id: big.id });
+  assert(tree.steps[2].steps.length === 2 && tree.progress.total === 4, 'nested steps; progress counts the smallest steps');
+  const rough = bd2.steps[0];
+  const partOf = await tool('get_task', { id: rough.id });
+  assert(partOf.part_of.map((x) => x.title).join(' < ') === 'Grind the mirror < Build a 2m telescope', 'get_task shows what a step is part of');
+  const again = await tool('break_down', { id: big.id, steps: ['Build the tube'] });
+  assert(again.steps[3].title === 'Build the tube' && db.tasks.find((x) => x.id === again.steps[3].id).sort > db.tasks.find((x) => x.id === grind.id).sort, 'break_down appends after existing steps');
+  // Availability: in order, only the first open step is available (at every level).
+  await tool('create_project', { name: 'Telescope shop' });
+  await tool('update_task', { id: big.id, project: 'Telescope shop' });
+  const bigPid = db.tasks.find((y) => y.id === big.id).project_id;
+  assert(bigPid && db.tasks.filter((x) => x.parent_id === grind.id).every((x) => x.project_id === bigPid), 'moving a task takes all its steps along');
+  const avail = async () => (await tool('list_tasks', { project: 'Telescope shop', available_only: true })).items.map((x) => x.title);
+  let av = await avail();
+  assert(av.includes('Research mirror grinding') && !av.includes('Order a mirror blank') && !av.includes('Rough grind') && !av.includes('Build a 2m telescope'), 'available_only: in-order steps wait their turn; a task with steps is not itself available');
+  await tool('update_task', { id: big.id, steps_in_order: false });
+  av = await avail();
+  assert(av.includes('Order a mirror blank') && av.includes('Rough grind') && !av.includes('Grind the mirror'), 'steps_in_order off: all leaf steps available');
+  await tool('update_task', { id: grind.id, defer: '2099-01-01' });
+  av = await avail();
+  assert(!av.includes('Rough grind'), 'a deferred step hides its own steps');
+  await tool('update_task', { id: grind.id, defer: null });
+  // Move under any open task; loops and depth are refused.
+  const loose = await tool('capture', { title: 'Buy grit' });
+  const moved = await tool('update_task', { id: loose.id, parent: rough.id });
+  assert(moved.parent_id === rough.id && moved.project_id === bigPid && !moved.in_inbox, 'update_task parent: any open task; it joins that project');
+  let err = '';
+  try { await tool('break_down', { id: loose.id, steps: ['Too deep'] }); } catch (e) { err = e.message; }
+  assert(/4 levels/.test(err), 'a 5th level is refused');
+  err = '';
+  try { await tool('update_task', { id: big.id, parent: rough.id }); } catch (e) { err = e.message; }
+  assert(/own steps/.test(err), 'a loop is refused');
+  // Convert to project.
+  const conv = await tool('convert_to_project', { id: big.id });
+  assert(conv.name === 'Build a 2m telescope' && conv.actions.length === 4 && conv.actions.every((x) => !x.parent_id), 'convert_to_project: steps become the project\'s actions');
+  assert(db.tasks.find((x) => x.id === big.id).dropped_at && /Became the project/.test(db.tasks.find((x) => x.id === big.id).completion_note), 'the task is dropped with a note, not deleted');
+  assert(db.tasks.find((x) => x.id === rough.id).project_id === conv.id, 'deeper steps come along into the project');
+}
 
 // ---------- delivery log, /push/test, queued tests, history ----------
 db.push_log.length = 0;
