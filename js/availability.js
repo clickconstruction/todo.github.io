@@ -1,5 +1,5 @@
 // What can be worked on right now. The MCP server mirrors these rules (mcp/src/index.js).
-//   available = open, not deferred, its project is active, and not blocked.
+//   available = open, not deferred, its project is active and not deferred, and not blocked.
 //   blocked   = it's a group with open children (do the children instead), or it sits
 //               in a sequential project behind the first open top-level item.
 // Groups themselves are parallel: every open child of an unblocked group is available.
@@ -39,7 +39,7 @@ export function isBlocked(t) {
 export function isAvailable(t) {
   if (!isOpen(t) || isDeferred(t)) return false;
   const p = projectOf(t);
-  if (p && p.status !== 'active') return false;
+  if (p && (p.status !== 'active' || isDeferred(p))) return false; // a deferred project hides its actions
   return !isBlocked(t);
 }
 

@@ -45,8 +45,8 @@ globalThis.fetch = async (url, init = {}) => {
   const body = init.body ? JSON.parse(init.body) : null;
   const res = (d, s = 200) => new Response(d === null ? null : JSON.stringify(d), { status: s });
   if (m === 'GET') return res(rows.filter((r) => match(r) && orMatch(r)));
-  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
-  if (m === 'PATCH') { rows.filter(match).forEach(r => Object.assign(r, body)); return res(null, 204); }
+  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
+  if (m === 'PATCH') { rows.filter(match).forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); return res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
 };
 const env = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SECRET_KEY: 'sb_secret_test', TIMEZONE: 'America/Chicago' };
@@ -290,4 +290,30 @@ const fallback = (await tool('get_task', { id: oneShot.id })).place;
 assert(fallback && fallback.name === 'Office' && fallback.inherited_from === 'tag Phone', 'archived own place stops applying; falls back to an inherited place (tag before project)');
 const cleared = await tool('update_task', { id: looked.id, place: null });
 assert(!cleared.place && db.tasks.find((t) => t.id === looked.id).location_trigger === null, 'place: null clears place and alert');
+
+// ---------- inspector parity 1 via MCP ----------
+const inWeek = (n) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(Date.now() + n * 86400000)).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
+const today0 = localToday();
+const np = await tool('create_project', { name: 'Kitchen remodel', due: today0, planned: inWeek(-1), estimate_minutes: 600, review_every: 2, review_unit: 'week' });
+assert(np.due === today0 && np.planned === inWeek(-1) && np.estimate_minutes === 600 && np.review.every === 2 && np.review.unit === 'week', 'create_project with due, planned, duration, review cadence');
+assert(np.created_at && np.changed_at !== undefined, 'projects report created_at / changed_at');
+const fcP = await tool('forecast', { days: 3 });
+assert(fcP.days[today0].projects.some((p) => p.name === 'Kitchen remodel'), 'forecast lists a project due today');
+const tdP = await tool('today', {});
+assert(tdP.projects_due.some((p) => p.name === 'Kitchen remodel' && !p.overdue), 'today lists projects due today');
+const up2 = await tool('update_project', { project: 'Kitchen remodel', next_review: '2027-01-15', review_unit: 'month', review_every: 1 });
+assert(up2.review.next_review === '2027-01-15' && up2.review.unit === 'month', 'update_project sets next review date and unit');
+let bad2 = null; try { await tool('update_project', { project: 'Kitchen remodel', review_unit: 'fortnight' }); } catch (x) { bad2 = x.message; }
+assert(/review_unit/.test(bad2 || ''), 'bad review_unit rejected');
+const kitchenTask = await tool('capture', { title: 'Pick cabinets', project: 'Kitchen remodel' });
+assert((await tool('list_tasks', { project: 'Kitchen remodel', available_only: true })).count === 1, 'action available in an undeferred project');
+await tool('update_project', { project: 'Kitchen remodel', defer: inWeek(7) });
+assert((await tool('list_tasks', { project: 'Kitchen remodel', available_only: true })).count === 0, 'deferring the project hides its actions');
+const closedP = await tool('update_project', { project: 'Kitchen remodel', status: 'completed', completed_at: '2026-09-01' });
+assert(closedP.status === 'completed' && closedP.completed_at.startsWith('2026-09-01'), 'backdated project completion');
+const backT = await tool('update_task', { id: kitchenTask.id, completed_at: '2026-08-30' });
+assert(backT.status === 'completed' && backT.completed_at.startsWith('2026-08-30'), 'update_task completed_at backdates (implies completed)');
+const droppedT = await tool('update_task', { id: kitchenTask.id, dropped_at: '2026-08-31T15:00:00Z' });
+assert(droppedT.status === 'dropped' && droppedT.dropped_at === '2026-08-31T15:00:00.000Z' && !droppedT.completed_at, 'update_task dropped_at backdates a drop');
+assert(backT.changed_at !== undefined && backT.created_at, 'tasks report created_at / changed_at');
 console.log('ALL PASSED');

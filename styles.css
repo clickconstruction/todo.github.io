@@ -442,3 +442,11 @@ h1.review { color: #3b82f6; }
 .errand-order { padding-left: 22px; }
 .errand-result { display: grid; gap: 10px; }
 .errand-result a.btn { text-align: center; text-decoration: none; }
+
+/* Added / Changed footer */
+.stamps { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.review-block { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 12px; margin: 0; display: grid; gap: 10px; min-width: 0; }
+.review-block legend { font-size: 13px; font-weight: 600; color: var(--muted); padding: 0 4px; }
+.review-every { display: flex; gap: 8px; align-items: center; }
+.review-every input { width: 5.5em; }
+.review-every select { width: auto; flex: 1; }

@@ -278,7 +278,9 @@ class Api {
       completed_at: t.completed_at,
       completion_note: t.completion_note || undefined,
       parent_id: t.parent_id || undefined,
+      dropped_at: t.dropped_at || undefined,
       created_at: t.created_at,
+      changed_at: t.updated_at,
     }));
   }
 
@@ -378,7 +380,7 @@ function availabilityOf(tasks, projects, nowIso = new Date().toISOString()) {
   const available = (t) => {
     if (!isOpenT(t) || (t.defer_at && t.defer_at > nowIso)) return false;
     const p = t.project_id && projectById.get(t.project_id);
-    if (p && p.status !== 'active') return false;
+    if (p && (p.status !== 'active' || (p.defer_at && p.defer_at > nowIso))) return false; // deferred project hides its actions
     if (hasOpenKids.has(t.id)) return false;
     if (p && heads.has(p.id)) {
       const top = t.parent_id ? byIdT.get(t.parent_id) : t;
@@ -465,6 +467,8 @@ const TOOLS = [
         due_today: shapedDue.filter((_, i) => due[i].due_at >= startOfToday),
         planned: await api.shape(planned.filter((t) => !dueIds.has(t.id))),
         flagged: await api.shape(flagged.filter((t) => !dueIds.has(t.id) && !planned.some((p) => p.id === t.id))),
+        projects_due: (await api.q(`projects?${api.u}&status=in.(active,on_hold)&due_at=lt.${endOfToday}&order=due_at.asc&select=id,name,due_at`))
+          .map((p) => ({ id: p.id, name: p.name, due: localDate(p.due_at, api.tz), overdue: p.due_at < startOfToday })),
       };
     },
   },
@@ -550,11 +554,18 @@ const TOOLS = [
       const end = zonedToIso(endDay, 24, api.tz);
       const rows = await api.q(`tasks?${api.u}&${OPEN}&or=(due_at.lt.${end},planned_at.lt.${end},defer_at.lt.${end})&select=*`);
       const items = await api.shape(rows);
-      const out = { today, past: { overdue: [], planned_earlier: [] }, days: {} };
+      const projects = await api.q(`projects?${api.u}&status=in.(active,on_hold)&or=(due_at.lt.${end},planned_at.lt.${end})&select=id,name,due_at,planned_at,status`);
+      const out = { today, past: { overdue: [], planned_earlier: [], overdue_projects: [] }, days: {} };
       for (let i = 0; i < days; i++) {
         const d = localDate(new Date(Date.parse(start) + i * 86400000 + 12 * 3600000).toISOString(), api.tz);
-        out.days[d] = { due: [], planned: [], becomes_available: [] };
+        out.days[d] = { due: [], planned: [], becomes_available: [], projects: [] };
       }
+      projects.forEach((p) => {
+        const due = localDate(p.due_at, api.tz); const planned = localDate(p.planned_at, api.tz);
+        const row = { id: p.id, name: p.name, due, planned };
+        if (due && due < today) out.past.overdue_projects.push(row);
+        [due, planned].filter((d, i, a) => d && a.indexOf(d) === i).forEach((d) => { if (out.days[d]) out.days[d].projects.push(row); });
+      });
       items.forEach((t) => {
         if (t.due && t.due < today) out.past.overdue.push(t);
         else if (t.planned && t.planned < today && !(t.due && t.due < today)) out.past.planned_earlier.push(t);
@@ -668,6 +679,8 @@ const TOOLS = [
         defer: { type: ['string', 'null'], description: 'YYYY-MM-DD (hidden until then) or null' },
         status: { type: 'string', enum: ['open', 'completed', 'dropped'], description: 'Only change when the user says so' },
         completion_note: { type: 'string' },
+        completed_at: { type: 'string', description: 'When it was completed (ISO time or YYYY-MM-DD), to backdate; implies status completed' },
+        dropped_at: { type: 'string', description: 'When it was dropped (ISO time or YYYY-MM-DD), to backdate; implies status dropped' },
         estimate_minutes: { type: ['integer', 'null'], description: 'How long it takes, in minutes; null to clear' },
         move: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'Reorder among its siblings (same project and parent). Order decides the next action in sequential projects.' },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
@@ -689,9 +702,12 @@ const TOOLS = [
       if (a.completion_note !== undefined) patch.completion_note = String(a.completion_note).trim();
       if (a.estimate_minutes !== undefined) patch.estimate_minutes = a.estimate_minutes === null ? null : Math.max(0, Math.round(Number(a.estimate_minutes)));
       Object.assign(patch, await api.locationPatch(a));
+      if (a.completed_at && a.status === undefined) a.status = 'completed';
+      if (a.dropped_at && a.status === undefined) a.status = 'dropped';
       if (a.status !== undefined) {
-        patch.completed_at = a.status === 'completed' ? (task.completed_at || new Date().toISOString()) : null;
-        patch.dropped_at = a.status === 'dropped' ? (task.dropped_at || new Date().toISOString()) : null;
+        const at = (v, fallback) => (v ? zonedToIso(v, 12, api.tz) : fallback || new Date().toISOString());
+        patch.completed_at = a.status === 'completed' ? at(a.completed_at, task.completed_at) : null;
+        patch.dropped_at = a.status === 'dropped' ? at(a.dropped_at, task.dropped_at) : null;
       }
       const projectId = patch.project_id !== undefined ? patch.project_id : task.project_id;
       if (a.parent !== undefined) {
@@ -787,7 +803,7 @@ const TOOLS = [
   },
   {
     name: 'list_projects',
-    description: 'List projects with their folder, status and number of open actions.',
+    description: 'List projects with folder, status, type, dates (defer/planned/due), duration, review cadence and dates, open action count and next action.',
     inputSchema: { type: 'object', properties: { include_inactive: { type: 'boolean', default: false, description: 'Include completed and dropped projects' } } },
     async run(api, { include_inactive = false }) {
       const [projects, folders, open] = await Promise.all([
@@ -799,12 +815,9 @@ const TOOLS = [
       return projects.map((p) => {
         const next = p.status === 'active' ? nextFor(p.id) : null;
         return {
-          id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, flagged: p.flagged,
-          notes: p.notes || undefined,
-          folder: (folders.find((f) => f.id === p.folder_id) || {}).name || null,
+          ...projectOut(api, p, folders),
           open_actions: open.filter((t) => t.project_id === p.id).length,
           next_action: next ? { id: next.id, title: next.title } : null,
-          review_every_days: p.review_every_days, last_reviewed: localDate(p.last_reviewed_at, api.tz), next_review: localDate(p.next_review_at, api.tz),
         };
       });
     },
@@ -818,16 +831,25 @@ const TOOLS = [
         name: { type: 'string' }, folder: { type: 'string' }, notes: { type: 'string' },
         kind: { type: 'string', enum: ['parallel', 'sequential', 'single_actions'], description: 'parallel (default): all actions available; sequential: only the next one; single_actions: a list of unrelated actions' },
         complete_with_last: { type: 'boolean', description: 'Complete the project automatically when its last action is done' },
+        defer: { type: ['string', 'null'], description: 'YYYY-MM-DD: the project and its actions are hidden until then; null to clear' },
+        planned: { type: ['string', 'null'], description: 'YYYY-MM-DD when the user intends to work on it; null to clear' },
+        due: { type: ['string', 'null'], description: 'YYYY-MM-DD hard deadline for the whole project; null to clear' },
+        estimate_minutes: { type: ['integer', 'null'], description: 'Rough total duration in minutes; null to clear' },
+        review_every: { type: 'integer', description: 'Review cadence number, with review_unit (e.g. 2 + week = every 2 weeks)' },
+        review_unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
+        next_review: { type: ['string', 'null'], description: 'YYYY-MM-DD next review date; null to recompute from the cadence' },
+        completed_at: { type: 'string', description: 'When it was completed/dropped (ISO time or YYYY-MM-DD), to backdate a closed project' },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
       },
       required: ['name'],
     },
-    async run(api, { name, folder, notes = '', kind = 'parallel', complete_with_last = false, ...loc }) {
+    async run(api, { name, folder, notes = '', kind = 'parallel', complete_with_last = false, ...more }) {
       const folder_id = folder ? await api.resolveFolder(folder) : null;
-      const [row] = await api.q('projects', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name: String(name).trim(), notes, folder_id, kind, complete_with_last: !!complete_with_last, ...(await api.locationPatch(loc)) } });
-      return { id: row.id, name: row.name, folder: folder || null, status: row.status, kind: row.kind, complete_with_last: row.complete_with_last };
+      const body = { user_id: api.userId, name: String(name).trim(), notes, folder_id, kind, complete_with_last: !!complete_with_last, ...(await api.locationPatch(more)), ...projectPatch(api, more) };
+      const [row] = await api.q('projects', { method: 'POST', prefer: 'return=representation', body });
+      return projectOut(api, row, folder ? [{ id: folder_id, name: folder }] : []);
     },
   },
   {
@@ -845,7 +867,15 @@ const TOOLS = [
         complete_with_last: { type: 'boolean' },
         flagged: { type: 'boolean', description: 'Flagged projects put all their actions in the Flagged list' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Replaces the project tags; its actions inherit them' },
-        review_every_days: { type: 'integer', description: 'Review interval in days (7 = weekly, 30 = monthly)' },
+        review_every_days: { type: 'integer', description: 'Review interval in days (older form; prefer review_every + review_unit)' },
+        defer: { type: ['string', 'null'], description: 'YYYY-MM-DD: the project and its actions are hidden until then; null to clear' },
+        planned: { type: ['string', 'null'], description: 'YYYY-MM-DD when the user intends to work on it; null to clear' },
+        due: { type: ['string', 'null'], description: 'YYYY-MM-DD hard deadline for the whole project; null to clear' },
+        estimate_minutes: { type: ['integer', 'null'], description: 'Rough total duration in minutes; null to clear' },
+        review_every: { type: 'integer', description: 'Review cadence number, with review_unit (e.g. 2 + week = every 2 weeks)' },
+        review_unit: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
+        next_review: { type: ['string', 'null'], description: 'YYYY-MM-DD next review date; null to recompute from the cadence' },
+        completed_at: { type: 'string', description: 'When it was completed/dropped (ISO time or YYYY-MM-DD), to backdate a closed project' },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
@@ -862,7 +892,7 @@ const TOOLS = [
       if (a.kind !== undefined) patch.kind = a.kind;
       if (a.complete_with_last !== undefined) patch.complete_with_last = !!a.complete_with_last;
       if (a.flagged !== undefined) patch.flagged = !!a.flagged;
-      Object.assign(patch, await api.locationPatch(a));
+      Object.assign(patch, await api.locationPatch(a), projectPatch(api, a));
       if (a.review_every_days !== undefined) patch.review_every_days = Math.min(3650, Math.max(1, Math.round(Number(a.review_every_days))));
       if (Array.isArray(a.tags)) {
         const tagIds = [];
@@ -876,7 +906,7 @@ const TOOLS = [
       const { tags: allTags, tagLabel } = await api.lookups();
       const pt = (await api.q(`project_tags?${api.u}&project_id=eq.${id}&select=tag_id`)).map((l) => allTags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel);
       const place = p.place_id ? (await api.q(`places?${api.u}&id=eq.${p.place_id}&select=*`))[0] : null;
-      return { id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, flagged: p.flagged, tags: pt, folder: folder ? folder.name : null, notes: p.notes || undefined,
+      return { ...projectOut(api, p, folder ? [{ id: p.folder_id, name: folder.name }] : []), tags: pt,
         place: place ? { name: place.name, alert: p.location_trigger, radius_m: p.location_radius_m || place.radius_m } : null };
     },
   },
@@ -1083,7 +1113,7 @@ const TOOLS = [
       const data = await loadPlaceData((path) => api.q(path), api.userId);
       const resolve = makePlaceResolver(data);
       const full = await api.q(`tasks?${api.u}&${OPEN}&select=*`);
-      const { available } = availabilityOf(full, await api.q(`projects?${api.u}&select=id,status,kind`));
+      const { available } = availabilityOf(full, await api.q(`projects?${api.u}&select=id,status,kind,defer_at`));
       const byPlace = new Map();
       full.forEach((t) => {
         if (available_only && !available(t)) return;
@@ -1104,6 +1134,37 @@ const TOOLS = [
     },
   },
 ];
+
+// ---------- projects ----------
+// Date/duration/review/completion arguments shared by create_project and update_project.
+function projectPatch(api, a) {
+  const patch = {};
+  if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, 0, api.tz);
+  if (a.planned !== undefined) patch.planned_at = zonedToIso(a.planned, 9, api.tz);
+  if (a.due !== undefined) patch.due_at = zonedToIso(a.due, 17, api.tz);
+  if (a.estimate_minutes !== undefined) patch.estimate_minutes = a.estimate_minutes === null ? null : Math.max(0, Math.round(Number(a.estimate_minutes)));
+  if (a.review_every !== undefined) patch.review_every = Math.min(999, Math.max(1, Math.round(Number(a.review_every))));
+  if (a.review_unit !== undefined) {
+    if (!['day', 'week', 'month', 'year'].includes(a.review_unit)) throw new Error('review_unit must be day, week, month or year');
+    patch.review_unit = a.review_unit;
+  }
+  if (a.next_review !== undefined) patch.next_review_at = a.next_review === null ? null : zonedToIso(a.next_review, 0, api.tz);
+  if (a.completed_at !== undefined) patch.completed_at = zonedToIso(a.completed_at, 12, api.tz);
+  return patch;
+}
+function projectOut(api, p, folders = []) {
+  return {
+    id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, flagged: p.flagged,
+    notes: p.notes || undefined,
+    folder: (folders.find((f) => f.id === p.folder_id) || {}).name || null,
+    defer: localDate(p.defer_at, api.tz), planned: localDate(p.planned_at, api.tz), due: localDate(p.due_at, api.tz),
+    estimate_minutes: p.estimate_minutes ?? undefined,
+    review: { every: p.review_every, unit: p.review_unit, last_reviewed: localDate(p.last_reviewed_at, api.tz), next_review: localDate(p.next_review_at, api.tz) },
+    review_every_days: p.review_every_days, last_reviewed: localDate(p.last_reviewed_at, api.tz), next_review: localDate(p.next_review_at, api.tz),
+    completed_at: p.completed_at || undefined,
+    created_at: p.created_at, changed_at: p.updated_at,
+  };
+}
 
 // ---------- places ----------
 function metersBetween(a, b) {

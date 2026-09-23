@@ -36,7 +36,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands };
+  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -689,4 +689,118 @@ async function errands(check) {
   const link = $('[data-maps-link]');
   check('opens Google Maps directions with waypoints and a round trip', link && link.href.startsWith('https://www.google.com/maps/dir/?api=1') && link.href.includes('waypoints=') && link.target === '_blank');
   $('#sheet').close();
+}
+
+// Inspector parity 1: duration +1m, editable completed/dropped times, Added/Changed,
+// project dates + duration, review cadence in units with an editable next review date.
+async function parity(check) {
+  const { db } = await import('/js/state.js');
+  const task = (id) => db.tasks.find((t) => t.id === id);
+  const proj = (id) => db.projects.find((p) => p.id === id);
+  const { isAvailable } = await import('/js/availability.js');
+
+  // Action: +1m duration, Added/Changed.
+  await go('#project/p3');
+  $('[data-task="t9"] .row-title').click();
+  await wait(100);
+  let f = $('#editor');
+  check('duration has +1m +5m +15m +1h', $$('[data-qe]', f).map((b) => b.textContent).join() === '+1m,+5m,+15m,+1h,✕');
+  check('editor shows Added and Changed', has('#editor .stamps', 'added', 'changed'));
+  $('[data-qe="1"]', f).click(); $('[data-qe="5"]', f).click();
+  f.requestSubmit();
+  await wait(200);
+  check('+1m and +5m add up', task('t9').estimate_minutes === 6, task('t9').estimate_minutes);
+
+  // Backdate a completion.
+  $('[data-task="t9"] .row-title').click();
+  await wait(100);
+  f = $('#editor');
+  f.elements.status.value = 'completed';
+  f.elements.status.dispatchEvent(new Event('change', { bubbles: true }));
+  f.requestSubmit();
+  await wait(200);
+  check('completing via status stamps a time', !!task('t9').completed_at);
+  const { openEditor } = await import('/js/editors/task.js');
+  openEditor(task('t9'));
+  f = $('#editor');
+  check('completed time is editable', !!f.elements.completed_at_edit);
+  f.elements.completed_at_edit.value = '2026-09-01T08:30';
+  f.requestSubmit();
+  await wait(200);
+  check('backdated completion saved', new Date(task('t9').completed_at).getTime() === new Date('2026-09-01T08:30').getTime(), task('t9').completed_at);
+
+  // Dropped time editable.
+  openEditor(task('t5'));
+  f = $('#editor');
+  f.elements.status.value = 'dropped';
+  f.elements.status.dispatchEvent(new Event('change', { bubbles: true }));
+  f.requestSubmit();
+  await wait(200);
+  openEditor(task('t5'));
+  f = $('#editor');
+  check('dropped time is editable', !!f.elements.dropped_at_edit && !$('[data-dropped-box]', f).hidden);
+  f.elements.dropped_at_edit.value = '2026-08-15T12:00';
+  f.requestSubmit();
+  await wait(200);
+  check('backdated drop saved', new Date(task('t5').dropped_at).getTime() === new Date('2026-08-15T12:00').getTime());
+
+  // Project: dates, duration, review cadence.
+  const { openProjectEditor } = await import('/js/editors/project.js');
+  openProjectEditor(proj('p1'));
+  f = $('#project-form');
+  check('project editor has defer/planned/due, duration, review', ['defer_at', 'planned_at', 'due_at', 'estimate_minutes', 'next_review_at', 'review_every', 'review_unit'].every((n) => f.elements[n]));
+  check('project editor shows last reviewed and Added/Changed', has('#project-form', 'last reviewed', 'added', 'changed'));
+  $('[data-qd="due_at"][data-step="today"]', f).click();
+  f.elements.estimate_minutes.value = '120';
+  f.elements.review_every.value = '2';
+  f.elements.review_unit.value = 'month';
+  f.requestSubmit();
+  await wait(200);
+  const p1 = proj('p1');
+  check('project due + duration saved', !!p1.due_at && new Date(p1.due_at).getHours() === 17 && p1.estimate_minutes === 120);
+  check('review every 2 months', p1.review_every === 2 && p1.review_unit === 'month' && p1.review_every_days === 60);
+  const expected = new Date(p1.last_reviewed_at); expected.setUTCMonth(expected.getUTCMonth() + 2);
+  check('next review follows calendar months', Math.abs(new Date(p1.next_review_at) - expected) < 3 * 86400e3, p1.next_review_at);
+
+  openProjectEditor(proj('p1'));
+  f = $('#project-form');
+  f.elements.next_review_at.value = '2027-01-15';
+  f.requestSubmit();
+  await wait(200);
+  check('next review date can be set directly', proj('p1').next_review_at.startsWith(new Date(2027, 0, 15).toISOString().slice(0, 10)), proj('p1').next_review_at);
+  openProjectEditor(proj('p1'));
+  f = $('#project-form');
+  f.elements.notes.value = 'unrelated edit';
+  f.requestSubmit();
+  await wait(200);
+  check('unrelated edits keep the chosen review date', proj('p1').next_review_at.startsWith(new Date(2027, 0, 15).toISOString().slice(0, 10)));
+
+  // Forecast shows the project due today.
+  await go('#forecast');
+  check('forecast lists a project due today', has(undefined, 'projects', 'click plumbing'));
+
+  // Deferred project hides its actions.
+  check('before deferring, its first action is available', isAvailable(task('t4')));
+  openProjectEditor(proj('p2'));
+  f = $('#project-form');
+  $('[data-qd="defer_at"][data-step="+1w"]', f).click();
+  f.requestSubmit();
+  await wait(200);
+  check('deferred project hides its actions', !!proj('p2').defer_at && !isAvailable(task('t4')));
+  await go('#projects');
+  check('project row shows its defer date', !!$$('.group-row').find((a) => a.innerText.includes('End of Life') && a.innerText.includes('⏸') && a.innerText.includes('Deferred')));
+
+  // Backdate a project's completion.
+  openProjectEditor(proj('p5'));
+  f = $('#project-form');
+  f.elements.status.value = 'completed';
+  f.requestSubmit();
+  await wait(200);
+  openProjectEditor(proj('p5'));
+  f = $('#project-form');
+  check('project completed time editable', !!f.elements.completed_at_edit);
+  f.elements.completed_at_edit.value = '2026-07-04T10:00';
+  f.requestSubmit();
+  await wait(200);
+  check('backdated project completion saved', new Date(proj('p5').completed_at).getTime() === new Date('2026-07-04T10:00').getTime(), proj('p5').completed_at);
 }

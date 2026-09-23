@@ -1,8 +1,8 @@
 // Task editor: one form builder used by the pop-up sheet (phones, new items) and by the
 // desktop inspector panel (edits in place, saving as you go). Plus quick entry.
 import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, isOpen, taskSort, tagsFor } from '../state.js';
-import { fmtDateTime, fromDateInput, HOURS } from '../dates.js';
-import { dateField, estimateField, wireQuickButtons } from '../components.js';
+import { fromDateInput, fromDateTimeInput, HOURS } from '../dates.js';
+import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
 import { saveTask, capture, addSubAction } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { locationFieldHtml, wireLocationField } from './place.js';
@@ -32,9 +32,11 @@ function taskFieldsHtml(t, task) {
         <option value="open" ${!t.completed_at && !t.dropped_at ? 'selected' : ''}>Open</option>
         <option value="completed" ${t.completed_at ? 'selected' : ''}>Completed</option>
         <option value="dropped" ${t.dropped_at && !t.completed_at ? 'selected' : ''}>Dropped</option></select></label>
-      <div class="done-box" data-done-box ${t.completed_at ? '' : 'hidden'}><b>✓ Completed ${t.completed_at ? esc(fmtDateTime(t.completed_at)) : 'when you save'}</b>
+      <div class="done-box" data-done-box ${t.completed_at ? '' : 'hidden'}>
+        ${t.completed_at ? dateTimeField('completed_at_edit', '✓ Completed', t.completed_at) : '<b>✓ Completed when you save</b>'}
         <label>Completion note<textarea name="completion_note" placeholder="Outcome, who you spoke to, what's next…">${esc(t.completion_note || '')}</textarea></label></div>
-      ${t.dropped_at ? `<p class="view-sub" style="margin:0">Dropped ${esc(fmtDateTime(t.dropped_at))}</p>` : ''}` : ''}`;
+      <div data-dropped-box ${t.dropped_at && !t.completed_at ? '' : 'hidden'}>${t.dropped_at ? dateTimeField('dropped_at_edit', 'Dropped', t.dropped_at) : ''}</div>
+      ${stampsHtml(task)}` : ''}`;
 }
 
 const secondaryButtons = (task) => `
@@ -65,7 +67,10 @@ function wireTaskForm(form, t, task, onTagsChange) {
   form.elements.project_id.addEventListener('change', drawParents);
   const collectLocation = wireLocationField(form, onTagsChange);
   if (form.elements.status) {
-    form.elements.status.addEventListener('change', () => { $('[data-done-box]', form).hidden = form.elements.status.value !== 'completed'; });
+    form.elements.status.addEventListener('change', () => {
+      $('[data-done-box]', form).hidden = form.elements.status.value !== 'completed';
+      $('[data-dropped-box]', form).hidden = form.elements.status.value !== 'dropped';
+    });
   }
 
   return () => {
@@ -85,8 +90,11 @@ function wireTaskForm(form, t, task, onTagsChange) {
     if (f.has('status')) {
       const status = f.get('status');
       const cur = (task && byId(db.tasks, task.id)) || t;
-      fields.completed_at = status === 'completed' ? (cur.completed_at || new Date().toISOString()) : null;
-      fields.dropped_at = status === 'dropped' ? (cur.dropped_at || new Date().toISOString()) : null;
+      // Completed / dropped times are editable (backdate something you did yesterday).
+      const editedDone = f.get('completed_at_edit') ? fromDateTimeInput(f.get('completed_at_edit')) : null;
+      const editedDrop = f.get('dropped_at_edit') ? fromDateTimeInput(f.get('dropped_at_edit')) : null;
+      fields.completed_at = status === 'completed' ? (editedDone || cur.completed_at || new Date().toISOString()) : null;
+      fields.dropped_at = status === 'dropped' ? (editedDrop || cur.dropped_at || new Date().toISOString()) : null;
       fields.completion_note = status === 'completed' ? (f.get('completion_note') || '').trim() : (cur.completion_note || '');
     }
     return fields.title ? { fields, tagIds: selectedTags() } : null;

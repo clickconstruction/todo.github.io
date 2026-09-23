@@ -58,8 +58,15 @@ export function projectRow(p) {
   const count = c.overdue ? `<span class="count due">${c.overdue}</span>` : `<span class="count">${c.open || ''}</span>`;
   const next = p.status === 'active' ? nextAction(p) : null;
   const kindIcon = { sequential: '⇣', single_actions: '☰' }[p.kind] || '';
+  const dates = [
+    p.defer_at && isDeferred(p) ? `<span>⏸ ${esc(fmtDate(p.defer_at))}</span>` : '',
+    p.planned_at && p.status === 'active' ? `<span class="meta-planned ${isPlannedPast(p) ? 'past' : ''}">🗓 ${esc(fmtDate(p.planned_at))}</span>` : '',
+    p.due_at && ['active', 'on_hold'].includes(p.status) ? `<span class="meta-due ${isOverdue(p) ? 'overdue' : ''}">📅 ${esc(fmtDate(p.due_at))}</span>` : '',
+    p.estimate_minutes ? `<span class="meta-estimate">⏱ ${fmtMinutes(p.estimate_minutes)}</span>` : '',
+  ].filter(Boolean).join('');
   return `<a class="group-row ${muted ? 'muted' : ''}" href="#project/${p.id}"><span class="dot"></span>
     <span class="group-main"><span>${p.flagged ? '<span class="meta-flag" title="Flagged">⚑</span> ' : ''}${esc(p.name)}${kindIcon ? ` <span class="kind-icon" title="${p.kind.replace('_', ' ')}">${kindIcon}</span>` : ''}${p.status === 'active' ? '' : ` (${PROJECT_STATUSES.find(([v]) => v === p.status)[1].toLowerCase()})`}</span>
     ${projectTagsFor(p.id).length ? `<span class="group-tags">${projectTagsFor(p.id).map((tg) => `<span class="chip">${esc(tagLabel(tg))}</span>`).join('')}</span>` : ''}
-    ${next ? `<span class="group-sub">Next: ${esc(next.title)}</span>` : p.status === 'active' && c.open ? '<span class="group-sub">No available action</span>' : ''}</span>${count}</a>`;
+    ${dates ? `<span class="group-sub row-meta">${dates}</span>` : ''}
+    ${next ? `<span class="group-sub">Next: ${esc(next.title)}</span>` : p.status === 'active' && c.open ? `<span class="group-sub">${isDeferred(p) ? 'Deferred' : 'No available action'}</span>` : ''}</span>${count}</a>`;
 }

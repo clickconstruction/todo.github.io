@@ -40,6 +40,16 @@ export const fromDateInput = (v, hour) => {
   return new Date(y, m - 1, d, hour).toISOString();
 };
 
+// <input type=datetime-local> value <-> timestamptz (editing completed/dropped times).
+export const toDateTimeInput = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${toDateInput(iso)}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+export const fromDateTimeInput = (v) => (v ? new Date(v).toISOString() : null);
+export const fmtStamp = (iso) => new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+
 // One-tap date math for the quick buttons: steps from the field's current day, or today if empty.
 export function quickDate(currentInputValue, step) {
   const base = currentInputValue ? new Date(currentInputValue + 'T00:00') : startOfToday();

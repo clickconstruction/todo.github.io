@@ -5,6 +5,10 @@ import { insertFolder, updateProject, setLinks } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { locationFieldHtml, wireLocationField } from './place.js';
 import { PROJECT_KINDS } from '../availability.js';
+import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
+import { fromDateInput, fromDateTimeInput, toDateInput, fmtStamp, HOURS } from '../dates.js';
+
+export const REVIEW_UNITS = [['day', 'Days'], ['week', 'Weeks'], ['month', 'Months'], ['year', 'Years']];
 
 function projectFieldsHtml(p, project) {
   const folderOptions = db.folders.filter((f) => !f.archived_at || f.id === p.folder_id).sort(bySort)
@@ -23,9 +27,22 @@ function projectFieldsHtml(p, project) {
     <label class="flag-toggle"><input type="checkbox" name="flagged" ${p.flagged ? 'checked' : ''}> Flagged <span class="hint">its actions show in Flagged</span></label>
     ${tagPickerHtml('actions inherit these')}
     ${locationFieldHtml(p)}
+    ${dateField('defer_at', 'Defer until', p.defer_at)}
+    ${dateField('planned_at', 'Planned', p.planned_at)}
+    ${dateField('due_at', 'Due', p.due_at)}
+    ${estimateField(p.estimate_minutes)}
+    <fieldset class="review-block"><legend>Review</legend>
+      ${project ? dateField('next_review_at', 'Next review', p.next_review_at) : ''}
+      <label>Review every<span class="review-every">
+        <input type="number" name="review_every" min="1" max="999" inputmode="numeric" value="${p.review_every || 1}" aria-label="Review every">
+        <select name="review_unit" aria-label="Unit">${REVIEW_UNITS.map(([v, l]) => `<option value="${v}" ${(p.review_unit || 'week') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></span></label>
+      ${project ? `<p class="hint" style="margin:0">Last reviewed: ${p.last_reviewed_at ? esc(fmtStamp(p.last_reviewed_at)) : 'never'}</p>` : ''}
+    </fieldset>
     ${project ? `<label>Status<select name="status">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
     <label>Notes<textarea name="notes" placeholder="Purpose, what done looks like…">${esc(p.notes)}</textarea></label>
-    ${project ? '<p class="view-sub" style="margin:0">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>' : ''}`;
+    ${project && p.completed_at ? dateTimeField('completed_at_edit', p.status === 'dropped' ? 'Dropped' : 'Completed', p.completed_at) : ''}
+    ${project ? '<p class="view-sub" style="margin:0">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>' : ''}
+    ${stampsHtml(project)}`;
 }
 
 // Shared wiring; returns collect() → Promise<{ fields, tagIds } | null> (creates a new folder if asked).
@@ -38,6 +55,7 @@ function wireProjectForm(form, project, onTagsChange) {
   });
   const selectedTags = wireTagPicker(form, project ? db.projectTags.filter((x) => x.project_id === project.id).map((x) => x.tag_id) : [], onTagsChange);
   const collectLocation = wireLocationField(form, onTagsChange);
+  wireQuickButtons(form);
   form.addEventListener('change', (e) => {
     if (e.target.name === 'kind') $('.kind-hint', form).textContent = PROJECT_KINDS.find(([v]) => v === e.target.value)[2];
   });
@@ -51,7 +69,20 @@ function wireProjectForm(form, project, onTagsChange) {
     }
     const fields = { name: (f.get('name') || '').trim(), folder_id, notes: f.get('notes'), kind: f.get('kind') || 'parallel',
       complete_with_last: f.get('complete_with_last') === 'on', flagged: f.get('flagged') === 'on', ...collectLocation() };
+    Object.assign(fields, {
+      defer_at: fromDateInput(f.get('defer_at'), HOURS.defer_at),
+      planned_at: fromDateInput(f.get('planned_at'), HOURS.planned_at),
+      due_at: fromDateInput(f.get('due_at'), HOURS.due_at),
+      estimate_minutes: f.get('estimate_minutes') === '' ? null : Math.max(0, Math.round(Number(f.get('estimate_minutes')))),
+      review_every: Math.min(999, Math.max(1, Math.round(Number(f.get('review_every')) || 1))),
+      review_unit: f.get('review_unit') || 'week',
+    });
+    // Send the review date only when it was changed here, so an untouched date keeps following the cadence.
+    if (project && f.has('next_review_at') && f.get('next_review_at') !== toDateInput(project.next_review_at)) {
+      fields.next_review_at = fromDateInput(f.get('next_review_at'), 0);
+    }
     if (project) fields.status = f.get('status');
+    if (project && f.get('completed_at_edit') && ['completed', 'dropped'].includes(fields.status)) fields.completed_at = fromDateTimeInput(f.get('completed_at_edit'));
     return fields.name ? { fields, tagIds: selectedTags() } : null;
   };
 }

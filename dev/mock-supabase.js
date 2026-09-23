@@ -15,7 +15,9 @@
       defer_at: null, planned_at: null, due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app',
       sort: 0, created_at: at(-20), updated_at: at(-1), ...o });
     const P = (o) => ({ user_id: uid, folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false,
-      review_every_days: 7, last_reviewed_at: null, next_review_at: null, completed_at: null, sort: 0, created_at: at(-30), updated_at: at(-1), ...o });
+      review_every_days: 7, review_every: 1, review_unit: 'week', last_reviewed_at: null, next_review_at: null, completed_at: null, sort: 0,
+      defer_at: null, planned_at: null, due_at: null, estimate_minutes: null, place_id: null, location_trigger: null, location_radius_m: null,
+      created_at: at(-30), updated_at: at(-1), ...o });
     return {
       folders: [
         { id: 'f1', user_id: uid, name: 'PRIORITIES', sort: 0, archived_at: null, created_at: at(-40) },
@@ -71,14 +73,34 @@
 
   // ----- mirrored database rules -----
   const isOpen = (t) => !t.completed_at && !t.dropped_at;
-  function reviewSchedule(p) {
+  // Mirrors projects_review_schedule(): every N day|week|month|year (calendar months), days kept in step,
+  // an explicitly set next_review_at kept until the cadence or last review changes.
+  const UNIT_DAYS = { day: 1, week: 7, month: 30, year: 365 };
+  function reviewSchedule(p, before) {
+    const daysOnly = before ? p.review_every_days !== before.review_every_days && p.review_every === before.review_every && p.review_unit === before.review_unit
+      : (p.review_every || 1) === 1 && (p.review_unit || 'week') === 'week' && p.review_every_days && p.review_every_days !== 7;
+    if (daysOnly) {
+      const d = p.review_every_days;
+      p.review_unit = d % 365 === 0 ? 'year' : d % 30 === 0 ? 'month' : d % 7 === 0 ? 'week' : 'day';
+      p.review_every = d / UNIT_DAYS[p.review_unit];
+    }
+    p.review_every = p.review_every || 1; p.review_unit = p.review_unit || 'week';
+    p.review_every_days = Math.min(3650, p.review_every * UNIT_DAYS[p.review_unit]);
+    const cadence = !before || p.review_every !== before.review_every || p.review_unit !== before.review_unit || p.last_reviewed_at !== before.last_reviewed_at;
+    if (!cadence && p.next_review_at) return;
     const base = new Date(p.last_reviewed_at || p.created_at || now());
-    base.setDate(base.getDate() + (p.review_every_days || 7));
+    if (p.review_unit === 'month' || p.review_unit === 'year') {
+      const day = base.getUTCDate();
+      base.setUTCDate(1);
+      base.setUTCMonth(base.getUTCMonth() + p.review_every * (p.review_unit === 'year' ? 12 : 1));
+      const last = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 0)).getUTCDate();
+      base.setUTCDate(Math.min(day, last));
+    } else base.setDate(base.getDate() + p.review_every * UNIT_DAYS[p.review_unit]);
     p.next_review_at = base.toISOString();
   }
   function projectStatusChange(p, oldStatus) {
     const closed = (s) => s === 'completed' || s === 'dropped';
-    if (closed(p.status) && !closed(oldStatus)) p.completed_at = now();
+    if (closed(p.status) && !closed(oldStatus)) p.completed_at = p.completed_at || now();
     else if (!closed(p.status)) p.completed_at = null;
   }
   function taskRules(t, before) {
@@ -110,7 +132,8 @@
     tasks: () => ({ project_id: null, parent_id: null, in_inbox: true, notes: '', completion_note: '', flagged: false, defer_at: null, planned_at: null,
       due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null }),
     projects: () => ({ folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
-      last_reviewed_at: null, completed_at: null }),
+      review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null, defer_at: null, planned_at: null, due_at: null, estimate_minutes: null,
+      place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null }),
     folders: () => ({ archived_at: null }),
     tags: () => ({ parent_id: null, place_id: null, location_trigger: null, location_radius_m: null }),
     places: () => ({ address: '', google_place_id: null, radius_m: 402, notes: '', archived_at: null }),
@@ -165,7 +188,7 @@
         hit.forEach((r) => {
           const before = { ...r };
           Object.assign(r, st.payload, { updated_at: now() });
-          if (table === 'projects') { reviewSchedule(r); projectStatusChange(r, before.status); }
+          if (table === 'projects') { reviewSchedule(r, before); projectStatusChange(r, before.status); }
           if (table === 'tasks') taskRules(r, before);
         });
         return { data: hit.map(copy), error: null };
