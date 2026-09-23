@@ -1,6 +1,7 @@
 // Settings: agent access tokens (MCP), email-capture senders, account.
 import { sb, app, esc, run, toast, openSheet, $ } from '../state.js';
-import { fmtDate, fmtStamp } from '../dates.js';
+import { fmtDate } from '../dates.js';
+import { resultLines, stripIcon, when, timeOnly } from '../pushResult.js';
 
 const MCP_URL = 'https://mcp.todotooling.com/mcp';
 const CAPTURE_EMAIL = 'inbox@todotooling.com';
@@ -92,31 +93,47 @@ export async function addSender(form) {
 // ---------- Notifications: devices, tests, delivery history ----------
 const PUSH_TEST_URL = 'https://mcp.todotooling.com/push/test';
 const KIND_ICON = { test: '🔔', reminder: '⏰', place: '📍' };
+let thisEndpoint = null; // this browser's push subscription, to label "This device"
+
+async function findThisDevice() {
+  try {
+    if (!('serviceWorker' in navigator) || location.hostname === 'localhost') return;
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    const ep = sub ? sub.endpoint : null;
+    if (ep !== thisEndpoint) { thisEndpoint = ep; app.render(); }
+  } catch { /* not supported here */ }
+}
 
 function resultText(d) {
-  if (!d.sent_at) return `<span class="hint">Queued for ${esc(new Date(d.scheduled_for).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }))}</span>`;
-  if (!d.devices) return '<span class="warn">No devices to send to</span>';
-  return (d.results || []).map((r) => (r.status >= 200 && r.status < 300
-    ? `<span class="ok">✓ ${esc(r.device)}: accepted by ${esc(r.service.includes('apple') ? 'Apple' : r.service.includes('google') ? 'Google' : r.service.includes('mozilla') ? 'Mozilla' : r.service)}</span>`
-    : `<span class="warn">✕ ${esc(r.device)}: ${r.status || 'error'} ${esc(r.reason || '')}</span>`)).join('<br>');
+  if (!d.sent_at) {
+    const at = new Date(d.scheduled_for);
+    return at < Date.now() - 3600e3 ? '<div class="warn">Never sent (expired)</div>' : `<div class="hint">Queued for ${esc(timeOnly(d.scheduled_for))}</div>`;
+  }
+  return d.devices ? resultLines(d.results) : '<div class="warn">No devices to send to</div>';
 }
 
 function notificationsSection() {
-  const list = devices.map((d) => `<li class="row" style="cursor:default"><div class="row-main"><div class="row-title">${d.device === 'iPhone' ? '📱' : '💻'} ${esc(d.device)}</div>
+  findThisDevice();
+  const mine = window.__thisEndpoint || thisEndpoint;
+  const list = devices.map((d) => `<li class="row device-row" style="cursor:default"><div class="row-main"><div class="row-title">${d.device === 'iPhone' || d.device === 'Android' ? '📱' : '💻'} ${esc(d.device)}${d.endpoint === mine ? ' <span class="chip">This device</span>' : ''}</div>
       <div class="row-meta"><span>Added ${esc(fmtDate(d.created_at))}</span></div></div>
       <button class="btn small danger" data-remove-device="${d.id}">Remove</button></li>`).join('');
-  const status = testState ? `<div class="test-status" data-test-status>${testStatusHtml()}</div>` : '<div class="test-status" data-test-status hidden></div>';
-  const history = deliveries.map((d) => `<li><div><b>${KIND_ICON[d.kind] || '🔔'} ${esc(d.title || d.kind)}</b> <span class="hint">${esc(fmtStamp(d.sent_at || d.created_at))}</span></div>
+  const status = `<div class="test-status" data-test-status role="status" ${testState ? '' : 'hidden'}>${testStatusHtml()}</div>`;
+  const history = deliveries.map((d) => `<li><div class="delivery-title"><span class="icon">${KIND_ICON[d.kind] || '🔔'}</span><b>${esc(stripIcon(d.title) || d.kind)}</b></div>
+      <div class="hint">${esc(when(d.sent_at || d.created_at))}</div>
       <div class="delivery-result">${resultText(d)}</div></li>`).join('');
   return `<h2 class="section-title">Notifications</h2>
     <p class="view-sub">Devices that get reminders and place alerts. Set up a phone from <a href="#alerts">Alerts</a>.</p>
     ${list ? `<ul class="list">${list}</ul>` : '<p class="empty small">No devices yet. Open Todo Tooling on your iPhone → Alerts → Turn on alerts.</p>'}
-    <div class="test-buttons"><button class="btn" data-act="push-test-now" ${devices.length ? '' : 'disabled'}>Send test now</button>
-      <button class="btn" data-act="push-test-later" ${devices.length ? '' : 'disabled'}>Send test in 1 minute</button></div>
+    <div class="test-buttons"><button class="btn" data-act="push-test-now" ${devices.length && !testRunning() ? '' : 'disabled'}>Send test now</button>
+      <button class="btn" data-act="push-test-later" ${devices.length && !testRunning() ? '' : 'disabled'}>Send test in 1 minute</button></div>
     ${status}
-    <p class="hint">Accepted by Apple but nothing on your phone? Check that no Focus (Sleep, Do Not Disturb) is on, and that iPhone Settings → Notifications → Todo allows notifications.</p>
+    <p class="hint">Delivered but nothing on your phone? Check that no Focus (Sleep, Do Not Disturb) is on, and that iPhone Settings → Notifications → Todo allows notifications.</p>
     <details class="delivery-log" ${history ? 'open' : ''}><summary>Delivery history</summary>${history ? `<ul>${history}</ul>` : '<p class="hint">Nothing sent yet.</p>'}</details>`;
 }
+
+const testRunning = () => !!testState && testState.phase !== 'done';
 
 function testStatusHtml() {
   if (!testState) return '';
@@ -133,6 +150,7 @@ let ticker = null;
 function tick() {
   const el = document.querySelector('[data-test-status]');
   if (el) { el.hidden = !testState; el.innerHTML = testStatusHtml(); }
+  document.querySelectorAll('[data-act="push-test-now"], [data-act="push-test-later"]').forEach((b) => { b.disabled = !devices.length || testRunning(); });
   if (testState && testState.phase === 'counting' && Date.now() >= testState.until) testState.phase = 'waiting';
 }
 function startTicker() { clearInterval(ticker); ticker = setInterval(() => { tick(); if (!testState || testState.phase === 'done') clearInterval(ticker); }, 1000); tick(); }
@@ -151,7 +169,7 @@ export async function pushTestNow() {
   startTicker();
   try {
     const out = await callPushTest(0);
-    testState = { phase: 'done', text: out.devices ? resultText({ sent_at: 1, devices: out.devices, results: out.results }) : 'No devices to send to.' };
+    testState = { phase: 'done', text: out.devices ? resultText({ sent_at: 1, devices: out.devices, results: out.results }) : '<div class="warn">No devices to send to.</div>' };
   } catch (e) { testState = { phase: 'done', text: `<span class="warn">${esc(e.message)}</span>` }; }
   await loadSettings();
 }
@@ -161,6 +179,7 @@ export async function pushTestLater() {
     const out = await callPushTest(60);
     testState = { phase: 'counting', until: Date.now() + 60e3, id: out.queued };
     startTicker();
+    loadSettings(); // show the queued test in Delivery history right away
     // Watch for the queued row to be sent, then show its result.
     const started = Date.now();
     const poll = setInterval(async () => {

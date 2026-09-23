@@ -157,6 +157,7 @@ export function renderProjectInspector(container, project) {
       const row = await saveProject(project, data);
       container.dataset.key = `p:${row.id}:${row.updated_at}`;
       state.textContent = 'Saved ✓';
+      form.dispatchEvent(new Event('saved')); // refresh an open History
     } finally { delete container.dataset.saving; }
   };
   const soon = () => { clearTimeout(timer); state.textContent = 'Editing…'; timer = setTimeout(save, 400); };

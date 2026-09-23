@@ -197,6 +197,7 @@ export function renderTaskInspector(container, task) {
       const row = await saveWithDropUndo(byId(db.tasks, task.id) || task, data.fields, data.tagIds);
       container.dataset.key = `t:${row.id}:${row.updated_at}`;
       state.textContent = 'Saved ✓';
+      form.dispatchEvent(new Event('saved')); // refresh an open History
     } finally { delete container.dataset.saving; }
   };
   const soon = () => { clearTimeout(timer); state.textContent = 'Editing…'; timer = setTimeout(save, 400); };

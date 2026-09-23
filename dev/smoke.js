@@ -1087,12 +1087,28 @@ async function history(check) {
   box.open = true;
   box.dispatchEvent(new Event('toggle'));
   await wait(250);
-  check('history shows old → new with who', has('#editor .history-list', 'title', 'order fittings for jodi', '(rush)', 'by you') && has('#editor .history-list', 'due'));
+  check('history reads naturally, grouped by day, with who', has('#editor .history-list', 'today', 'title', 'order fittings for jodi', '(rush)', '· you') && has('#editor .history-list', 'due'));
   const filter = $('[data-history-filter]', f);
   filter.value = 'due_at';
-  filter.dispatchEvent(new Event('change'));
-  check('filter to one field', $$('#editor .history-list li').filter((li) => !li.hidden).every((li) => li.dataset.field === 'due_at'));
+  filter.dispatchEvent(new Event('change', { bubbles: true }));
+  const rowsShown = $$('#editor .history-list li:not(.history-day)');
+  check('filter to one field', rowsShown.length > 0 && rowsShown.every((li) => li.dataset.field === 'due_at') && !!$('#editor .history-day'));
   $('#sheet').close();
+
+  // Inspector: History refreshes after an in-place save.
+  window.__forceSheet = false; window.__forceWide = true;
+  const { select } = await import('/js/inspector.js');
+  await go('#project/p1');
+  select('task', 't2');
+  await wait(300);
+  const insBox = $('#inspector [data-history]');
+  insBox.open = true; insBox.dispatchEvent(new Event('toggle'));
+  await wait(250);
+  const before = $$('#inspector .history-list li:not(.history-day)').length;
+  $('#inspector [data-qe="15"]').click();
+  await wait(900);
+  check('inspector History refreshes after it saves', $$('#inspector .history-list li:not(.history-day)').length === before + 1 && has('#inspector .history-list', 'duration'), `${before} → ${$$('#inspector .history-list li:not(.history-day)').length}`);
+  window.__forceSheet = true; window.__forceWide = false;
 
   // Settings: devices + tests.
   T().push_subscriptions.push({ id: 'ps1', user_id: 'u1', endpoint: 'https://web.push.apple.com/abc', p256dh: 'k', auth: 'a', device: 'iPhone', created_at: new Date().toISOString() });
@@ -1113,14 +1129,15 @@ async function history(check) {
   check('settings lists the iPhone', has(undefined, 'notifications', 'iphone') && !!$('[data-act="push-test-now"]') && !!$('[data-act="push-test-later"]'));
   $('[data-act="push-test-now"]').click();
   await wait(400);
-  check('test now shows the push service result', has('[data-test-status]', 'iphone: accepted by apple'));
-  check('delivery history lists it', has('.delivery-log', 'test notification', 'accepted by apple'));
+  check('test now shows the push service result', has('[data-test-status]', 'iphone: delivered to apple'));
+  check('delivery history lists it once (one icon)', has('.delivery-log', 'test notification', 'delivered to apple') && !text('.delivery-log').includes('🔔 🔔'));
   $('[data-act="push-test-later"]').click();
   await wait(1300);
   check('test in 1 minute shows a countdown', /⏳ 0:5\d/.test(text('[data-test-status]')) && has('[data-test-status]', 'lock your phone'), text('[data-test-status]'));
+  check('buttons are disabled while a test runs; the queued test shows in history', $('[data-act="push-test-now"]').disabled && has('.delivery-log', 'queued for'));
   const row = T().push_log.find((x) => x.id === 'l2');
   Object.assign(row, { sent_at: new Date().toISOString(), devices: 1, delivered: 0, results: [{ device: 'iPhone', service: 'web.push.apple.com', status: 403, reason: 'BadJwtToken' }] });
   await wait(700);
-  check('when the queued test is sent, its result replaces the countdown (with the reason)', has('[data-test-status]', 'iphone: 403', 'badjwttoken'), text('[data-test-status]'));
+  check('when the queued test is sent, the result replaces the countdown, in plain words with the raw reason under Why?', has('[data-test-status]', 'iphone: refused', 'why?') && $('[data-test-status] .why code').textContent.includes('403 BadJwtToken'), text('[data-test-status]'));
   window.__pushTest = undefined; window.__pollMs = undefined;
 }
