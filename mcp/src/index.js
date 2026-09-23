@@ -322,16 +322,27 @@ const OPEN = 'completed_at=is.null&dropped_at=is.null';
 const TOOLS = [
   {
     name: 'capture',
-    description: 'Add a new item to the Inbox. Use for anything the user wants remembered; clarify it later with update_task.',
+    description: 'Add a new item. With just a title it lands in the Inbox to clarify later; you can also set project, tags, parent, flag, due/defer dates and notes in the same call (it then skips the Inbox).',
     inputSchema: {
       type: 'object',
-      properties: { title: { type: 'string', description: 'What it is, in the user\'s words' }, notes: { type: 'string' } },
+      properties: {
+        title: { type: 'string', description: "What it is, in the user's words" },
+        notes: { type: 'string' },
+        project: { type: 'string', description: 'Project name or id' },
+        parent: { type: 'string', description: 'Id of an open action in that project, to make this a subtask' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Labels like "Laptop" or "Waiting : Hiro"; missing tags are created' },
+        flagged: { type: 'boolean' },
+        due: { type: 'string', description: 'YYYY-MM-DD (due 5pm local)' },
+        defer: { type: 'string', description: 'YYYY-MM-DD (hidden until then)' },
+      },
       required: ['title'],
     },
-    async run(api, { title, notes = '' }) {
+    async run(api, { title, notes = '', ...rest }) {
       if (!title || !String(title).trim()) throw new Error('title is required');
       const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, title: String(title).trim(), notes, source: 'mcp' } });
-      return (await api.shape([row]))[0];
+      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'tags', 'flagged', 'due', 'defer'].includes(k) && v !== undefined));
+      if (!Object.keys(fields).length) return (await api.shape([row]))[0];
+      return TOOLS.find((t) => t.name === 'update_task').run(api, { id: row.id, ...fields });
     },
   },
   {
@@ -373,7 +384,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        search: { type: 'string', description: 'Case-insensitive text to match in title or notes' },
+        search: { type: 'string', description: 'Words to find; each must appear in the title, notes, completion note, project name or a tag (same as the app search)' },
         project: { type: 'string', description: 'Project name or id' },
         tag: { type: 'string', description: 'Tag label, e.g. "Laptop" or "Waiting : Hiro" (a parent tag includes its children)' },
         flagged: { type: 'boolean' },
@@ -389,8 +400,21 @@ const TOOLS = [
       if (a.due_before) f.push(`due_at=lt.${zonedToIso(a.due_before, 24, api.tz)}`);
       if (a.project) f.push(`project_id=eq.${await api.resolveProject(a.project)}`);
       if (a.search) {
-        const s = String(a.search).replace(/[%,()*]/g, ' ').trim();
-        f.push(`or=(title.ilike.*${encodeURIComponent(s)}*,notes.ilike.*${encodeURIComponent(s)}*)`);
+        const words = String(a.search).toLowerCase().replace(/[%,()*\\]/g, ' ').split(/\s+/).filter(Boolean);
+        if (words.length) {
+          const { projects, tags, tagLabel } = await api.lookups();
+          const links = await api.q(`task_tags?${api.u}&select=task_id,tag_id`);
+          for (const w of words) {
+            const e = encodeURIComponent(w);
+            const conds = [`title.ilike.*${e}*`, `notes.ilike.*${e}*`, `completion_note.ilike.*${e}*`];
+            const pids = projects.filter((p) => p.name.toLowerCase().includes(w)).map((p) => p.id);
+            const tids = new Set(tags.filter((t) => tagLabel(t).toLowerCase().includes(w)).map((t) => t.id));
+            const taskIds = [...new Set(links.filter((l) => tids.has(l.tag_id)).map((l) => l.task_id))].slice(0, 300);
+            if (pids.length) conds.push(`project_id.in.(${pids.join(',')})`);
+            if (taskIds.length) conds.push(`id.in.(${taskIds.join(',')})`);
+            f.push(`or=(${conds.join(',')})`);
+          }
+        }
       }
       if (a.tag) {
         const { tags, tagLabel } = await api.lookups();

@@ -9,6 +9,15 @@ let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, 
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url); const table = u.pathname.split('/').pop();
   const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','or'].includes(k));
+  const ors = [...u.searchParams].filter(([k]) => k === 'or').map(([, v]) => v.slice(1, -1).match(/[a-z_]+\.(?:ilike\.\*[^*]*\*|in\.\([^)]*\)|not\.is\.null|is\.null)/g) || []);
+  const orMatch = (r) => ors.every((conds) => conds.some((c) => {
+    const [k, op, ...rest] = c.split('.'); const v = rest.join('.');
+    if (op === 'ilike') return (r[k] || '').toLowerCase().includes(decodeURIComponent(v).replace(/\*/g, '').toLowerCase());
+    if (op === 'in') return v.slice(1, -1).split(',').map((x) => x.replace(/"/g, '')).includes(String(r[k]));
+    if (op === 'not') return r[k] != null;
+    if (op === 'is') return r[k] == null;
+    return false;
+  }));
   const match = (r) => filters.every(([k, v]) => {
     const [op, ...rest] = v.split('.'); const val = rest.join('.');
     if (op === 'eq') return String(r[k]) === val;
@@ -22,7 +31,7 @@ globalThis.fetch = async (url, init = {}) => {
   const m = init.method || 'GET'; const rows = db[table];
   const body = init.body ? JSON.parse(init.body) : null;
   const res = (d, s = 200) => new Response(d === null ? null : JSON.stringify(d), { status: s });
-  if (m === 'GET') return res(rows.filter(match));
+  if (m === 'GET') return res(rows.filter((r) => match(r) && orMatch(r)));
   if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
   if (m === 'PATCH') { rows.filter(match).forEach(r => Object.assign(r, body)); return res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
@@ -56,6 +65,11 @@ const tags = await tool('list_tags', {});
 assert(tags.find(t => t.label === 'Waiting : Hiro').open_tasks === 1, 'list_tags counts');
 const projs = await tool('list_projects', {});
 assert(projs[0].folder === 'PRIORITIES' && projs[0].open_actions === 1, 'list_projects with folder + counts');
+const oneShot = await tool('capture', { title: 'Schedule backflow test', project: 'click plumbing', tags: ['Phone', 'Waiting : Hiro'], due: '2026-10-01', flagged: true });
+assert(!oneShot.in_inbox && oneShot.project === 'Click Plumbing' && oneShot.tags.length === 2 && oneShot.due === '2026-10-01' && oneShot.flagged, 'capture sets project, tags, due, flag in one call');
+assert((await tool('list_tasks', { search: 'backflow hiro' })).count === 1, 'search: words across title + tag must all match');
+assert((await tool('list_tasks', { search: 'plumbing' })).items.some((x) => x.title === 'Schedule backflow test'), 'search: matches project name');
+assert((await tool('list_tasks', { search: 'backflow nope' })).count === 0, 'search: every word must match');
 const moved = await tool('update_project', { project: 'Click Plumbing', folder: 'Businesses', status: 'on_hold' });
 assert(moved.folder === 'Businesses' && moved.status === 'on_hold' && db.folders.length === 2, 'update_project moves to new folder + status');
 const unfiled = await tool('update_project', { project: 'click plumbing', folder: null, name: 'Click Plumbing Co' });

@@ -179,13 +179,6 @@
     render();
   }
 
-  async function deleteTask(task) {
-    await run(sb.from('tasks').delete().eq('id', task.id));
-    db.tasks = db.tasks.filter((t) => t.id !== task.id && t.parent_id !== task.id);
-    db.taskTags = db.taskTags.filter((x) => x.task_id !== task.id);
-    render();
-  }
-
   // "Waiting : Hiro" creates (or reuses) parent tag "Waiting" and child "Hiro".
   async function ensureTag(label) {
     const parts = label.split(':').map((s) => s.trim()).filter(Boolean);
@@ -461,7 +454,16 @@
     const terms = searchTerms(q).map((w) => w.replace(/[,()*%\\]/g, '')).filter(Boolean);
     if (!terms.length) { searchExtra = []; return; }
     let query = sb.from('tasks').select('*').or('completed_at.not.is.null,dropped_at.not.is.null').order('updated_at', { ascending: false }).limit(100);
-    terms.forEach((w) => { query = query.or(`title.ilike.*${w}*,notes.ilike.*${w}*,completion_note.ilike.*${w}*`); });
+    // Each word must match the title, notes, completion note, project name or a tag (a parent tag covers its children).
+    terms.forEach((w) => {
+      const conds = [`title.ilike.*${w}*`, `notes.ilike.*${w}*`, `completion_note.ilike.*${w}*`];
+      const projectIds = db.projects.filter((p) => p.name.toLowerCase().includes(w)).map((p) => p.id);
+      const tagIds = db.tags.filter((tg) => tagLabel(tg).toLowerCase().includes(w)).map((tg) => tg.id);
+      const taggedIds = [...new Set(db.taskTags.filter((x) => tagIds.includes(x.tag_id)).map((x) => x.task_id))];
+      if (projectIds.length) conds.push(`project_id.in.(${projectIds.join(',')})`);
+      if (taggedIds.length) conds.push(`id.in.(${taggedIds.slice(0, 300).join(',')})`);
+      query = query.or(conds.join(','));
+    });
     const { data, error } = await query;
     if (error || seq !== searchSeq) return;
     searchExtra = data;
@@ -711,7 +713,7 @@
           <label>Completion note<textarea name="completion_note" placeholder="Outcome, who you spoke to, what's next…">${esc(t.completion_note || '')}</textarea></label></div>
         ${t.dropped_at ? `<p class="view-sub" style="margin:0">Dropped ${esc(fmtDateTime(t.dropped_at))}</p>` : ''}` : ''}
       <div class="actions">
-        ${task ? '<button type="button" class="btn danger" data-del>Delete</button>' : ''}
+        ${task && isOpen(task) ? '<button type="button" class="btn danger" data-drop>Drop</button>' : ''}
         <div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div>
       </div>
     </form>`;
@@ -749,8 +751,9 @@
       form.elements.status.onchange = () => { $('#done-box', sheet).hidden = form.elements.status.value !== 'completed'; };
     }
     $('[data-cancel]', sheet).onclick = () => sheet.close();
-    const del = $('[data-del]', sheet);
-    if (del) del.onclick = async () => { if (confirm('Delete this item?')) { sheet.close(); await deleteTask(task); } };
+    // Items are dropped, never deleted: Drop saves the form with status "dropped" (restore via Status → Open).
+    const drop = $('[data-drop]', sheet);
+    if (drop) drop.onclick = () => { form.elements.status.value = 'dropped'; form.requestSubmit(); };
     $('#editor', sheet).onsubmit = async (e) => {
       e.preventDefault();
       const f = new FormData(e.target);
@@ -772,7 +775,16 @@
       if (!fields.title) return;
       doneCache = null;
       sheet.close();
+      const wasDropped = !!(task && task.dropped_at); // saveTask updates task in place, so read it first
       await saveTask(task, fields, [...selected]);
+      if (task && fields.dropped_at && !wasDropped) {
+        const saved = byId(db.tasks, task.id) || task;
+        toast('Dropped', { label: 'Undo', run: async () => {
+          const [row] = await run(sb.from('tasks').update({ dropped_at: null }).eq('id', saved.id).select());
+          syncRow('tasks', saved, row);
+          render();
+        } });
+      }
     };
     // Long notes (e.g. a forwarded email) earn the whole screen; re-check as the user types.
     const notes = $('[name=notes]', sheet);
