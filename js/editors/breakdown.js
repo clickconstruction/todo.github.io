@@ -47,20 +47,25 @@ export function openBreakdown(task, { onDone } = {}) {
   const add = (titles) => { titles.forEach((title) => items.push({ id: null, title, done: false, drop: false })); render(); };
   let input = render();
 
+  // #sheet2 is shared: a handler left over from an earlier sheet must not act on another form.
+  const mine = (e) => !!(e.target && e.target.closest && e.target.closest('form.breakdown'));
   dlg.onkeydown = (e) => {
+    if (!mine(e)) return;
     if (e.target.name !== 'step' || e.key !== 'Enter') return;
     e.preventDefault();
     const v = e.target.value.trim();
     if (v) add([v]);
   };
   dlg.onpaste = (e) => {
+    if (!mine(e)) return;
     if (e.target.name !== 'step') return;
     const text = (e.clipboardData || window.clipboardData).getData('text');
     const lines = splitSteps(text);
     if (lines.length > 1) { e.preventDefault(); add(lines); }
   };
-  dlg.onchange = (e) => { if (e.target.name === 'in_order') inOrder = e.target.checked; };
+  dlg.onchange = (e) => { if (!mine(e)) return; if (e.target.name === 'in_order') inOrder = e.target.checked; };
   dlg.onclick = (e) => {
+    if (!mine(e)) return;
     if (e.target.closest('[data-bd-add]')) { const v = $('[name=step]', dlg).value.trim(); if (v) add([v]); return; }
     const mv = e.target.closest('[data-bd-move]');
     if (mv) {
@@ -83,6 +88,7 @@ export function openBreakdown(task, { onDone } = {}) {
     if (e.target.closest('[data-bd-cancel]')) dlg.close();
   };
   dlg.onsubmit = async (e) => {
+    if (!mine(e)) return;
     e.preventDefault();
     const pending = $('[name=step]', dlg).value.trim();
     if (pending) items.push({ id: null, title: pending, done: false, drop: false }); // don't lose what's typed

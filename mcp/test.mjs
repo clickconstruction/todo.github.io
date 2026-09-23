@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -28,6 +28,13 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (String(url).startsWith('https://push.example')) { pushed.push({ url: String(url), init }); return String(url).includes('gone') ? new Response(null, { status: 410 }) : String(url).includes('badjwt') ? new Response('{"reason":"BadJwtToken"}', { status: 403 }) : new Response(null, { status: 201 }); }
   const rpcCalls = globalThis.rpcCalls = globalThis.rpcCalls || [];
+  if (String(url).includes('/rest/v1/rpc/import_omnifocus')) { // the SQL function is tested in supabase/tests; here: what the tool sends
+    const b = JSON.parse(init.body); (globalThis.importCalls = globalThis.importCalls || []).push(b);
+    const counts = { folders: b.payload.folders.length, tags: b.payload.tags.length, projects: b.payload.projects.length, tasks: b.payload.tasks.length, open_tasks: b.payload.tasks.filter((t) => !t.completed_at && !t.dropped_at).length, inbox: 1, review_due: 1, tasks_skipped: 0, projects_skipped: 0, folders_merged: 0, tags_merged: 0 };
+    if (!b.dry_run) db.imports.push({ id: 'imp-1', user_id: b.owner, source: b.payload.source, counts, created_at: new Date().toISOString(), undone_at: null });
+    return new Response(JSON.stringify({ ...counts, dry_run: b.dry_run, ...(b.dry_run ? {} : { import_id: 'imp-1' }) }), { status: 200 });
+  }
+  if (String(url).includes('/rest/v1/rpc/undo_import')) { const b = JSON.parse(init.body); (globalThis.undoCalls = globalThis.undoCalls || []).push(b); return new Response(JSON.stringify({ tasks_dropped: 9, projects_dropped: 3, folders_archived: 1 }), { status: 200 }); }
   if (String(url).includes('/rest/v1/rpc/convert_to_project')) { // mirror of the SQL function
     const b = JSON.parse(init.body); const t = db.tasks.find((x) => x.id === b.task_id && x.user_id === b.owner);
     if (!t) return new Response(JSON.stringify({ message: 'Task not found.' }), { status: 400 });
@@ -104,7 +111,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 35 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 35 tools, no internals leaked');
+assert(list.body.result.tools.length === 37 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 37 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -530,6 +537,29 @@ assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'r
   assert((await tool('list_perspectives', {}))[0].name === 'Short calls', 'update_perspective move');
   await tool('update_perspective', { perspective: 'Short calls', archived: true });
   assert((await tool('list_perspectives', {})).length === 1 && (await tool('list_perspectives', { include_archived: true })).length === 2, 'archive hides it (never deleted)');
+}
+
+// ---------- OmniFocus import ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const sample = readFileSync(new URL('../dev/fixtures/omnifocus-sample.json', import.meta.url), 'utf8');
+  const pre = await tool('import_omnifocus', { data: sample });
+  const call = globalThis.importCalls.at(-1);
+  assert(!pre.saved && call.dry_run === true && call.owner === UID && pre.format === 'json' && pre.counts.projects === 3 && pre.counts.open_tasks === 9, 'import_omnifocus previews by default (dry run, as the user)');
+  assert(pre.warnings.some((w) => /moved up/.test(w)) && pre.sample.some((l) => /Click Plumbing/.test(l)) && /confirm: true/.test(pre.next), 'preview has warnings, a sample and the next step');
+  assert(call.payload.tasks.every((t, i, a) => i === 0 || a[i - 1].depth <= t.depth), 'steps are sent after the tasks they belong to');
+  const done = await tool('import_omnifocus', { data: sample, confirm: true, completed: 'all' });
+  assert(done.saved && done.import_id === 'imp-1' && globalThis.importCalls.at(-1).dry_run === false && globalThis.importCalls.at(-1).payload.tasks.length > call.payload.tasks.length, 'confirm imports (completed: all brings history)');
+  const tp = await tool('import_omnifocus', { data: readFileSync(new URL('../dev/fixtures/omnifocus-sample.taskpaper', import.meta.url), 'utf8') });
+  assert(tp.format === 'taskpaper' && tp.counts.projects === 2, 'TaskPaper works through MCP too');
+  let bad = '';
+  try { await tool('import_omnifocus', { data: 'hello' }); } catch (e) { bad = e.message; }
+  assert(/doesn’t look like an OmniFocus export/.test(bad), 'not an export: a clear error');
+  const listed = await tool('undo_import', {});
+  assert(listed.length === 1 && listed[0].id === 'imp-1' && listed[0].projects >= 3, 'undo_import without an id lists imports');
+  let badId = '';
+  try { await tool('undo_import', { import_id: 'nope' }); } catch (e) { badId = e.message; }
+  assert(/import_id/.test(badId), 'undo_import checks the id');
 }
 
 // ---------- delivery log, /push/test, queued tests, history ----------

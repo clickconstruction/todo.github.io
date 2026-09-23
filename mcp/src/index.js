@@ -11,6 +11,7 @@ import { handleGeo, makePlaceResolver, loadPlaceData } from './geo.js';
 import { sendDueReminders } from './reminders.js';
 import { deliver, sendQueuedTests } from './deliver.js';
 import * as P from '../../js/perspective-engine.js';
+import * as OF from '../../js/omnifocus-import.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -23,6 +24,7 @@ Attachments: add_attachment attaches text, base64 or a URL's file to an action o
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 For a weekly review: call list_review, go through each project with the user (use its hints), make the changes they want, then mark_reviewed.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
+Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); undo_import takes an import back.
 Perspectives are the user's saved views (e.g. Calls, Today): list_perspectives, then run_perspective to see what's in one; to answer "what should I do now" questions, prefer the user's own perspectives. create_perspective/update_perspective build them (preview rules with run_perspective first).
 Big tasks: break_down splits a task into steps (in_order for one at a time); steps can have steps, up to 4 levels. get_task shows the steps tree and progress. Move a task under another with update_task parent. If a task grows into a real project, offer convert_to_project.
 Places: an action, tag or project can have a place (a saved location) plus an optional location_alert (arrive, leave or nearby) and radius. Actions inherit a place from their tags, group, project or project tags. Pass place as a saved place's name or id, or as an address/business to look up (it is saved as a new place). Use list_nearby with the user's coordinates to find what can be done nearby. Places are archived, never deleted.`;
@@ -1166,6 +1168,50 @@ const TOOLS = [
       }
       const [row] = await api.q(`perspectives?${api.u}&id=eq.${p.id}&select=*`);
       return perspectiveOut(row, data);
+    },
+  },
+  {
+    name: 'import_omnifocus',
+    description: 'Import the user\'s OmniFocus library. data is what OmniFocus produced: the JSON from the Todo Tooling OmniFocus script (best: folders, review schedules, repeats), or a TaskPaper or CSV export. Without confirm it only previews (counts, merges, skips, warnings; nothing saved). Show the preview to the user and only call again with confirm: true when they agree. Importing twice never duplicates; undo_import takes an import back.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        data: { type: 'string', description: 'The OmniFocus script JSON, TaskPaper text or CSV text' },
+        completed: { type: 'string', enum: ['none', '30', '90', 'all'], default: 'none', description: 'Which completed/dropped items come along: none, the last 30 or 90 days, or all' },
+        confirm: { type: 'boolean', default: false, description: 'true = actually import (after the user saw the preview)' },
+      },
+      required: ['data'],
+    },
+    async run(api, { data, completed = 'none', confirm = false }) {
+      const parsed = OF.parse(String(data || ''), { tz: api.tz });
+      const prepared = OF.prepare(parsed, { completed });
+      const parts = OF.chunks(prepared.payload);
+      const results = [];
+      let batch = null;
+      for (const part of parts) {
+        const r = await api.q('rpc/import_omnifocus', { method: 'POST', body: { payload: part, dry_run: !confirm, owner: api.userId, ...(batch ? { batch } : {}) } });
+        if (confirm) batch = batch || r.import_id;
+        results.push(r);
+      }
+      const counts = OF.sumCounts(results, { dryRun: !confirm });
+      return {
+        format: parsed.format, saved: !!confirm, import_id: confirm ? counts.import_id : undefined,
+        counts, summary: prepared.summary, warnings: prepared.warnings,
+        sample: OF.sampleTree(prepared.payload).map((l) => `${'  '.repeat(l.depth)}${l.text}${l.meta ? ` (${l.meta})` : ''}`),
+        next: confirm ? 'Imported. The user can undo it with undo_import.' : 'Nothing saved yet. Show this preview; call again with confirm: true to import.',
+      };
+    },
+  },
+  {
+    name: 'undo_import',
+    description: 'Take back an OmniFocus import: its open actions and projects are dropped and its new folders archived (nothing is deleted); a later import brings them in again. Without import_id, lists recent imports. Ask the user first.',
+    inputSchema: { type: 'object', properties: { import_id: { type: 'string' } } },
+    async run(api, { import_id }) {
+      if (!import_id) {
+        const rows = await api.q(`imports?${api.u}&order=created_at.desc&limit=20&select=id,source,counts,created_at,undone_at`);
+        return rows.filter((r) => (r.counts.tasks || 0) + (r.counts.projects || 0) > 0).map((r) => ({ id: r.id, source: r.source, at: r.created_at, projects: r.counts.projects || 0, actions: r.counts.tasks || 0, undone: !!r.undone_at }));
+      }
+      return api.q('rpc/undo_import', { method: 'POST', body: { batch: mustUuid(import_id, 'import_id'), owner: api.userId } });
     },
   },
   {

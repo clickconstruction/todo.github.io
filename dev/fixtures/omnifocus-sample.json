@@ -1,0 +1,25 @@
+{"format":"todotooling-omnifocus","version":1,"exported_at":"2026-09-23T15:00:00.000Z","app":"OmniFocus 4.7",
+"folders":[{"id":"F1","name":"Click Construction","parent":null,"dropped":false,"added":"2025-01-02T10:00:00.000Z"},{"id":"F2","name":"Clients","parent":"F1","dropped":false},{"id":"F3","name":"Old stuff","parent":null,"dropped":true}],
+"tags":[{"id":"G1","name":"Phone","parent":null,"status":"active"},{"id":"G2","name":"Waiting","parent":null,"status":"active"},{"id":"G3","name":"Hiro","parent":"G2","status":"active"},{"id":"G4","name":"Someday","parent":null,"status":"on_hold"}],
+"projects":[
+ {"id":"P1","name":"Click Plumbing","note":"Main job","folder":"F2","status":"active","sequential":true,"singleActions":false,"autoComplete":true,"flagged":false,"defer":null,"planned":null,"due":"2026-10-01T22:00:00.000Z","estimate":null,"completed":null,"dropped":null,"review":{"steps":2,"unit":"weeks"},"lastReview":"2026-09-01T15:00:00.000Z","tags":["G1"],"repeat":null,"attachments":1,"added":"2025-03-01T10:00:00.000Z","modified":"2026-09-20T10:00:00.000Z"},
+ {"id":"P2","name":"Errands","note":"","folder":null,"status":"active","sequential":false,"singleActions":true,"autoComplete":false,"flagged":true,"review":{"steps":1,"unit":"months"},"lastReview":null,"tags":[],"repeat":null},
+ {"id":"P3","name":"Monthly close","note":"","folder":"F1","status":"on_hold","sequential":false,"singleActions":false,"autoComplete":false,"flagged":false,"review":{"steps":1,"unit":"weeks"},"tags":[],"repeat":{"rule":"FREQ=MONTHLY;BYMONTHDAY=1","method":"[object Task.RepetitionMethod: Fixed]"}},
+ {"id":"P4","name":"Shipped app","status":"completed","completed":"2026-01-10T12:00:00.000Z","folder":"F1","tags":[],"review":null},
+ {"id":"P5","name":"In a dropped folder","status":"active","folder":"F3","tags":[],"review":null}
+],
+"tasks":[
+ {"id":"T1","name":"Call GVEC about utilities","note":"Account 4471","project":"P1","parent":null,"inbox":false,"flagged":true,"due":"2026-09-21T22:00:00.000Z","estimate":15,"sequential":false,"tags":["G1"],"repeat":null,"attachments":0,"notifications":2,"added":"2026-08-01T10:00:00.000Z","modified":"2026-09-01T10:00:00.000Z"},
+ {"id":"T2","name":"Order fittings","project":"P1","parent":null,"sequential":true,"tags":["G3"],"repeat":null},
+ {"id":"T3","name":"Measure","project":"P1","parent":"T2","tags":[],"repeat":null},
+ {"id":"T4","name":"Level 3","project":"P1","parent":"T3","tags":[]},
+ {"id":"T5","name":"Level 4","project":"P1","parent":"T4","tags":[]},
+ {"id":"T6","name":"Level 5 too deep","project":"P1","parent":"T5","tags":[]},
+ {"id":"T7","name":"Buy fuel filter","project":"P2","parent":null,"estimate":30,"tags":[],"repeat":{"rule":"FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH","method":"[object Task.RepetitionMethod: DeferUntilDate]"}},
+ {"id":"T8","name":"Old done thing","project":"P2","parent":null,"completed":"2026-09-10T10:00:00.000Z","tags":[]},
+ {"id":"T9","name":"Ancient done thing","project":"P2","parent":null,"completed":"2025-01-10T10:00:00.000Z","tags":[]},
+ {"id":"T10","name":"Frog Pond EIN","project":null,"parent":null,"inbox":true,"tags":[]},
+ {"id":"T11","name":"Reconcile bank","project":"P3","parent":null,"tags":["G4"]},
+ {"id":"T12","name":"Release","project":"P4","parent":null,"completed":"2026-01-09T10:00:00.000Z","tags":[]},
+ {"id":"T13","name":"Dropped task","project":"P2","parent":null,"dropped":"2026-09-15T10:00:00.000Z","tags":[]}
+]}

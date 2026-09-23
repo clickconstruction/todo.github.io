@@ -37,7 +37,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -447,6 +447,13 @@ async function perspectives(check) {
   await wait(100);
   check('save view: flagged becomes a rule', $('#sheet [name=name]').value === 'Flagged' && has('#sheet [data-preview]', 'flagged'));
   $('#sheet [data-cancel]').click();
+  // Straight into another sheet: the perspective editor's handlers must not act on it.
+  const { openEditor } = await import('/js/editors/task.js');
+  openEditor(db.tasks.find((t) => t.id === 't2'));
+  await wait(50);
+  $('#editor').requestSubmit();
+  await wait(250);
+  check('a closed perspective editor never acts on the next sheet', !db.perspectives.some((p) => p.name === 'Flagged') && !location.hash.startsWith('#perspective/'), location.hash);
   // A rule from a newer version warns instead of silently hiding things.
   const { savePerspective } = await import('/js/perspectives.js');
   const odd = await savePerspective(null, { name: 'Future', icon: '🔭', rules: { v: 1, match: 'all', rules: [] }, options: {} });
@@ -495,6 +502,76 @@ async function layout(check) {
   await wait(120);
   check('project editor uses the same layout, with Review', ['organize', 'dates', 'review', 'alerts', 'more'].every((k) => $(`#sheet [data-sec="${k}"]`)) && has('#sheet [data-sec-sum="review"]', 'every'), text('#sheet [data-sec-sum="review"]'));
   $('#sheet').close();
+}
+
+// Import from OmniFocus: paste → preview (dry run) → import → idempotent → undo; TaskPaper; errors.
+async function omnifocusImport(check) {
+  const { db } = await import('/js/state.js');
+  (await import('/js/views/import.js')).resetImport();
+  const json = await (await fetch('/dev/fixtures/omnifocus-sample.json', { cache: 'no-store' })).text();
+  const tp = await (await fetch('/dev/fixtures/omnifocus-sample.taskpaper', { cache: 'no-store' })).text();
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  let clip = json;
+  const realClip = Object.getOwnPropertyDescriptor(Navigator.prototype, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText: async () => clip, writeText: async (t) => { clip = t; } } });
+  try {
+    await go('#import');
+    check('import: two ways in', has(undefined, 'copy from omnifocus', 'open omnifocus', 'or an export file') && $('[data-of-open]').getAttribute('href').startsWith('omnifocus://localhost/omnijs-run?script='));
+    $('[data-of-copy-script]').click();
+    await wait(50);
+    check('copy the script (for the Mac console)', clip.includes('Pasteboard.general.string') && clip.includes('flattenedProjects'));
+    clip = json;
+    $('[data-of-paste]').click();
+    await until(() => has(undefined, 'preview'));
+    check('paste → preview, nothing saved yet', has(undefined, 'preview', 'nothing is saved yet') && !T().projects.some((p) => p.import_id) && !T().imports.length, text().slice(0, 200));
+    check('preview counts', has('.import-stats', '3', 'projects', '9', 'open actions', '1', 'in the inbox'), text('.import-stats'));
+    check('existing tags are shared, not duplicated', has('.import-notes', '3 tags match'), text('.import-notes'));
+    check('warnings in plain words', has(undefined, 'moved up', 'repeat rule', 'attachment stays in omnifocus', 'notifications aren’t copied'));
+    check('sample tree', has('.import-tree', 'click construction › clients › 🗂️ click plumbing', 'call gvec about utilities', 'inbox'));
+    const sel = $('[data-of-completed]');
+    sel.value = 'all'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await until(() => has(undefined, 'preview') && has('.import-notes', 'completed or dropped'));
+    check('completed items are an option', has('.import-notes', 'completed or dropped item'), text('.import-notes'));
+    const sel2 = $('[data-of-completed]');
+    sel2.value = 'none'; sel2.dispatchEvent(new Event('change', { bubbles: true }));
+    await until(() => has(undefined, 'preview') && !has('.import-notes', 'completed or dropped'));
+    $('[data-of-import]').click();
+    await until(() => has(undefined, 'imported'));
+    check('import done', has('.import-ok', 'imported 3 projects, 9 actions and 1 new tag'), text('.import-ok'));
+    const plumbing = db.projects.find((p) => p.name === 'Click Plumbing' && p.import_id);
+    check('projects, folders, nesting and tags arrive', plumbing && plumbing.kind === 'sequential' && plumbing.review_every === 2
+      && db.folders.some((f) => f.name === 'Click Construction › Clients') && db.tasks.some((t) => t.title === 'Measure' && t.parent_id)
+      && db.taskTags.some((l) => l.tag_id === 'g2' && db.tasks.find((t) => t.id === l.task_id && t.title === 'Call GVEC about utilities' && t.import_id)));
+    check('Inbox item lands in the Inbox', db.tasks.some((t) => t.title === 'Frog Pond EIN' && t.in_inbox && t.source === 'omnifocus'));
+    check('next steps offered', has(undefined, 'open projects', 'open the inbox') && !!$('[data-of-undo]'));
+    // Import the same thing again: nothing new.
+    $('[data-of-cancel]').click();
+    await wait(50);
+    $('[data-of-paste]').click();
+    await until(() => has(undefined, 'preview'));
+    check('importing again: nothing new, clearly said', has(undefined, 'nothing new to import', 'imported before and are skipped') && !$('[data-of-import]'));
+    $('[data-of-cancel]').click();
+    await until(() => has(undefined, 'past imports'));
+    check('past imports listed', has('.import-list', '3 projects', '9 actions'));
+    $('.import-list [data-of-undo]').click();
+    await until(() => has('.import-list', 'undone'));
+    check('undo drops what it added (nothing deleted)', T().projects.find((p) => p.name === 'Click Plumbing' && p.import_id).status === 'dropped' && T().projects.find((p) => p.id === 'p1').status === 'active' && T().tasks.some((t) => t.title === 'Measure' && t.dropped_at));
+    // TaskPaper, pasted as text.
+    $('[data-of-paste-text]').click();
+    await wait(50);
+    $('[data-of-text]').value = tp;
+    $('[data-of-check]').click();
+    await until(() => has(undefined, 'preview'));
+    check('TaskPaper works too', has('.import-stats', '2', 'projects') && has(undefined, 'ignored @weird'), text('.import-stats'));
+    $('[data-of-cancel]').click();
+    await wait(50);
+    clip = 'hello world';
+    $('[data-of-paste]').click();
+    await until(() => has(undefined, 'doesn’t look like'));
+    check('something else on the clipboard: a clear message', has(undefined, 'doesn’t look like an omnifocus export'));
+  } finally {
+    if (realClip) delete navigator.clipboard; // back to the prototype's
+  }
 }
 
 // P4: estimates, row signals, project flags and tags.

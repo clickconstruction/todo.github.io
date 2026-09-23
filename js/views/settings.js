@@ -46,6 +46,9 @@ export function viewSettings() {
     <ul class="list">${emailSenders.map((e) => `<li class="row" style="cursor:default"><div class="row-main"><div class="row-title">${esc(e.email)}</div></div>
       <button class="btn small danger" data-remove-sender="${e.id}">Remove</button></li>`).join('')}</ul>
     <form class="capture" data-add-sender style="margin-top:12px"><input type="email" name="email" placeholder="Add another address you send from" autocomplete="off"><button class="btn">Add</button></form>
+    <h2 class="section-title">Import</h2>
+    <p class="view-sub" style="margin-bottom:8px">Moving from OmniFocus? Bring folders, projects, tags, repeats and review schedules over; you'll see a preview first.</p>
+    <a class="btn" href="#import">Import from OmniFocus</a>
     <h2 class="section-title">Account</h2>
     <button class="btn" data-act="sign-out">Sign out</button>`;
 }

@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      perspectives: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      perspectives: [], imports: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -237,7 +237,7 @@
     notifications: () => ({ task_id: null, project_id: null, offset_minutes: 0, at: null, sent_at: null }),
     attachments: () => ({ task_id: null, project_id: null, size: 0, mime: 'application/octet-stream', archived_at: null }),
   };
-  const NO_DELETE = { perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
+  const NO_DELETE = { imports: 'imports are kept.', perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
 
   // ----- PostgREST-ish filter parsing for .or() strings -----
   function splitTop(s) {
@@ -382,6 +382,74 @@
           tables.tasks.filter((c) => c.parent_id === t.id).forEach((c) => { c.parent_id = null; c.project_id = pid; follow(c); });
           t.dropped_at = now(); t.completion_note = `Became the project “${t.title}”`;
           return { data: pid, error: null };
+        }
+        // Mirrors import_omnifocus() / undo_import() (migrations 20260929000001/2).
+        if (name === 'import_omnifocus') {
+          const P = args.payload || {};
+          const snapshot = args.dry_run ? JSON.stringify(tables) : null;
+          const imp = args.batch || id();
+          if (args.batch && !tables.imports.some((i) => i.id === args.batch && !i.undone_at)) return { data: null, error: { message: 'Import not found (or it was undone).' } };
+          if (!args.batch) tables.imports.push({ id: imp, user_id: uid, source: P.source || 'omnifocus', counts: {}, created_at: now(), undone_at: null });
+          const c = { folders: 0, folders_merged: 0, tags: 0, tags_merged: 0, projects: 0, projects_skipped: 0, tasks: 0, tasks_skipped: 0 };
+          const byRef = (list, r) => list.find((x) => x.external_ref && x.external_ref === r);
+          (P.folders || []).forEach((f) => {
+            if (byRef(tables.folders, f.ref)) return;
+            const same = tables.folders.find((x) => !x.external_ref && !x.archived_at && x.name.toLowerCase() === f.name.toLowerCase());
+            if (same) { same.external_ref = f.ref; c.folders_merged++; return; }
+            tables.folders.push({ id: id(), user_id: uid, name: f.name, sort: 1000 + (f.sort || 0), archived_at: null, external_ref: f.ref, import_id: imp, created_at: f.created_at || now() });
+            c.folders++;
+          });
+          [...(P.tags || [])].sort((a, b) => a.depth - b.depth).forEach((g) => {
+            if (byRef(tables.tags, g.ref)) return;
+            const parent = g.parent_ref ? (byRef(tables.tags, g.parent_ref) || {}).id || null : null;
+            const same = tables.tags.find((x) => !x.external_ref && x.name.toLowerCase() === g.name.toLowerCase() && (x.parent_id || null) === parent);
+            if (same) { same.external_ref = g.ref; c.tags_merged++; return; }
+            tables.tags.push({ id: id(), user_id: uid, name: g.name, parent_id: parent, sort: 1000 + (g.sort || 0), place_id: null, location_trigger: null, location_radius_m: null, external_ref: g.ref, import_id: imp });
+            c.tags++;
+          });
+          (P.projects || []).forEach((x) => {
+            if (byRef(tables.projects, x.ref)) { c.projects_skipped++; return; }
+            const np = { ...DEFAULTS.projects(), id: id(), user_id: uid, name: x.name, notes: x.notes || '', folder_id: x.folder_ref ? (byRef(tables.folders, x.folder_ref) || {}).id || null : null,
+              status: x.status || 'active', kind: x.kind || 'parallel', complete_with_last: !!x.complete_with_last, flagged: !!x.flagged, defer_at: x.defer_at || null, planned_at: x.planned_at || null,
+              due_at: x.due_at || null, estimate_minutes: x.estimate_minutes || null, repeat_rule: x.repeat_rule || null, review_every: x.review_every || 1, review_unit: x.review_unit || 'week',
+              last_reviewed_at: x.last_reviewed_at || null, next_review_at: x.next_review_at || null, completed_at: x.completed_at || null, sort: 1000 + (x.sort || 0),
+              external_ref: x.ref, import_id: imp, created_at: x.created_at || now(), updated_at: x.updated_at || x.created_at || now() };
+            reviewSchedule(np);
+            tables.projects.push(np);
+            (x.tag_refs || []).forEach((r) => { const g = byRef(tables.tags, r); if (g) tables.project_tags.push({ project_id: np.id, tag_id: g.id, user_id: uid }); });
+            c.projects++;
+          });
+          [...(P.tasks || [])].sort((a, b) => (a.depth || 1) - (b.depth || 1)).forEach((x) => {
+            if (byRef(tables.tasks, x.ref)) { c.tasks_skipped++; return; }
+            const parent = x.parent_ref ? byRef(tables.tasks, x.parent_ref) : null;
+            const project = x.project_ref ? byRef(tables.projects, x.project_ref) : null;
+            const nt = { ...DEFAULTS.tasks(), id: id(), user_id: uid, title: x.title, notes: x.notes || '', project_id: parent ? parent.project_id : project ? project.id : null, parent_id: parent ? parent.id : null,
+              in_inbox: parent ? false : !!x.in_inbox, flagged: !!x.flagged, defer_at: x.defer_at || null, planned_at: x.planned_at || null, due_at: x.due_at || null,
+              estimate_minutes: x.estimate_minutes || null, repeat_rule: x.repeat_rule || null, steps_in_order: !!x.steps_in_order, completed_at: x.completed_at || null,
+              dropped_at: x.completed_at ? null : x.dropped_at || null, sort: x.sort || 0, source: 'omnifocus', external_ref: x.ref, import_id: imp,
+              created_at: x.created_at || now(), updated_at: x.updated_at || x.created_at || now() };
+            tables.tasks.push(nt);
+            (x.tag_refs || []).forEach((r) => { const g = byRef(tables.tags, r); if (g) tables.task_tags.push({ task_id: nt.id, tag_id: g.id, user_id: uid }); });
+            c.tasks++;
+          });
+          const mine = tables.tasks.filter((t) => t.import_id === imp && !t.completed_at && !t.dropped_at);
+          Object.assign(c, { open_tasks: mine.length, inbox: mine.filter((t) => t.in_inbox).length,
+            review_due: tables.projects.filter((p) => p.import_id === imp && ['active', 'on_hold'].includes(p.status) && p.next_review_at && p.next_review_at <= now()).length });
+          if (args.dry_run) { tables = JSON.parse(snapshot); window.__mock.tables = tables; return { data: { ...c, dry_run: true }, error: null }; }
+          const rec = tables.imports.find((i) => i.id === imp);
+          Object.keys(c).forEach((k) => { rec.counts[k] = ['open_tasks', 'inbox', 'review_due'].includes(k) ? c[k] : (rec.counts[k] || 0) + c[k]; });
+          return { data: { ...c, import_id: imp, dry_run: false }, error: null };
+        }
+        if (name === 'undo_import') {
+          const rec = tables.imports.find((i) => i.id === args.batch && !i.undone_at);
+          if (!rec) return { data: null, error: { message: 'Import not found or already undone.' } };
+          let tasksDropped = 0; let projectsDropped = 0; let folders = 0;
+          tables.tasks.filter((t) => t.import_id === rec.id).forEach((t) => { if (!t.completed_at && !t.dropped_at) { t.dropped_at = now(); tasksDropped++; } t.external_ref = null; });
+          tables.projects.filter((p) => p.import_id === rec.id).forEach((p) => { if (['active', 'on_hold'].includes(p.status)) { p.status = 'dropped'; projectsDropped++; } p.external_ref = null; });
+          tables.folders.filter((f) => f.import_id === rec.id && !f.archived_at && !tables.projects.some((p) => p.folder_id === f.id && ['active', 'on_hold'].includes(p.status)))
+            .forEach((f) => { f.archived_at = now(); f.external_ref = null; folders++; });
+          rec.undone_at = now();
+          return { data: { tasks_dropped: tasksDropped, projects_dropped: projectsDropped, folders_archived: folders }, error: null };
         }
         return { data: null, error: { message: `function ${name} does not exist` } };
       },

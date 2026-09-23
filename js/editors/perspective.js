@@ -125,7 +125,10 @@ export function openPerspectiveEditor(p, seed) {
   const preview = () => { const box = $('[data-preview]', sheet); if (box) box.innerHTML = previewHtml(draft); };
   draw();
 
+  // #sheet is shared: a handler left over from an earlier editor must not act on another form.
+  const mine = (e) => !!(e.target && e.target.closest && e.target.closest('form.persp-editor'));
   sheet.oninput = (e) => {
+    if (!mine(e)) return;
     const el = e.target;
     if (el.name === 'name') { draft.name = el.value; return; }
     if (el.dataset.ruleField !== undefined && ['number', 'text', 'date'].includes(el.type)) {
@@ -135,6 +138,7 @@ export function openPerspectiveEditor(p, seed) {
     }
   };
   sheet.onchange = (e) => {
+    if (!mine(e)) return;
     const el = e.target;
     if (el.dataset.opt) { draft.options[el.dataset.opt] = el.value; preview(); return; }
     if (el.name === 'badge') { draft.badge = el.checked; return; }
@@ -158,6 +162,7 @@ export function openPerspectiveEditor(p, seed) {
     }
   };
   sheet.onclick = async (e) => {
+    if (!mine(e)) return;
     const t = e.target;
     const icon = t.closest('[data-icon]');
     if (icon) { draft.icon = icon.dataset.icon; sheet.querySelectorAll('[data-icon]').forEach((b) => { b.classList.toggle('on', b === icon); b.setAttribute('aria-checked', b === icon); }); return; }
@@ -183,6 +188,7 @@ export function openPerspectiveEditor(p, seed) {
     }
   };
   sheet.onsubmit = async (e) => {
+    if (!mine(e)) return;
     e.preventDefault();
     draft.name = String(draft.name || '').trim();
     if (!draft.name) { toast('Give it a name'); $('[name=name]', sheet).focus(); return; }

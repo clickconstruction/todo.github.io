@@ -1,0 +1,12 @@
+Inbox:
+	- Frog Pond EIN @flagged
+Click Construction:
+	- Click Plumbing @parallel(false) @autodone(true) @tags(Phone) @due(2026-10-01 17:00)
+		Main job notes
+		- Call GVEC about utilities @tags(Phone, Waiting : Hiro) @due(2026-09-21) @estimate(15m) @flagged
+			Account 4471
+		- Order fittings @parallel(false)
+			- Measure @estimate(1h 30m)
+		- Done thing @done(2026-09-10 10:00)
+	- Errands @parallel(true) @autodone(false)
+		- Buy fuel filter @repeat-method(start-after-completion) @repeat-rule(FREQ=WEEKLY;INTERVAL=2) @weird(1)
