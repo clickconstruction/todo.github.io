@@ -611,6 +611,8 @@ async function nearby(check) {
 
   // Denied: explain how to turn it back on, offer retry.
   const { app } = await import('/js/state.js');
+  (await import('/js/geo.js')).stopWatching();
+  window.__geo.state = 'denied'; // so a background re-watch can't restore a position
   app.here = null; app.locationState = 'denied';
   await go('#nearby');
   check('denied shows how to fix and Try again', has(undefined, 'location is off', 'try again'));
@@ -661,7 +663,7 @@ async function alerts(check) {
   check('per-place Arrive/Leave URLs use the key', urls.length >= 2 && urls.every((u) => u.startsWith('https://mcp.todotooling.com/geo?t=tt_') && /&place=pl\d&event=(arrive|leave)$/.test(u)), urls[0]);
   check('Home Depot marked as needing Leave (t2)', has('.alert-place', 'home depot', 'leave'));
   await go('#settings');
-  await wait(200);
+  for (let i = 0; i < 20 && !has(undefined, 'location alerts only'); i++) await wait(100); // tokens load async
   check('settings labels location keys', has(undefined, 'location alerts only'));
 }
 
