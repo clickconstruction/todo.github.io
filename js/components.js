@@ -9,12 +9,15 @@ export const DATE_HINTS = {
   due_at: 'Hard deadline only',
 };
 
-// Date input with one-tap buttons. Wire once per container with wireQuickDates().
+let seq = 0; // unique ids: a sheet and the inspector can be on screen together
+
+// Date input with one-tap buttons. Wire once per container with wireQuickButtons().
 export function dateField(name, label, iso) {
+  const id = `f-${name}-${++seq}`;
   return `<div class="date-field">
-    <label for="f-${name}">${esc(label)} <span class="hint">${esc(DATE_HINTS[name] || '')}</span></label>
+    <label for="${id}">${esc(label)} <span class="hint">${esc(DATE_HINTS[name] || '')}</span></label>
     <div class="date-row">
-      <input type="date" id="f-${name}" name="${name}" value="${toDateInput(iso)}">
+      <input type="date" id="${id}" name="${name}" value="${toDateInput(iso)}">
       <span class="quick">${DATE_STEPS.map(([step, text]) => `<button type="button" class="qbtn" data-qd="${name}" data-step="${step}">${text}</button>`).join('')}
         <button type="button" class="qbtn" data-qd="${name}" data-step="clear" aria-label="Clear ${esc(label)}">✕</button></span>
     </div>
@@ -24,10 +27,11 @@ export function dateField(name, label, iso) {
 const ESTIMATE_STEPS = [5, 15, 30, 60];
 // Estimate in minutes: number input plus quick add buttons.
 export function estimateField(minutes) {
+  const id = `f-estimate-${++seq}`;
   return `<div class="date-field">
-    <label for="f-estimate">Estimate <span class="hint">How long it takes</span></label>
+    <label for="${id}">Estimate <span class="hint">How long it takes</span></label>
     <div class="date-row">
-      <input type="number" id="f-estimate" name="estimate_minutes" min="0" step="5" inputmode="numeric" placeholder="min" value="${minutes ?? ''}">
+      <input type="number" id="${id}" name="estimate_minutes" min="0" step="5" inputmode="numeric" placeholder="min" value="${minutes ?? ''}">
       <span class="quick">${ESTIMATE_STEPS.map((m) => `<button type="button" class="qbtn" data-qe="${m}">+${m < 60 ? `${m}m` : `${m / 60}h`}</button>`).join('')}
         <button type="button" class="qbtn" data-qe="clear" aria-label="Clear estimate">✕</button></span>
     </div>

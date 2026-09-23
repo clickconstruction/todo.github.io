@@ -13,6 +13,8 @@ const T = () => window.__mock.tables;
 // Reset mock data and reload it through the app's own modules (same instances the page uses).
 async function reload() {
   window.__mock.reset();
+  window.__forceSheet = true; window.__forceWide = false; // suites use the sheet unless they opt in
+  const insp = await import('/js/state.js'); insp.app.selected = null;
   try { localStorage.removeItem('todo.filter'); localStorage.removeItem('todo.collapsed'); } catch { /* ignore */ }
   const { app } = await import('/js/state.js');
   app.review = null; app.reviewStats = null;
@@ -30,13 +32,14 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review };
+  const suites = { core, planned, projectTypes, groups, signals, filters, forecast, review, inspector };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
     try { await fn(check); } catch (e) { check(`${name}: threw`, false, e.stack || e.message); }
     if ($('#sheet').open) $('#sheet').close();
   }
+  window.__forceSheet = false; window.__forceWide = false;
   const failed = results.filter((r) => !r.ok);
   console.log(`smoke: ${results.length - failed.length}/${results.length} passed`, failed);
   return { passed: results.length - failed.length, total: results.length, failed, results };
@@ -441,4 +444,59 @@ async function review(check) {
   for (let i = 0; i < 5 && $('[data-mark-reviewed]'); i++) { $('[data-mark-reviewed]').click(); await wait(250); }
   check('all caught up screen', has(undefined, 'All caught up', 'You reviewed 4 projects'), text());
   check('badge clears', $('#badge-review').textContent === '');
+}
+
+// P8: desktop inspector.
+async function inspector(check) {
+  const { db } = await import('/js/state.js');
+  const task = (id) => db.tasks.find((t) => t.id === id);
+  const proj = (id) => db.projects.find((p) => p.id === id);
+  window.__forceSheet = false; window.__forceWide = true;
+  const { renderInspector } = await import('/js/inspector.js');
+  await go('#project/p1');
+  renderInspector(true);
+  check('empty selection shows the page project', $('#inspector [data-inspector-project="p1"]') !== null);
+  $('[data-task="t1"] .row-title').click();
+  await wait(150);
+  const f = () => $('#inspector form');
+  check('click selects instead of opening a sheet', !$('#sheet').open && f() && f().dataset.inspectorTask === 't1');
+  check('selected row highlighted', $('[data-task="t1"]').classList.contains('selected'));
+
+  f().elements.title.value = 'Call GVEC (inspector)';
+  f().elements.title.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(700);
+  check('title autosaves', task('t1').title === 'Call GVEC (inspector)', task('t1').title);
+  check('save state shown', has('#inspector .save-state', 'Saved'), text('#inspector .save-state'));
+
+  $('#inspector [data-qd="planned_at"][data-step="today"]').click();
+  await wait(700);
+  check('quick date autosaves', !!task('t1').planned_at);
+  $('#inspector [data-tag="g1"]').click();
+  await wait(700);
+  check('tag toggle autosaves', db.taskTags.some((x) => x.task_id === 't1' && x.tag_id === 'g1'));
+
+  const input = f().elements.notes;
+  input.focus();
+  input.value = 'typing…';
+  const { render } = await import('/js/router.js');
+  render(); // e.g. a background refresh while typing
+  check('does not re-render while typing', $('#inspector [name=notes]') === input && input.value === 'typing…');
+  input.blur();
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(700);
+  check('notes save on blur', task('t1').notes === 'typing…', task('t1').notes);
+
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  await wait(200);
+  check('↓ moves selection', f().dataset.inspectorTask === 't2', f() && f().dataset.inspectorTask);
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await wait(150);
+  check('Esc clears to the page project', $('#inspector [data-inspector-project="p1"]') !== null);
+
+  const seq = $('#inspector input[name=kind][value=sequential]');
+  seq.checked = true;
+  seq.dispatchEvent(new Event('change', { bubbles: true }));
+  await wait(700);
+  check('project inspector autosaves type', proj('p1').kind === 'sequential', proj('p1').kind);
+  window.__forceWide = false;
 }

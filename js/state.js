@@ -16,6 +16,7 @@ export const app = {
   reorder: null, // project id currently in reorder mode
   review: null, // { ids, reviewed, current } for the current review session
   reviewStats: null, // projectId -> last completed_at (lazy)
+  selected: null, // { type: 'task'|'project', id } shown in the desktop inspector
 };
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

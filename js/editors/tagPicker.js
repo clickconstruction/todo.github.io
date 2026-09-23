@@ -6,7 +6,7 @@ import { ensureTag } from '../data.js';
 export const tagPickerHtml = (hint = '') => `<label>Tags${hint ? ` <span class="hint">${esc(hint)}</span>` : ''} <div class="tag-picker" data-tag-picker></div>
   <input type="text" data-new-tag placeholder="New tag (Enter). e.g. Laptop, Waiting : Hiro" autocomplete="off"></label>`;
 
-export function wireTagPicker(root, initialIds) {
+export function wireTagPicker(root, initialIds, onChange = () => {}) {
   const selected = new Set(initialIds);
   const box = $('[data-tag-picker]', root);
   const draw = () => {
@@ -19,12 +19,13 @@ export function wireTagPicker(root, initialIds) {
     if (!b) return;
     selected.has(b.dataset.tag) ? selected.delete(b.dataset.tag) : selected.add(b.dataset.tag);
     draw();
+    onChange();
   };
   $('[data-new-tag]', root).onkeydown = async (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
     const tag = await ensureTag(e.target.value);
-    if (tag) { selected.add(tag.id); e.target.value = ''; draw(); }
+    if (tag) { selected.add(tag.id); e.target.value = ''; draw(); onChange(); }
   };
   return () => [...selected];
 }

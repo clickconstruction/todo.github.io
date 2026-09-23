@@ -8,6 +8,7 @@ import { forecastData } from './views/forecast.js';
 import { HOURS } from './dates.js';
 import { openEditor, openQuickEntry } from './editors/task.js';
 import { openProjectEditor, openFolderEditor } from './editors/project.js';
+import { isWide, select, clearSelection, moveSelection } from './inspector.js';
 import { onSearchInput } from './views/search.js';
 import { onDoneFilterChange } from './views/done.js';
 import { setFilter } from './filter.js';
@@ -16,6 +17,12 @@ import { createToken, revokeToken, removeSender, addSender, resetSettings } from
 
 const view = $('#view');
 const typing = () => /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+// Wide screens edit in the inspector; phones (and items not loaded locally) use the sheet.
+const inspectOrEdit = (id) => {
+  if (isWide() && byId(db.tasks, id)) return select('task', id);
+  const t = findTask(id);
+  if (t) openEditor(t);
+};
 const findTask = (id) => byId(db.tasks, id) || byId(app.searchExtra, id) || (app.doneCache && byId(app.doneCache.rows, id));
 
 const ACTIONS = {
@@ -88,11 +95,11 @@ const CLICKS = [
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
   ['[data-edit-folder]', (el) => openFolderEditor(byId(db.folders, el.dataset.editFolder))],
   ['[data-add-project]', (el) => openProjectEditor(null, { folder_id: el.dataset.addProject })],
-  ['[data-edit-project]', (el) => openProjectEditor(byId(db.projects, el.dataset.editProject))],
+  ['[data-edit-project]', (el) => (isWide() ? select('project', el.dataset.editProject) : openProjectEditor(byId(db.projects, el.dataset.editProject)))],
   ['[data-remove-sender]', (el) => removeSender(el.dataset.removeSender)],
   ['[data-revoke]', (el) => revokeToken(el.dataset.revoke)],
-  ['[data-done-task]', (el) => { const t = findTask(el.dataset.doneTask); if (t) openEditor(t); }],
-  ['[data-task]', (el) => { const t = findTask(el.dataset.task); if (t) openEditor(t); }],
+  ['[data-done-task]', (el) => inspectOrEdit(el.dataset.doneTask)],
+  ['[data-task]', (el) => inspectOrEdit(el.dataset.task)],
 ];
 
 view.addEventListener('click', (e) => {
@@ -152,6 +159,8 @@ $('#more-tab').onclick = () => {
 window.addEventListener('hashchange', render);
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || $('#sheet').open || typing()) return;
+  if (isWide() && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); moveSelection(e.key === 'ArrowDown' ? 1 : -1); return; }
+  if (e.key === 'Escape' && app.selected) { clearSelection(); return; }
   if (location.hash.startsWith('#review') && ['j', 'k', 'm'].includes(e.key)) {
     const btn = e.key === 'm' ? $('[data-mark-reviewed]') : $$review(e.key === 'j' ? 1 : 0);
     if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }

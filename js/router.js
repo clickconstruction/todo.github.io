@@ -3,6 +3,7 @@ import { db, app, $, isOpen } from './state.js';
 import { viewInbox, viewTags, viewTag, viewFlagged, flaggedBadgeCount } from './views/basic.js';
 import { viewForecast, forecastBadgeCount } from './views/forecast.js';
 import { viewReview, reviewDueCount } from './views/review.js';
+import { renderInspector } from './inspector.js';
 import { viewProjects, viewProject } from './views/projects.js';
 import { viewSearch } from './views/search.js';
 import { viewDone } from './views/done.js';
@@ -29,6 +30,7 @@ export function render() {
   $('#badge-review').textContent = reviewDueCount() || '';
   // Views that live under "More" on phones light up the More tab.
   $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review'].includes(view));
+  renderInspector();
   if ('setAppBadge' in navigator) (inboxCount + dueCount ? navigator.setAppBadge(inboxCount + dueCount) : navigator.clearAppBadge()).catch(() => {});
 }
 

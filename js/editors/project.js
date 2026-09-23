@@ -1,22 +1,20 @@
 // Project and folder editor sheets. Nothing is deleted: projects are completed/dropped,
 // folders archived (only once they hold no active or on-hold projects; the database enforces this too).
-import { sb, db, app, $, esc, run, syncRow, toast, openSheet, bySort, PROJECT_STATUSES } from '../state.js';
+import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, bySort, PROJECT_STATUSES } from '../state.js';
 import { insertFolder, updateProject, setLinks } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { PROJECT_KINDS } from '../availability.js';
 
-export function openProjectEditor(project, defaults = {}) {
-  const p = project || { name: '', folder_id: null, status: 'active', kind: 'parallel', complete_with_last: false, notes: '', ...defaults };
+function projectFieldsHtml(p, project) {
   const folderOptions = db.folders.filter((f) => !f.archived_at || f.id === p.folder_id).sort(bySort)
     .map((f) => `<option value="${f.id}" ${f.id === p.folder_id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
-  const sheet = openSheet(`<form method="dialog" id="project-form">
-    <h2>${project ? 'Edit project' : 'New project'}</h2>
-    <input type="text" name="name" value="${esc(p.name)}" placeholder="Outcome, e.g. Launch todotooling.com" required autocomplete="off">
+  return `
+    <input type="text" name="name" value="${esc(p.name)}" placeholder="Outcome, e.g. Launch todotooling.com" required autocomplete="off" aria-label="Project name">
     <label>Folder
       <select name="folder_id"><option value="">No folder</option>${folderOptions}<option value="__new">+ New folder…</option></select></label>
     <input type="text" name="new_folder" placeholder="New folder name" autocomplete="off" hidden>
-    <div class="field"><span class="field-label" id="kind-label">Type</span>
-      <div class="segmented" role="radiogroup" aria-labelledby="kind-label">
+    <div class="field"><span class="field-label">Type</span>
+      <div class="segmented" role="radiogroup" aria-label="Project type">
         ${PROJECT_KINDS.map(([v, l, hint]) => `<label title="${esc(hint)}"><input type="radio" name="kind" value="${v}" ${p.kind === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}
       </div></div>
     <p class="view-sub kind-hint" style="margin:0">${esc(PROJECT_KINDS.find(([v]) => v === p.kind)[2])}</p>
@@ -25,47 +23,96 @@ export function openProjectEditor(project, defaults = {}) {
     ${tagPickerHtml('actions inherit these')}
     ${project ? `<label>Status<select name="status">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
     <label>Notes<textarea name="notes" placeholder="Purpose, what done looks like…">${esc(p.notes)}</textarea></label>
-    ${project ? '<p class="view-sub" style="margin:0">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>' : ''}
+    ${project ? '<p class="view-sub" style="margin:0">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>' : ''}`;
+}
+
+// Shared wiring; returns collect() → Promise<{ fields, tagIds } | null> (creates a new folder if asked).
+function wireProjectForm(form, project, onTagsChange) {
+  const newFolder = form.elements.new_folder;
+  form.elements.folder_id.addEventListener('change', (e) => {
+    newFolder.hidden = e.target.value !== '__new';
+    newFolder.required = !newFolder.hidden;
+    if (!newFolder.hidden) newFolder.focus();
+  });
+  const selectedTags = wireTagPicker(form, project ? db.projectTags.filter((x) => x.project_id === project.id).map((x) => x.tag_id) : [], onTagsChange);
+  form.addEventListener('change', (e) => {
+    if (e.target.name === 'kind') $('.kind-hint', form).textContent = PROJECT_KINDS.find(([v]) => v === e.target.value)[2];
+  });
+  return async () => {
+    const f = new FormData(form);
+    let folder_id = f.get('folder_id') || null;
+    if (folder_id === '__new') {
+      const folder = await insertFolder(f.get('new_folder'));
+      if (!folder) return null;
+      folder_id = folder.id;
+    }
+    const fields = { name: (f.get('name') || '').trim(), folder_id, notes: f.get('notes'), kind: f.get('kind') || 'parallel',
+      complete_with_last: f.get('complete_with_last') === 'on', flagged: f.get('flagged') === 'on' };
+    if (project) fields.status = f.get('status');
+    return fields.name ? { fields, tagIds: selectedTags() } : null;
+  };
+}
+
+async function saveProject(project, { fields, tagIds }) {
+  await setLinks('project_tags', 'projectTags', 'project_id', project.id, tagIds);
+  return updateProject(byId(db.projects, project.id) || project, fields);
+}
+
+export function openProjectEditor(project, defaults = {}) {
+  const p = project || { name: '', folder_id: null, status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, notes: '', ...defaults };
+  const sheet = openSheet(`<form method="dialog" id="project-form">
+    <h2>${project ? 'Edit project' : 'New project'}</h2>
+    ${projectFieldsHtml(p, project)}
     <div class="actions">
       <div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div>
     </div>
   </form>`);
   const form = $('#project-form', sheet);
-  const newFolder = form.elements.new_folder;
-  form.elements.folder_id.onchange = (e) => {
-    newFolder.hidden = e.target.value !== '__new';
-    newFolder.required = !newFolder.hidden;
-    if (!newFolder.hidden) newFolder.focus();
-  };
-  const selectedTags = wireTagPicker(form, project ? db.projectTags.filter((x) => x.project_id === project.id).map((x) => x.tag_id) : []);
-  form.addEventListener('change', (e) => {
-    if (e.target.name === 'kind') $('.kind-hint', sheet).textContent = PROJECT_KINDS.find(([v]) => v === e.target.value)[2];
-  });
+  const collect = wireProjectForm(form, project);
   $('[data-cancel]', sheet).onclick = () => sheet.close();
   form.onsubmit = async (e) => {
     e.preventDefault();
-    const f = new FormData(form);
-    let folder_id = f.get('folder_id') || null;
-    if (folder_id === '__new') {
-      const folder = await insertFolder(f.get('new_folder'));
-      if (!folder) return;
-      folder_id = folder.id;
-    }
-    const fields = { name: f.get('name').trim(), folder_id, notes: f.get('notes'), kind: f.get('kind') || 'parallel', complete_with_last: f.get('complete_with_last') === 'on', flagged: f.get('flagged') === 'on' };
-    if (project) fields.status = f.get('status');
-    if (!fields.name) return;
+    const data = await collect();
+    if (!data) return;
     sheet.close();
-    if (project) {
-      await setLinks('project_tags', 'projectTags', 'project_id', project.id, selectedTags());
-      return updateProject(project, fields);
-    }
-    const [row] = await run(sb.from('projects').insert({ ...fields, sort: db.projects.length }).select());
+    if (project) return saveProject(project, data);
+    const [row] = await run(sb.from('projects').insert({ ...data.fields, sort: db.projects.length }).select());
     db.projects.push(row);
-    await setLinks('project_tags', 'projectTags', 'project_id', row.id, selectedTags());
+    await setLinks('project_tags', 'projectTags', 'project_id', row.id, data.tagIds);
     location.hash = `#project/${row.id}`;
   };
   sheet.showModal();
   if (!project) form.elements.name.focus();
+}
+
+// Inspector panel for a project: edits in place and saves as you go.
+export function renderProjectInspector(container, project) {
+  container.innerHTML = `<form class="inspector-form" data-inspector-project="${project.id}" novalidate>
+    <div class="inspector-head"><span class="inspector-kind">Project</span><span class="save-state" aria-live="polite"></span></div>
+    ${projectFieldsHtml(project, project)}
+  </form>`;
+  const form = $('form', container);
+  const state = $('.save-state', form);
+  let timer;
+  const save = async () => {
+    clearTimeout(timer);
+    if (form.elements.folder_id.value === '__new' && !form.elements.new_folder.value.trim()) return; // wait for a name
+    const data = await collect();
+    if (!data) { state.textContent = 'Name required'; return; }
+    state.textContent = 'Saving…';
+    container.dataset.saving = '1'; // the app re-renders during the save; the panel is already current
+    try {
+      const row = await saveProject(project, data);
+      container.dataset.key = `p:${row.id}:${row.updated_at}`;
+      state.textContent = 'Saved ✓';
+    } finally { delete container.dataset.saving; }
+  };
+  const soon = () => { clearTimeout(timer); state.textContent = 'Editing…'; timer = setTimeout(save, 400); };
+  const collect = wireProjectForm(form, project, soon);
+  form.addEventListener('change', soon);
+  form.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); } });
+  form.addEventListener('submit', (e) => { e.preventDefault(); save(); });
+  form.flushSave = () => (timer ? save() : Promise.resolve());
 }
 
 export function openFolderEditor(folder) {

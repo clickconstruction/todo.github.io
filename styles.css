@@ -356,3 +356,26 @@ h1.review { color: #3b82f6; }
 .badge.inline { position: static; display: inline-block; margin-left: 8px; }
 /* Keep Mark Reviewed within reach while scrolling a long project. */
 .review-bar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding-top: calc(env(safe-area-inset-top) + 6px); padding-bottom: 6px; margin-top: calc(-1 * env(safe-area-inset-top) - 6px); }
+
+/* Desktop inspector */
+.inspector { display: none; }
+@media (min-width: 1100px) {
+  body.has-inspector .view { margin-right: 380px; }
+  .inspector:not([hidden]) { display: block; position: fixed; top: 0; right: 0; bottom: 0; width: 380px; overflow-y: auto; z-index: 9;
+    background: var(--surface); border-left: 1px solid var(--line); padding: 20px 18px 40px; }
+  body.has-inspector .fab { right: 404px; }
+  body.has-inspector .toast { left: calc(50% - 80px); }
+}
+.inspector-form { display: grid; gap: 12px; }
+.inspector-form label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.inspector-form .flag-toggle { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.inspector-form .flag-toggle input { width: 20px; height: 20px; accent-color: var(--flag); }
+.inspector-form .segmented label { display: block; color: var(--text); }
+.inspector-form textarea { min-height: 110px; }
+.inspector-form input[name=title], .inspector-form input[name=name] { font-size: 18px; font-weight: 600; }
+.inspector-head { display: flex; justify-content: space-between; align-items: center; }
+.inspector-kind { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+.save-state { font-size: 12px; color: var(--muted); }
+.inspector-empty { color: var(--muted); text-align: center; padding-top: 40vh; }
+.row.selected { background: var(--accent-soft); border-radius: 8px; }
+.inspector-form .date-field > label { display: block; }
