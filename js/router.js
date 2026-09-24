@@ -27,20 +27,21 @@ import { viewShare, mountShare } from './views/capture.js';
 import { viewChecklists, viewChecklist } from './views/checklists.js';
 import { viewDaily } from './views/daily.js';
 import { viewSettle } from './views/settle.js';
+import { viewFullReview, stopListening } from './views/fullreview.js';
 import { withFocus, getFocus, focusLabel, focusedProjectIds } from './prefs.js';
 import { applySidebar } from './sidebar.js';
 import { somedayCount } from './views/someday.js';
 import { rowFor } from './views/daily.js';
 import { bigDue } from './views/horizons.js';
 
-const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person', 'weekly', 'sweep', 'someday', 'horizons', 'area', 'goal', 'share', 'checklists', 'checklist', 'daily', 'settle']);
+const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person', 'weekly', 'sweep', 'someday', 'horizons', 'area', 'goal', 'share', 'checklists', 'checklist', 'daily', 'settle', 'full']);
 const VIEWS = {
   search: viewSearch, inbox: viewInbox, forecast: viewForecast, projects: viewProjects, project: viewProject,
   tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone, flagged: viewFlagged, review: viewReview,
   nearby: viewNearby, places: viewPlaces, alerts: viewAlerts, perspective: viewPerspective, perspectives: viewPerspectives, import: viewImport, template: viewTemplate,
   clarify: viewClarify, tickler: viewTickler, reference: viewReference, waiting: viewWaiting, person: viewPerson,
   weekly: viewWeekly, sweep: viewSweep, someday: viewSomeday,
-  horizons: viewHorizons, area: viewArea, goal: viewGoal, now: viewNow, plan: viewPlan, share: viewShare, checklists: viewChecklists, checklist: viewChecklist, daily: viewDaily, settle: viewSettle,
+  horizons: viewHorizons, area: viewArea, goal: viewGoal, now: viewNow, plan: viewPlan, share: viewShare, checklists: viewChecklists, checklist: viewChecklist, daily: viewDaily, settle: viewSettle, full: viewFullReview,
 };
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
 const AFTER = { share: mountShare, plan: mountPlan, nearby: mountNearbyMap, clarify: mountClarify, sweep: mountSweep, weekly: (step) => step === 'sweep' && mountSweep(), reference: (id) => id && mountReferenceFiles(id) };
@@ -65,6 +66,8 @@ export function render() {
   const banner = focused ? `<div class="focus-banner" role="status"><span>🎯 Focused on <b>${esc(focusLabel())}</b></span>
     <span><button class="link-btn" data-act="focus">Change</button><button class="link-btn" data-act="unfocus">Unfocus</button></span></div>` : '';
   $('#view').innerHTML = banner + html;
+  document.body.classList.toggle('fr-mode', view === 'full'); // Full Review: one card, nothing else
+  if (view !== 'full') stopListening();
   document.body.classList.toggle('is-focused', !!getFocus());
   if (AFTER[view]) AFTER[view](...args);
   const tab = TAB_FOR[view] || view;

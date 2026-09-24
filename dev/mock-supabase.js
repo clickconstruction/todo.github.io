@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      perspectives: [], imports: [], settle_ops: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      perspectives: [], imports: [], settle_ops: [], review_sessions: [], review_items: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -240,6 +240,8 @@
     calendars: () => ({ color: '#1D9E75', enabled: true, sort: 0, last_ok_at: null, last_error: null, event_count: null, archived_at: null }),
     user_settings: () => ({ due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, review_notified_at: null, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true, daily_notified_at: null, horizons_quarter_at: null, sidebar: {} }),
     daily_reviews: () => ({ started_at: null, shutdown_at: null, focus: [] }),
+    review_sessions: () => ({ title: 'Full Review', scope: {}, current_item: null, status: 'active', agent_seen_at: null, agent_status: '', finished_at: null }),
+    review_items: () => ({ task_id: null, grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null }),
     checklists: () => ({ items: [], complete_action: true, sort: 0, archived_at: null }),
     checklist_runs: () => ({ started_at: new Date().toISOString(), finished_at: null, ticked: [], total: 0 }),
     areas: () => ({ standards: '', review_every_days: 30, last_reviewed_at: null, sort: 0, archived_at: null }),
@@ -324,12 +326,12 @@
         return { data: [], error: null };
       }
       let out = rows.filter(match).map(copy);
-      if (st.order) out.sort((a, b) => ((a[st.order] ?? '') < (b[st.order] ?? '') ? -1 : 1) * (st.asc ? 1 : -1));
+      if (st.orders && st.orders.length) out.sort((a, b) => { for (const [k, asc] of st.orders) { const x = a[k] ?? ''; const y = b[k] ?? ''; if (x < y) return asc ? -1 : 1; if (x > y) return asc ? 1 : -1; } return 0; });
       return { data: out.slice(st.offset, st.offset + Math.min(st.limit, 1000)), error: null }; // the server caps a request at 1,000 rows
     };
     const b = {
       select() { return b; },
-      order(k, o) { st.order = k; st.asc = !(o && o.ascending === false); return b; },
+      order(k, o) { (st.orders ||= []).push([k, !(o && o.ascending === false)]); return b; },
       limit(x) { st.limit = x; return b; },
       range(from, to) { st.offset = from; st.limit = to - from + 1; return b; },
       insert(p) { st.op = 'insert'; st.payload = p; return b; },
@@ -503,6 +505,41 @@
             .forEach((f) => { f.archived_at = now(); f.external_ref = null; folders++; });
           rec.undone_at = now();
           return { data: { tasks_dropped: tasksDropped, projects_dropped: projectsDropped, folders_archived: folders }, error: null };
+        }
+        // Mirrors review_decide() / review_undo() (migration 20261015000001).
+        if (name === 'review_decide' || name === 'review_undo') {
+          const it = tables.review_items.find((x) => x.id === args.item);
+          if (!it) return { data: null, error: { message: 'Card not found.' } };
+          const openT = (t) => t && !t.completed_at && !t.dropped_at;
+          const next = (sid, after) => { const p = tables.review_items.filter((x) => x.session_id === sid && x.status === 'pending').sort((a, b) => a.sort - b.sort); return (p.find((x) => x.sort > after) || p[0] || {}).id || null; };
+          const ses = tables.review_sessions.find((s) => s.id === it.session_id);
+          const somedayTag = () => { let g = tables.tags.find((x) => !x.parent_id && /^someday/i.test(x.name)); if (!g) { g = { ...DEFAULTS.tags(), id: id(), user_id: uid, name: 'Someday', status: 'on_hold', sort: 0, created_at: now() }; tables.tags.push(g); } return g; };
+          if (name === 'review_undo') {
+            if (!['reviewed', 'skipped'].includes(it.status)) return { data: null, error: { message: 'Nothing to undo on that card.' } };
+            (it.before || []).forEach((e) => {
+              if (e.t === 'someday_tag') tables.task_tags = tables.task_tags.filter((x) => !(x.tag_id === e.tag && e.ids.includes(x.task_id)));
+              if (e.t === 'task') Object.assign(tables.tasks.find((t) => t.id === e.id), { completed_at: e.completed_at, dropped_at: e.dropped_at });
+              if (e.t === 'project') tables.projects.find((p) => p.id === e.id).status = e.status;
+              if (e.t === 'expanded') tables.review_items.filter((x) => x.session_id === it.session_id && x.sort > it.sort && x.sort < it.sort + 1 && x.kind === 'task' && x.status === 'pending').forEach((x) => { x.status = 'void'; });
+            });
+            Object.assign(it, { status: 'pending', decision: null, decided_by: null, before: [], reviewed_at: null, updated_at: now() });
+            Object.assign(ses, { current_item: it.id, status: 'active', finished_at: null, updated_at: now() });
+            return { data: { restored: 1, current: it.id }, error: null };
+          }
+          if (it.status !== 'pending') return { data: null, error: { message: 'That card was already decided (undo it first).' } };
+          const d = args.decision;
+          let ids = (it.kind === 'task' ? [it.task_id] : (it.grp.task_ids || [])).filter((x) => openT(tables.tasks.find((t) => t.id === x)));
+          let op = { someday: 'someday', done: 'done', drop: 'drop' }[d] || (d === 'accept' ? ((it.grp.proposal || {}).op || 'someday') : null);
+          if (op === 'keep_newest') { const keep = (it.grp.proposal.keep ?? 20); const touched = (t) => Math.max(Date.parse(t.updated_at || 0) || 0, Date.parse(t.created_at || 0) || 0); ids = ids.map((x) => tables.tasks.find((t) => t.id === x)).sort((a, b) => touched(b) - touched(a)).slice(keep).map((t) => t.id); op = 'someday'; }
+          let before = [];
+          if (op === 'someday') { const g = somedayTag(); const add = ids.filter((x) => !tables.task_tags.some((l) => l.task_id === x && l.tag_id === g.id)); add.forEach((x) => tables.task_tags.push({ task_id: x, tag_id: g.id, user_id: uid, created_at: now() })); before = [{ t: 'someday_tag', tag: g.id, ids: add }]; }
+          if (op === 'done' || op === 'drop') { before = ids.map((x) => { const t = tables.tasks.find((y) => y.id === x); return { t: 'task', id: x, completed_at: t.completed_at, dropped_at: t.dropped_at }; }); ids.forEach((x) => { const t = tables.tasks.find((y) => y.id === x); if (op === 'done') t.completed_at = now(); else t.dropped_at = now(); }); }
+          if (op === 'park') { const ps = tables.projects.filter((p) => p.status === 'active' && ids.some((x) => (tables.tasks.find((t) => t.id === x) || {}).project_id === p.id)); before = ps.map((p) => ({ t: 'project', id: p.id, status: p.status })); ps.forEach((p) => { p.status = 'on_hold'; }); }
+          if (d === 'one_by_one') { ids.forEach((x, i) => tables.review_items.push({ ...DEFAULTS.review_items(), id: id(), session_id: it.session_id, user_id: uid, sort: it.sort + (i + 1) / (ids.length + 1), kind: 'task', task_id: x, created_at: now(), updated_at: now() })); before = [{ t: 'expanded' }]; }
+          Object.assign(it, { status: d === 'skip' ? 'skipped' : 'reviewed', decision: d, decided_by: args.by === 'agent' ? 'agent' : 'user', note: args.note ?? it.note, before, reviewed_at: now(), updated_at: now() });
+          const nx = next(it.session_id, it.sort);
+          Object.assign(ses, { current_item: nx, status: nx ? 'active' : 'done', finished_at: nx ? null : now(), updated_at: now(), ...(args.by === 'agent' ? { agent_seen_at: now(), agent_status: '' } : {}) });
+          return { data: { changed: ids.length, next: nx }, error: null };
         }
         // Mirrors settle_apply() / settle_undo() (migration 20261012000001).
         if (name === 'settle_apply') {

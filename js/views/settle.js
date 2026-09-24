@@ -79,6 +79,8 @@ export function viewSettle(id, step, a, b) {
   return `<a class="back" href="#import">‹ Import</a>
     <div class="view-head"><h1 class="settle">Settle in</h1></div>
     <p class="view-sub">${esc(i.source === 'omnifocus' || !i.source ? 'OmniFocus' : i.source)} import · ${esc(fmtDate(i.created_at))} · only what it added</p>
+    <div class="fr-start"><div><b>Full Review</b><p class="hint">Go through it one card at a time, with Claude alongside in another window. Important things first; big clusters as one card.</p></div>
+      <button class="btn primary" data-fr-start="import" data-id="${id}" data-title="Full Review · OmniFocus import">Start</button></div>
     <div class="st-live"><span class="hint">Live actions</span><span><b>${n(d.total)}</b> <span class="hint">→</span> <b class="ok">${n(d.live)}</b></span></div>
     <div class="cl-progress"><i style="width:${Math.round((doneN / st.length) * 100)}%"></i></div>
     <div class="wk-steps">${st.map((x) => `<a class="wk-step ${x.done ? 'done' : ''}" href="#settle/${id}/${x.key}"><span class="wk-check" aria-hidden="true">${x.done ? '✓' : ''}</span>

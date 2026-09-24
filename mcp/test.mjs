@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -126,7 +126,7 @@ globalThis.fetch = async (url, init = {}) => {
   const follow = (r) => db.tasks.filter((x) => x.parent_id === r.id && x.project_id !== r.project_id).forEach((x) => { x.project_id = r.project_id; follow(x); });
   if (m === 'POST' && table === 'tasks') for (const b of (Array.isArray(body) ? body : [body])) { const e = guard({}, b); if (e) return res({ message: e }, 400); }
   if (m === 'PATCH' && table === 'tasks') for (const r of rows.filter(match)) { const b = { ...body }; const e = guard(r, b); if (e) return res({ message: e }, 400); Object.assign(r, b); follow(r); }
-  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...(table === 'checklists' ? { complete_action: true, archived_at: null } : {}), ...(table === 'checklist_runs' ? { started_at: new Date().toISOString(), finished_at: null } : {}), ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
+  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...(table === 'checklists' ? { complete_action: true, archived_at: null } : {}), ...(table === 'review_items' ? { status: 'pending', note: '', changed: {}, priority: false } : {}), ...(table === 'checklist_runs' ? { started_at: new Date().toISOString(), finished_at: null } : {}), ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
   if (m === 'PATCH') { const hit = rows.filter((r) => match(r) && orMatch(r)); hit.forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); if (table === 'tasks') hit.forEach((r) => { if (!r.waiting_on) r.follow_up_at = null; }); return init.headers.Prefer ? res(hit) : res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
 };
@@ -146,7 +146,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 69 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 69 tools, no internals leaked');
+assert(list.body.result.tools.length === 70 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 70 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -1130,5 +1130,40 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(made.pinned === false && db.perspectives.find((p) => p.name === 'Quick pins').pinned === false, 'create_perspective: pinned false keeps it out of the sidebar');
   const again = await tool('update_perspective', { perspective: made.id, pinned: true });
   assert(again.pinned === true, 'update_perspective: pin it');
+}
+// ---------- Full Review (full_review) ----------
+{
+  const U4 = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const W = U4(901); const S1 = U4(902); const M = (i) => U4(1000 + i);
+  const ago = (d) => new Date(Date.now() - d * 86400000).toISOString();
+  db.projects.push({ id: 'pRM', user_id: UID, name: 'Movies', status: 'active', folder_id: null, import_id: 'imR', sort: 90, created_at: ago(2000) });
+  db.projects.push({ id: 'pRE', user_id: UID, name: 'Estate and legacy', status: 'active', folder_id: null, sort: 91, created_at: ago(10) });
+  const T0 = { user_id: UID, notes: '', parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, completed_at: null, dropped_at: null, import_id: 'imR', gain: '' };
+  db.tasks.push({ ...T0, id: W, title: 'Update my will', project_id: null, created_at: ago(1900), updated_at: ago(1900) });
+  for (let i = 0; i < 14; i++) db.tasks.push({ ...T0, id: M(i), title: `Movie ${i}`, project_id: 'pRM', created_at: ago(1500 + i), updated_at: ago(1500 + i) });
+  db.tasks.push({ ...T0, id: S1, title: 'Fix the gate latch', project_id: null, created_at: ago(1600), updated_at: ago(1600) });
+  const st = await tool('full_review', { action: 'start', import_id: 'imR', title: 'Full Review · test' });
+  assert(st.queue.cards === 3 && st.queue.first_because_important === 1 && st.queue.groups === 1 && /#full\//.test(st.app_link), 'full_review start: important first, 14 movies as one group, the rest single');
+  assert(st.current.task.title === 'Update my will' && /my will/.test(st.current.why_first) && st.progress.total === 3, 'the first card is the important one, and says why');
+  const an = await tool('full_review', { action: 'annotate', gain: 'Family is not left guessing', project: 'Estate and legacy', planned: '2026-10-03', note: 'You said this matters more now.' });
+  const w = db.tasks.find((t) => t.id === W);
+  const item = db.review_items.find((x) => x.task_id === W);
+  assert(w.gain === 'Family is not left guessing' && w.project_id === 'pRE' && w.planned_at && item.changed.gain && item.changed.project && item.changed.dates && item.note === 'You said this matters more now.', 'annotate: updates the action, marks what changed (for the live highlight), keeps the note');
+  const ses = db.review_sessions.find((x) => x.id === st.session_id);
+  assert(ses.agent_seen_at && ses.agent_status === '' && an.current.task.gain === 'Family is not left guessing', 'presence recorded; the card reflects the change');
+  const before = rpcCalls.length;
+  await tool('full_review', { action: 'decide', decision: 'keep', note: 'Planned for Saturday' });
+  const dc = rpcCalls.slice(before).find((c) => c.fn === 'review_decide');
+  assert(dc && dc.body.item === item.id && dc.body.decision === 'keep' && dc.body.by === 'agent' && dc.body.owner === UID, 'decide: review_decide as the agent');
+  const grp = db.review_items.find((x) => x.kind === 'group');
+  await tool('full_review', { action: 'goto', item_id: grp.id });
+  await tool('full_review', { action: 'annotate', proposal: { op: 'keep_newest', keep: 5 }, note: 'A watchlist, not actions' });
+  assert(grp.grp.proposal.op === 'keep_newest' && grp.grp.proposal.keep === 5 && grp.changed.proposal, 'a group card’s proposal can be changed before the user accepts');
+  await tool('full_review', { action: 'prioritize', task_ids: [M(3)] });
+  assert(!grp.grp.task_ids.includes(M(3)) && db.review_items.some((x) => x.task_id === M(3) && x.priority && x.sort > grp.sort && x.sort < grp.sort + 1), 'prioritize pulls one out of its group, right after the current card');
+  let bad = ''; try { await tool('full_review', { action: 'decide' }); } catch (e) { bad = e.message; }
+  assert(/decision is required/.test(bad), 'decide needs a decision');
+  const ls = await tool('full_review', { action: 'list' });
+  assert(ls.some((x) => x.id === st.session_id), 'list sessions');
 }
 console.log('ALL PASSED');

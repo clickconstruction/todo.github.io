@@ -58,6 +58,7 @@ export function viewProject(id) {
       ordered.filter((t) => !t.completed_at).length > 1 ? `<button type="button" data-act="toggle-reorder">${app.reorder === p.id ? 'Done reordering' : 'Reorder actions'}</button>` : '',
       `<button type="button" data-focus-here="${p.id}">Focus on this project</button>`,
       `<button type="button" data-save-template="${p.id}">Save as template</button>`,
+      `<button type="button" data-fr-start="project" data-id="${p.id}" data-title="Full Review · ${esc(p.name)}">Full Review <span class="hint">one card at a time, with Claude</span></button>`,
     ])}</div>
     ${p.template_id && byId(db.templates || [], p.template_id) ? `<p class="view-sub from-template">From the template <a href="#template/${p.template_id}">${esc(byId(db.templates, p.template_id).name)}</a></p>` : ''}
     ${outcomeLine(p)}

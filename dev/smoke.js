@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -56,6 +56,62 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Full Review: one card at a time, Claude alongside (simulated here by writing what the MCP writes).
+async function fullReview(check) {
+  const { app } = await import('/js/state.js');
+  app.fr = null; window.__frPollMs = 150;
+  const until = async (fn, ms = 4000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const ago = (d) => new Date(Date.now() - d * 86400000).toISOString();
+  const t = T();
+  t.imports.push({ id: 'imF', user_id: 'u1', source: 'omnifocus', counts: { tasks: 18, projects: 1 }, settle: {}, created_at: ago(0), undone_at: null });
+  t.projects.push({ ...t.projects[0], id: 'pfM', name: 'Movies', status: 'active', folder_id: null, import_id: 'imF', created_at: ago(2000), updated_at: ago(2000) });
+  const T1 = (id, title, extra = {}) => t.tasks.push({ ...t.tasks[0], id, title, notes: '', project_id: null, parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, completed_at: null, dropped_at: null, gain: '', import_id: 'imF', created_at: ago(1800), updated_at: ago(1800), ...extra });
+  T1('fW', 'Update my will');
+  for (let i = 0; i < 14; i++) T1(`fM${i}`, `Movie ${i}`, { project_id: 'pfM', created_at: ago(1500 + i), updated_at: ago(1500 + i) });
+  T1('fS1', 'Fix the gate latch'); T1('fS2', 'Sort the garage shelves');
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  await go('#settle/imF');
+  check('Settle in offers Full Review', !!$('[data-fr-start="import"]'));
+  $('[data-fr-start="import"]').click();
+  await until(() => location.hash.startsWith('#full/') && has(undefined, 'update my will'));
+  const sid = location.hash.split('/')[1];
+  check('starts: full screen, important first with why, progress', document.body.classList.contains('fr-mode') && has(undefined, 'update my will', 'mentions “my will”', '1 of 4') && t.review_items.filter((x) => x.session_id === sid).length === 4);
+  check('queue: 1 important, 14 movies as one group, 2 singles', t.review_items.filter((x) => x.session_id === sid && x.kind === 'group').length === 1 && t.review_items.find((x) => x.kind === 'group' && x.session_id === sid).grp.task_ids.length === 14);
+  check('before Claude joins: “Review with Claude” to invite', !!$('[data-fr="invite"]'));
+  let clip = ''; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (x) => { clip = x; } } });
+  $('[data-fr="invite"]').click(); await wait(50);
+  check('invite copies a prompt for Claude with the session', clip.includes(sid) && clip.includes('full_review'));
+  // Claude annotates over the MCP: the card updates live, with the change highlighted and a note.
+  const ses = t.review_sessions.find((x) => x.id === sid);
+  const cur = t.review_items.find((x) => x.id === ses.current_item);
+  const stamp = new Date().toISOString();
+  Object.assign(t.tasks.find((x) => x.id === 'fW'), { gain: 'Family is not left guessing', updated_at: stamp });
+  Object.assign(cur, { changed: { gain: stamp }, note: 'You said this matters more now.', updated_at: stamp });
+  Object.assign(ses, { agent_seen_at: stamp, agent_status: 'editing', updated_at: stamp });
+  await until(() => has(undefined, 'family is not left guessing') && has(undefined, 'claude is here'));
+  check('live: Claude’s gain appears, highlighted, with its note and presence', has(undefined, 'family is not left guessing', 'you said this matters more now', 'claude is here · editing') && !!$('.fr-new'));
+  // Keys: 1 keep → the group card.
+  key('1'); await until(() => has(undefined, 'movies') && !!$('.fr-sample'));
+  check('1 = Keep; next is the group card with a proposal', t.review_items.find((x) => x.task_id === 'fW').status === 'reviewed' && has(undefined, 'group · 14 actions', 'all 14 → someday'));
+  key('2'); await until(() => !$('.fr-sample') && has(undefined, 'movie 0'));
+  check('One by one: 14 single cards, right after', t.review_items.filter((x) => x.session_id === sid && x.kind === 'task' && /^fM/.test(x.task_id)).length === 14 && has(undefined, 'movie 0'));
+  key('u'); await until(() => has(undefined, 'group · 14 actions') && T().review_items.filter((x) => x.status === 'void').length === 14);
+  check('u = undo: back to the group card', has(undefined, 'group · 14 actions') && t.review_items.filter((x) => x.session_id === sid && x.status === 'void').length === 14);
+  key('1'); await until(() => has(undefined, 'fix the gate latch') || has(undefined, 'sort the garage shelves'));
+  const some = t.tags.find((g) => g.name === 'Someday');
+  check('Accept: all 14 → Someday', some && t.task_tags.filter((l) => l.tag_id === some.id && /^fM/.test(l.task_id)).length === 14);
+  const before = $('.fr-title').textContent; key('s'); await until(() => $('.fr-title') && $('.fr-title').textContent !== before);
+  key('2'); await until(() => has(undefined, 'all reviewed'));
+  check('skip and someday: the end, with the skipped one offered', has(undefined, 'all reviewed', 'skipped') && !!$('[data-fr="reopen-skipped"]'));
+  $('[data-fr="reopen-skipped"]').click(); await until(() => !has(undefined, 'all reviewed'));
+  check('go through the skipped ones', !has(undefined, 'all reviewed') && (has(undefined, 'fix the gate latch') || has(undefined, 'sort the garage shelves')));
+  key('Escape'); await wait(150);
+  check('Esc closes back to where it started', location.hash === '#settle/imF' && !document.body.classList.contains('fr-mode'));
+  await go('#project/pfM');
+  check('a project’s ⋯ menu offers Full Review', !!$('.head-menu [data-fr-start="project"]'));
+  window.__frPollMs = undefined; app.fr = null;
+}
 
 // Staying signed in: renew on wake, never sign out for a dropped connection, a kind signed-out screen.
 async function staySignedIn(check) {

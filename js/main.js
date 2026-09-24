@@ -27,6 +27,7 @@ import { noticeEmailPeople } from './views/capture.js';
 import { checklistAction, checklistChange } from './views/checklists.js';
 import { dailyAction, dailySubmit } from './views/daily.js';
 import { settleAction, settleKey } from './views/settle.js';
+import { fullReviewAction, fullReviewKey, startFullReview, activeSession } from './views/fullreview.js';
 import { moreSheetHtml, openCustomize } from './sidebar.js';
 import { initUpdates, resumeAfterUpdate, tryApply } from './updates.js';
 import { keepSession, signedIn, markSignedOutOnPurpose, lastEmail, signInNotice } from './session.js';
@@ -167,6 +168,15 @@ const CLICKS = [
   ['[data-ck]', (el, e) => { e.stopPropagation(); checklistAction(el); }],
   ['[data-daily]', (el, e) => { e.stopPropagation(); dailyAction(el); }],
   ['[data-settle]', (el, e) => { e.stopPropagation(); if (!el.disabled) settleAction(el); }],
+  ['[data-fr]', (el, e) => { e.stopPropagation(); fullReviewAction(el); }],
+  ['[data-fr-start]', async (el, e) => {
+    e.stopPropagation();
+    const key = el.dataset.frStart === 'import' ? 'import_id' : 'project_id';
+    const open = await activeSession(key, el.dataset.id);
+    if (open && confirm('Pick up your Full Review where you left off? (Cancel starts a new one.)')) { location.hash = `#full/${open.id}`; return; }
+    el.disabled = true;
+    try { await startFullReview({ [key]: el.dataset.id }, el.dataset.title || 'Full Review'); } finally { el.disabled = false; }
+  }],
   ['[data-flag-keep]', () => {}], // a Settle in flag tick is just a checkbox
   ['[data-cl-tick]', () => {}], // a checklist tick is handled on change
   ['[data-now], [data-now-set]', (el, e) => { e.stopPropagation(); nowAction(el); }],
@@ -264,7 +274,7 @@ $('#more-tab').onclick = () => {
 };
 window.addEventListener('hashchange', render);
 document.addEventListener('keydown', (e) => {
-  if (clarifyKey(e) || sweepKey(e) || (!$('#sheet').open && settleKey(e))) return;
+  if (clarifyKey(e) || sweepKey(e) || (!$('#sheet').open && (settleKey(e) || fullReviewKey(e)))) return;
   if (!e.metaKey && !e.ctrlKey && !$('#sheet').open && !typing() && location.hash.startsWith('#review') && ['j', 'k', 'm'].includes(e.key)) {
     const btn = e.key === 'm' ? $('[data-mark-reviewed]') : $$review(e.key === 'j' ? 1 : 0);
     if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
