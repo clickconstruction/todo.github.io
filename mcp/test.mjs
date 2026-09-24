@@ -863,6 +863,13 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(hz.goals.some((g) => g.title === 'Grow maintenance revenue' && g.projects.includes('Maintenance plan launch')) && hz.areas.some((a) => a.name === 'Click Plumbing' && a.standards) && hz.vision.year === 2029 && hz.purpose.text === 'Build things that last.', 'list_horizons: goals, areas, purpose (first line), vision');
   const hzFull = await tool('list_horizons', { include_text: true });
   assert(hzFull.purpose.text.includes('Treat people fairly'), 'list_horizons include_text');
+  { // many projects at once: batched, well under Cloudflare's 50 subrequests
+    const many = Array.from({ length: 30 }, (_, i) => { const id = `pFd${i}`; db.projects.push({ id, user_id: UID, name: `Feeder ${i}`, status: 'active', kind: 'parallel' }); return i % 2 ? id : `feeder ${i}`; });
+    const orig = globalThis.fetch; let n = 0; globalThis.fetch = (...x) => { n++; return orig(...x); };
+    const opha = await tool('save_area', { name: 'OPHA · runs off Farm 1', projects: many });
+    globalThis.fetch = orig;
+    assert(Array.from({ length: 30 }, (_, i) => `pFd${i}`).every((id) => db.projects.find((p) => p.id === id).area_id === opha.id) && n < 15, `save_area links 30 projects (ids and names) in few requests (${n})`);
+  }
   const empty = await tool('save_area', { name: 'Health' });
   assert((await tool('list_horizons', {})).areas.find((a) => a.name === 'Health').warnings.includes('nothing active'), 'balance: an area with nothing active is flagged');
   await tool('save_area', { id: 'Health', archived: true });

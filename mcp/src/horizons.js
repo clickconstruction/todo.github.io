@@ -2,6 +2,19 @@
 import { rankNow, areaBalance, isDueForReview, bigReviewsDue } from '../../js/whatnow.js';
 
 export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, calendar }) {
+  // Link many projects in two requests (one lookup, one batched update): a per-project loop ran past
+  // Cloudflare's 50-subrequest limit at about a dozen projects.
+  const linkProjects = async (api, refs, field, id) => {
+    if (!refs || !refs.length) return 0;
+    const { projects } = await api.lookups();
+    const ids = [...new Set(refs.map((ref) => {
+      const p = projects.find((x) => x.id === ref) || projects.find((x) => x.name.toLowerCase() === String(ref).trim().toLowerCase());
+      if (!p) throw new Error(`No project named "${ref}". Use list_projects.`);
+      return p.id;
+    }))];
+    for (let i = 0; i < ids.length; i += 100) await api.q(`projects?${api.u}&id=in.(${ids.slice(i, i + 100).map((x) => `"${x}"`).join(',')})`, { method: 'PATCH', body: { [field]: id } });
+    return ids.length;
+  };
   const findBy = (list, ref, key) => { const r = String(ref || '').trim().toLowerCase(); return list.find((x) => x.id === ref) || list.find((x) => String(x[key]).toLowerCase() === r); };
 
   return [
@@ -58,7 +71,7 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
           if (!body.name) throw new Error('name is required');
           [row] = await api.q('areas', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, ...body } });
         }
-        for (const ref of a.projects || []) await api.q(`projects?${api.u}&id=eq.${await api.resolveProject(ref)}`, { method: 'PATCH', body: { area_id: row.id } });
+        await linkProjects(api, a.projects, 'area_id', row.id);
         return { id: row.id, name: row.name, standards: row.standards || undefined, review_every_days: row.review_every_days, last_reviewed: localDate(row.last_reviewed_at, api.tz), archived: !!row.archived_at || undefined, projects_added: (a.projects || []).length || undefined };
       },
     },
@@ -86,7 +99,7 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
           if (!body.title) throw new Error('title is required');
           [row] = await api.q('goals', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, ...body } });
         }
-        for (const ref of a.projects || []) await api.q(`projects?${api.u}&id=eq.${await api.resolveProject(ref)}`, { method: 'PATCH', body: { goal_id: row.id } });
+        await linkProjects(api, a.projects, 'goal_id', row.id);
         return { id: row.id, title: row.title, status: row.status, target: row.target_date, why: row.why || undefined, projects_linked: (a.projects || []).length || undefined };
       },
     },
