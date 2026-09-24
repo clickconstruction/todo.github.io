@@ -3,7 +3,55 @@
 // note) and decide it; the app updates live. Every decision can be undone; nothing is deleted.
 import { buildQueue, priorityReason, proposalText } from '../../js/review.js';
 
-export function fullReviewTools({ OPEN, localDate, tool }) {
+export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
+  // ---------- suggestions: Claude proposes, the user Submits in the app ----------
+  const TASK_DECISIONS = ['keep', 'someday', 'done', 'drop', 'skip'];
+  const GROUP_DECISIONS = ['accept', 'one_by_one', 'keep_all', 'skip'];
+  async function lookups(api) {
+    const [projects, tags] = await Promise.all([
+      api.q(`projects?${api.u}&status=in.(active,on_hold)&select=id,name`), api.q(`tags?${api.u}&status=neq.dropped&select=id,name,parent_id`),
+    ]);
+    const label = (g) => { const p = g.parent_id && tags.find((x) => x.id === g.parent_id); return p ? `${p.name} : ${g.name}` : g.name; };
+    return { projects, tags, label };
+  }
+  // One suggestion from tool arguments; throws on anything that doesn't resolve (nothing is saved then).
+  function suggestionFrom(api, a, kind, L) {
+    const s = { at: new Date().toISOString() };
+    const ok = kind === 'group' ? GROUP_DECISIONS : TASK_DECISIONS;
+    if (!ok.includes(a.decision)) throw new Error(`decision must be one of: ${ok.join(', ')}`);
+    s.decision = a.decision;
+    if (a.note !== undefined) s.note = String(a.note).slice(0, 1000);
+    if (a.ahead) s.ahead = true;
+    if (kind === 'group') {
+      if (a.proposal) s.proposal = { op: a.proposal.op || 'someday', ...(a.proposal.keep !== undefined ? { keep: a.proposal.keep } : {}) };
+      return s;
+    }
+    if (a.title !== undefined && String(a.title).trim()) s.title = String(a.title).trim().slice(0, 1000);
+    if (a.gain !== undefined) { s.gain = String(a.gain || '').trim().slice(0, 500); if (a.gain_suggested) s.gain_suggested = true; }
+    if (a.project !== undefined) {
+      if (a.project === null || a.project === '') s.project_id = null;
+      else {
+        const r = String(a.project).trim().toLowerCase();
+        const p = L.projects.find((x) => x.id === a.project) || L.projects.find((x) => x.name.toLowerCase() === r);
+        if (!p) throw new Error(`No active project called "${a.project}". Create it first (create_project) or pick another.`);
+        s.project_id = p.id; s.project_name = p.name;
+      }
+    }
+    const hours = { planned: api.hours.planned, due: api.hours.due, defer: api.hours.defer };
+    ['planned', 'due', 'defer'].forEach((k) => { if (a[k] !== undefined) s[k] = a[k] === null || a[k] === '' ? null : zonedToIso(a[k], hours[k], api.tz); });
+    if (a.flagged !== undefined) s.flagged = !!a.flagged;
+    const find = (name) => { const n = String(name).trim().toLowerCase(); return L.tags.find((g) => g.id === name) || L.tags.find((g) => L.label(g).toLowerCase() === n) || L.tags.find((g) => g.name.toLowerCase() === n); };
+    if (Array.isArray(a.add_tags) && a.add_tags.length) {
+      s.add_tag_ids = []; s.add_tag_names = []; s.add_tag_labels = [];
+      a.add_tags.forEach((n) => { const g = find(n); if (g) { s.add_tag_ids.push(g.id); s.add_tag_labels.push(L.label(g)); } else { s.add_tag_names.push(String(n).trim().slice(0, 100)); s.add_tag_labels.push(`${String(n).trim()} (new)`); } });
+    }
+    if (Array.isArray(a.remove_tags) && a.remove_tags.length) {
+      s.remove_tag_ids = []; s.remove_tag_labels = [];
+      a.remove_tags.forEach((n) => { const g = find(n); if (g) { s.remove_tag_ids.push(g.id); s.remove_tag_labels.push(L.label(g)); } });
+    }
+    return s;
+  }
+
   const touch = (api, id, extra = {}) => api.q(`review_sessions?${api.u}&id=eq.${id}`, { method: 'PATCH', body: { agent_seen_at: new Date().toISOString(), ...extra } });
   const findSession = async (api, sid) => {
     const rows = await api.q(`review_sessions?${api.u}&order=created_at.desc&limit=20&select=*`);
@@ -18,7 +66,7 @@ export function fullReviewTools({ OPEN, localDate, tool }) {
 
   async function cardOut(api, it) {
     if (!it) return null;
-    const base = { item_id: it.id, kind: it.kind, status: it.status, note: it.note || undefined };
+    const base = { item_id: it.id, kind: it.kind, status: it.status, note: it.note || undefined, suggestion: it.suggestion && !it.suggestion.applied_at ? it.suggestion : undefined };
     if (it.kind === 'group') {
       const g = it.grp || {};
       const ids = g.task_ids || [];
@@ -58,19 +106,24 @@ export function fullReviewTools({ OPEN, localDate, tool }) {
 
   return [{
     name: 'full_review',
-    description: `Full Review: go through the user's actions one card at a time WITH them, while they watch the same card in the app (it updates live as you work). Ideal after an import or for a big project.
-How to run it: read the card ("status"), ask the user what they gain from it and where it belongs, then "annotate" (their words as the gain; project, dates, tags; a one-line note explaining the change) and "decide" with them. Important-looking items come first; big clusters come as one group card with a proposal you can change ("annotate" proposal) before the user accepts. Never decide drop/done without the user's say-so. Keep each card quick.
+    description: `Full Review: go through the user's actions one card at a time WITH them while they watch the same card in the app.
+Default way of working: SUGGEST, the user approves. When the user tells you what to do with a card, turn it into a suggestion ("suggest": decision plus any title/gain/project/dates/flag/tags and a one-line note). It appears on the card in the app as "Suggested by Claude" with Submit / Edit / Dismiss; nothing changes until they Submit. Only use "annotate" + "decide" (which apply immediately) when the user says to just do it.
+Draft ahead: call "upcoming" and "suggest" with items [...] for the next few cards from the user's patterns; these show as "drafted ahead" so the user can Submit quickly and only talk to you when they disagree. Never suggest drop/done for something the user hasn't clearly let go of; the gain should be the user's words (set gain_suggested when it's yours).
 actions:
-  start {import_id | project | all:true, min_age_days?, title?} → a new session (then give the user app_link)
-  status {session_id?} (default) → progress, the current card (full detail), the next few
-  annotate {gain?, gain_suggested?, project?, tags?|add_tags?|remove_tags?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, title?, note?, proposal? {op: someday|drop|park|keep_newest, keep?}} on the current card
-  decide {decision, note?} → action cards: keep|someday|done|drop|skip; group cards: accept|one_by_one|keep_all|skip. Returns the next card.
-  prioritize {task_ids} → bring these actions up next (pulled out of their group card if needed)
-  goto {item_id | "next" | "previous"} · undo {item_id? (default: the last decided)} · list`,
+  start {import_id | project | all:true, min_age_days?, title?} → a new session (give the user app_link)
+  status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
+  suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
+  upcoming {count? ≤10} → the next cards in full, for drafting ahead
+  annotate {…same fields…} / decide {decision, note?} → apply now (only when asked to just do it)
+  prioritize {task_ids} · goto {item_id | "next" | "previous"} · undo {item_id?} · list
+Decisions: action cards keep|someday|done|drop|skip; group cards accept|one_by_one|keep_all|skip.`,
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['start', 'status', 'annotate', 'decide', 'prioritize', 'goto', 'undo', 'list'], default: 'status' },
+        action: { type: 'string', enum: ['start', 'status', 'suggest', 'upcoming', 'annotate', 'decide', 'prioritize', 'goto', 'undo', 'list'], default: 'status' },
+        items: { type: 'array', description: 'suggest: several cards at once, each {item_id, decision, title?, gain?, project?, planned?, due?, defer?, flagged?, add_tags?, remove_tags?, proposal?, note?}', items: { type: 'object' } },
+        ahead: { type: 'boolean', description: 'suggest: drafted before talking it through (shown as “drafted ahead”)' },
+        count: { type: 'integer', description: 'upcoming: how many cards (max 10)' },
         session_id: { type: 'string' },
         import_id: { type: 'string' }, project: { type: 'string', description: 'Project name or id (start: review that project; annotate: move the action there)' },
         all: { type: 'boolean' }, min_age_days: { type: 'integer' }, title: { type: 'string' },
@@ -117,6 +170,50 @@ actions:
       let list = await items(api, s.id);
       const cur = await itemFull(api, (list.find((x) => x.id === s.current_item) || {}).id);
       if (action === 'status') { await touch(api, s.id); return stateOut(api, s, list); }
+      if (action === 'suggest') {
+        // One card (item_id, default the current one) or several: items [{item_id, decision, …}].
+        const wanted = Array.isArray(a.items) && a.items.length ? a.items.slice(0, 25) : [{ ...a, item_id: a.item_id || (cur && cur.id) }];
+        const L = await lookups(api);
+        const rows = await api.q(`review_items?${api.u}&session_id=eq.${s.id}&id=in.(${wanted.map((w) => `"${w.item_id}"`).join(',')})&select=id,kind,status`);
+        const planned = wanted.map((w) => {
+          const row = rows.find((r) => r.id === w.item_id);
+          if (!row) throw new Error(`No card ${w.item_id} in this review.`);
+          if (row.status !== 'pending') throw new Error(`Card ${w.item_id} is already decided.`);
+          return { id: row.id, s: suggestionFrom(api, { ...w, ahead: w.ahead ?? (cur && w.item_id !== cur.id) }, row.kind, L) };
+        });
+        for (const p of planned) await api.q(`review_items?${api.u}&id=eq.${p.id}`, { method: 'PATCH', body: { suggestion: p.s } });
+        await touch(api, s.id, { agent_status: '' });
+        return { suggested: planned.length, items: planned.map((p) => ({ item_id: p.id, decision: p.s.decision, ahead: p.s.ahead || undefined })),
+          next: 'The user sees each suggestion on its card in the app and Submits (or edits / dismisses) it there. Check status to see what they decided.' };
+      }
+      if (action === 'upcoming') {
+        // The next few cards in one go (for drafting suggestions ahead): 4–5 queries, whatever the count.
+        const n = Math.min(10, Math.max(1, a.count || 5));
+        const next = list.filter((x) => x.status === 'pending' && (!cur || x.sort > cur.sort)).slice(0, n);
+        if (!next.length) return { cards: [] };
+        const full = await api.q(`review_items?${api.u}&id=in.(${next.map((x) => `"${x.id}"`).join(',')})&select=*`);
+        const taskIds = full.filter((x) => x.kind === 'task').map((x) => x.task_id);
+        const tasks = taskIds.length ? await api.q(`tasks?${api.u}&id=in.(${taskIds.map((x) => `"${x}"`).join(',')})&select=*`) : [];
+        const [links, projects] = await Promise.all([
+          taskIds.length ? api.q(`task_tags?${api.u}&task_id=in.(${taskIds.map((x) => `"${x}"`).join(',')})&select=task_id,tag_id`) : [],
+          api.q(`projects?${api.u}&id=in.(${[...new Set(tasks.map((t) => t.project_id).filter(Boolean))].map((x) => `"${x}"`).join(',') || '"00000000-0000-0000-0000-000000000000"'})&select=id,name,flagged,purpose`),
+        ]);
+        const tagRows = links.length ? await api.q(`tags?${api.u}&id=in.(${[...new Set(links.map((l) => l.tag_id))].map((x) => `"${x}"`).join(',')})&select=id,name`) : [];
+        const day = (iso) => (iso ? localDate(iso, api.tz) : undefined);
+        const cards = next.map((x) => {
+          const it = full.find((f) => f.id === x.id) || x;
+          const sug = it.suggestion && !it.suggestion.applied_at ? it.suggestion : undefined;
+          if (it.kind === 'group') { const g = it.grp || {}; return { item_id: it.id, kind: 'group', label: g.label, count: (g.task_ids || []).length, proposal: g.proposal || { op: 'someday' }, suggestion: sug }; }
+          const t = tasks.find((r) => r.id === it.task_id);
+          if (!t) return { item_id: it.id, kind: 'task', task: null };
+          const p = projects.find((r) => r.id === t.project_id);
+          return { item_id: it.id, kind: 'task', priority: it.priority || undefined, why_first: it.priority ? priorityReason(t, p) || undefined : undefined, suggestion: sug,
+            task: { id: t.id, title: t.title, notes: t.notes ? String(t.notes).slice(0, 600) : undefined, project: p ? p.name : undefined, tags: links.filter((l) => l.task_id === t.id).map((l) => (tagRows.find((g) => g.id === l.tag_id) || {}).name).filter(Boolean),
+              gain: t.gain || undefined, flagged: t.flagged || undefined, due: day(t.due_at), planned: day(t.planned_at), added: day(t.created_at) } };
+        });
+        await touch(api, s.id);
+        return { cards, next: 'Draft suggestions for these with action "suggest" and items [{item_id, decision, …}] (marked "drafted ahead" in the app).' };
+      }
       if (action === 'annotate') {
         if (!cur) throw new Error('No current card.');
         const changed = { ...(cur.changed || {}) };

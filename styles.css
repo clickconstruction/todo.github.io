@@ -1309,3 +1309,14 @@ body.fr-mode .view { margin-left: auto !important; margin-right: auto !important
 .fr-start { display: flex; gap: 12px; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 8px 0 12px; }
 .fr-start p { margin: 2px 0 0; }
 .fr-btns .btn { white-space: nowrap; }
+/* Full Review: Claude's suggestion, waiting for Submit */
+.sg-bar { margin-top: 12px; border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 9%, transparent); border-radius: 12px; padding: 12px 14px; }
+.sg-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--accent); font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.sg-row { display: flex; gap: 8px; align-items: baseline; font-size: 15px; padding: 3px 0; overflow-wrap: anywhere; }
+.sg-i { width: 18px; flex: none; text-align: center; color: var(--accent); }
+.sg-old { color: var(--muted); text-decoration: line-through; font-size: 13px; margin-left: 4px; }
+.sg-note { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
+.sg-btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.sg-btns kbd { opacity: .7; font-size: .75rem; margin-left: 4px; }
+.fr-btns-quiet { opacity: .55; }
+.fr-btns-quiet:hover, .fr-btns-quiet:focus-within { opacity: 1; }

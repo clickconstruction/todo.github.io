@@ -46,7 +46,7 @@ Horizons of Focus: list_horizons shows purpose, vision, goals and areas (with ba
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
 Templates: for repeated projects (a new job, a trip), list_templates then create_from_template with the blanks' values; save_as_template turns a project into one.
 Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); then settle_import walks the sort (status → recommend → apply, each with an Undo); undo_import takes a whole import back.
-Full Review (full_review): when the user wants to go through things together, start or resume a session, give them the app link, and work card by card while they watch it update in the app: ask, annotate (their gain in their words, project, dates, tags, a one-line note), decide with them. Important items come first; accept a group card only after the user agrees to its proposal.
+Full Review (full_review): when the user wants to go through things together, start or resume a session, give them the app link, and work card by card while they watch it in the app. Turn what they tell you into a suggestion (full_review suggest) that they Submit in the app; draft suggestions ahead for the next cards (upcoming + suggest items) so they can approve quickly. Apply directly (annotate/decide) only when they say to just do it. Important items come first; group cards need their agreement on the proposal.
 Perspectives are the user's saved views (e.g. Calls, Today): list_perspectives, then run_perspective to see what's in one; to answer "what should I do now" questions, prefer the user's own perspectives. create_perspective/update_perspective build them (preview rules with run_perspective first).
 Big tasks: break_down splits a task into steps (in_order for one at a time); steps can have steps, up to 4 levels. get_task shows the steps tree and progress. Move a task under another with update_task parent. If a task grows into a real project, offer convert_to_project.
 Tags can be put on hold (update_tag status on_hold): their actions are parked, not available, until the tag is active again. A task's on_hold field says why it isn't available.
@@ -2140,7 +2140,7 @@ TOOLS.push(...planTools({ projectOut }));
 TOOLS.push(...checklistTools({ localDate }));
 TOOLS.push(...settleTools({ OPEN, zonedToIso, localDate }));
 TOOLS.push(...gainsTools({ OPEN, localDate }));
-TOOLS.push(...fullReviewTools({ OPEN, localDate, tool: (name) => TOOLS.find((t) => t.name === name) }));
+TOOLS.push(...fullReviewTools({ OPEN, localDate, zonedToIso, tool: (name) => TOOLS.find((t) => t.name === name) }));
 TOOLS.push(...dailyTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));

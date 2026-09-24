@@ -1163,6 +1163,25 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(!grp.grp.task_ids.includes(M(3)) && db.review_items.some((x) => x.task_id === M(3) && x.priority && x.sort > grp.sort && x.sort < grp.sort + 1), 'prioritize pulls one out of its group, right after the current card');
   let bad = ''; try { await tool('full_review', { action: 'decide' }); } catch (e) { bad = e.message; }
   assert(/decision is required/.test(bad), 'decide needs a decision');
+  // Suggestions: nothing changes until the user Submits in the app.
+  const s1 = db.review_items.find((x) => x.task_id === S1);
+  await tool('full_review', { action: 'goto', item_id: s1.id });
+  const sg = await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Fix the gate latch before winter', gain: 'Goats stay in', project: 'Estate and legacy', planned: '2026-10-05', flagged: false, add_tags: ['Brand new tag'], note: 'You said before the cold snap' });
+  assert(sg.suggested === 1 && s1.suggestion.decision === 'keep' && s1.suggestion.project_id === 'pRE' && s1.suggestion.project_name === 'Estate and legacy' && /^2026-10-05T/.test(s1.suggestion.planned) && s1.suggestion.add_tag_names.includes('Brand new tag') && !s1.suggestion.ahead, 'suggest: resolved and stored on the card');
+  assert(db.tasks.find((t) => t.id === S1).title === 'Fix the gate latch' && !db.tasks.find((t) => t.id === S1).gain, 'suggest changes nothing until the user Submits');
+  let bad2 = ''; try { await tool('full_review', { action: 'suggest', decision: 'keep', project: 'No such project' }); } catch (e) { bad2 = e.message; }
+  assert(/No active project/.test(bad2), 'a suggestion that doesn’t resolve is refused (nothing saved)');
+  let bad3 = ''; try { await tool('full_review', { action: 'suggest', decision: 'accept' }); } catch (e) { bad3 = e.message; }
+  assert(/decision must be one of/.test(bad3), 'group decisions aren’t allowed on an action card');
+  const st2 = await tool('full_review', { action: 'status' });
+  assert(st2.current.suggestion && st2.current.suggestion.note === 'You said before the cold snap', 'status shows the pending suggestion');
+  const up = await tool('full_review', { action: 'upcoming', count: 3 });
+  assert(Array.isArray(up.cards), 'upcoming: the next cards in one go');
+  const nextTask = db.review_items.find((x) => x.kind === 'task' && x.status === 'pending' && x.id !== s1.id && x.task_id !== W);
+  if (nextTask) {
+    const ah = await tool('full_review', { action: 'suggest', items: [{ item_id: nextTask.id, decision: 'someday', note: 'Like the other movies' }] });
+    assert(ah.items[0].ahead === true && nextTask.suggestion.ahead === true, 'drafted ahead: marked as such');
+  }
   const ls = await tool('full_review', { action: 'list' });
   assert(ls.some((x) => x.id === st.session_id), 'list sessions');
 }

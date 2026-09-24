@@ -241,7 +241,7 @@
     user_settings: () => ({ due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, review_notified_at: null, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true, daily_notified_at: null, horizons_quarter_at: null, sidebar: {} }),
     daily_reviews: () => ({ started_at: null, shutdown_at: null, focus: [] }),
     review_sessions: () => ({ title: 'Full Review', scope: {}, current_item: null, status: 'active', agent_seen_at: null, agent_status: '', finished_at: null }),
-    review_items: () => ({ task_id: null, grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null }),
+    review_items: () => ({ task_id: null, grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: null }),
     checklists: () => ({ items: [], complete_action: true, sort: 0, archived_at: null }),
     checklist_runs: () => ({ started_at: new Date().toISOString(), finished_at: null, ticked: [], total: 0 }),
     areas: () => ({ standards: '', review_every_days: 30, last_reviewed_at: null, sort: 0, archived_at: null }),
@@ -506,6 +506,33 @@
           rec.undone_at = now();
           return { data: { tasks_dropped: tasksDropped, projects_dropped: projectsDropped, folders_archived: folders }, error: null };
         }
+        // Mirrors review_apply() (migration 20261016000001): apply the suggestion's fields, then decide.
+        if (name === 'review_apply') {
+          const it = tables.review_items.find((x) => x.id === args.item);
+          if (!it) return { data: null, error: { message: 'Card not found.' } };
+          if (it.status !== 'pending') return { data: null, error: { message: 'That card was already decided (undo it first).' } };
+          const s = it.suggestion;
+          if (!s || !s.decision) return { data: null, error: { message: 'No suggestion to submit on this card.' } };
+          let snap = null;
+          if (it.kind === 'group') { if (s.proposal) it.grp = { ...it.grp, proposal: s.proposal }; }
+          else {
+            const t = tables.tasks.find((x) => x.id === it.task_id);
+            snap = { t: 'fields', id: t.id, title: t.title, gain: t.gain, gain_by: t.gain_by, project_id: t.project_id, in_inbox: t.in_inbox, planned_at: t.planned_at, due_at: t.due_at, defer_at: t.defer_at, flagged: t.flagged, tags: tables.task_tags.filter((l) => l.task_id === t.id).map((l) => l.tag_id) };
+            if (s.title) t.title = s.title;
+            if ('gain' in s) { t.gain = s.gain || ''; t.gain_by = s.gain_suggested ? 'agent' : null; }
+            if ('project_id' in s) { t.project_id = s.project_id; if (s.project_id) t.in_inbox = false; }
+            if ('planned' in s) t.planned_at = s.planned; if ('due' in s) t.due_at = s.due; if ('defer' in s) t.defer_at = s.defer; if ('flagged' in s) t.flagged = !!s.flagged;
+            (s.add_tag_ids || []).forEach((g) => { if (!tables.task_tags.some((l) => l.task_id === t.id && l.tag_id === g)) tables.task_tags.push({ task_id: t.id, tag_id: g, user_id: uid }); });
+            (s.add_tag_names || []).forEach((nm) => { let g = tables.tags.find((x) => x.name.toLowerCase() === nm.toLowerCase()); if (!g) { g = { ...DEFAULTS.tags(), id: id(), user_id: uid, name: nm, sort: 0, created_at: now() }; tables.tags.push(g); } if (!tables.task_tags.some((l) => l.task_id === t.id && l.tag_id === g.id)) tables.task_tags.push({ task_id: t.id, tag_id: g.id, user_id: uid }); });
+            tables.task_tags = tables.task_tags.filter((l) => !(l.task_id === t.id && (s.remove_tag_ids || []).includes(l.tag_id)));
+            t.updated_at = now();
+          }
+          const res = await this.rpc('review_decide', { item: it.id, decision: s.decision, by: 'user', note: s.note });
+          if (res.error) return res;
+          if (snap) it.before = [...(it.before || []), snap];
+          it.suggestion = { ...s, applied_at: now() };
+          return res;
+        }
         // Mirrors review_decide() / review_undo() (migration 20261015000001).
         if (name === 'review_decide' || name === 'review_undo') {
           const it = tables.review_items.find((x) => x.id === args.item);
@@ -520,9 +547,11 @@
               if (e.t === 'someday_tag') tables.task_tags = tables.task_tags.filter((x) => !(x.tag_id === e.tag && e.ids.includes(x.task_id)));
               if (e.t === 'task') Object.assign(tables.tasks.find((t) => t.id === e.id), { completed_at: e.completed_at, dropped_at: e.dropped_at });
               if (e.t === 'project') tables.projects.find((p) => p.id === e.id).status = e.status;
+              if (e.t === 'fields') { Object.assign(tables.tasks.find((t) => t.id === e.id), { title: e.title, gain: e.gain, gain_by: e.gain_by, project_id: e.project_id, in_inbox: e.in_inbox, planned_at: e.planned_at, due_at: e.due_at, defer_at: e.defer_at, flagged: e.flagged });
+                tables.task_tags = tables.task_tags.filter((l) => l.task_id !== e.id).concat(e.tags.map((g) => ({ task_id: e.id, tag_id: g, user_id: uid }))); }
               if (e.t === 'expanded') tables.review_items.filter((x) => x.session_id === it.session_id && x.sort > it.sort && x.sort < it.sort + 1 && x.kind === 'task' && x.status === 'pending').forEach((x) => { x.status = 'void'; });
             });
-            Object.assign(it, { status: 'pending', decision: null, decided_by: null, before: [], reviewed_at: null, updated_at: now() });
+            Object.assign(it, { status: 'pending', decision: null, decided_by: null, before: [], reviewed_at: null, updated_at: now(), suggestion: it.suggestion ? (({ applied_at, ...rest }) => rest)(it.suggestion) : null });
             Object.assign(ses, { current_item: it.id, status: 'active', finished_at: null, updated_at: now() });
             return { data: { restored: 1, current: it.id }, error: null };
           }

@@ -113,6 +113,39 @@ const mark = (it, field, html) => (fresh(it, field) ? `<span class="fr-new">${ht
 // When it was added (edits during the review don't make it look new).
 const added = (t) => { const ms = Date.parse(t.created_at || 0) || 0; if (!ms) return ''; const d = Math.floor((Date.now() - ms) / 86400000); return d >= 730 ? `added ${Math.round(d / 365)} years ago` : d >= 60 ? `added ${Math.round(d / 30)} months ago` : d >= 1 ? `added ${d} day${d === 1 ? '' : 's'} ago` : 'added today'; };
 
+// Claude's suggestion, waiting for your Submit: every change spelled out, the old value struck through.
+const DECISION_LABEL = { keep: 'Keep', someday: 'Someday', done: 'Done', drop: 'Drop', skip: 'Skip', accept: 'Accept', one_by_one: 'One by one', keep_all: 'Keep all' };
+const pending = (it) => it.suggestion && !it.suggestion.applied_at && it.status === 'pending' ? it.suggestion : null;
+const when = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : 'no date');
+const ago = (iso) => { const m = Math.round((Date.now() - Date.parse(iso || 0)) / 60000); return !iso ? '' : m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
+function suggestionBar(it, t) {
+  const s = pending(it);
+  if (!s) return '';
+  const rows = [];
+  const row = (icon, html) => rows.push(`<div class="sg-row"><span class="sg-i" aria-hidden="true">${icon}</span><span>${html}</span></div>`);
+  if (it.kind === 'group') {
+    const g = it.grp || {};
+    const n = (g.task_ids || []).length;
+    if (s.proposal) row('✦', `Proposal: ${esc(proposalText(s.proposal, n))} <span class="sg-old">${esc(proposalText(g.proposal, n))}</span>`);
+    row('✓', `<b>${esc(DECISION_LABEL[s.decision] || s.decision)}</b>${s.decision === 'accept' ? ` · ${esc(proposalText(s.proposal || g.proposal, n))}` : ''}`);
+  } else if (t) {
+    const p = t.project_id && byId(db.projects, t.project_id);
+    if (s.title && s.title !== t.title) row('✎', `Title: “${esc(s.title)}” <span class="sg-old">${esc(t.title)}</span>`);
+    if ('gain' in s && s.gain !== (t.gain || '')) row('✦', `Gain: <span class="gain-text">${esc(s.gain || 'none')}</span>${s.gain_suggested ? ' <span class="chip sug">Claude’s words</span>' : ''}`);
+    if ('project_id' in s && s.project_id !== t.project_id) row('🗂', `Project: ${esc(s.project_name || 'none')}${p ? ` <span class="sg-old">${esc(p.name)}</span>` : ''}`);
+    [['planned', 'planned_at', 'Planned'], ['due', 'due_at', 'Due'], ['defer', 'defer_at', 'Defer until']].forEach(([k, col, l]) => { if (k in s && s[k] !== t[col]) row('🗓', `${l}: ${s[k] ? esc(when(s[k])) : 'clear'}${t[col] ? ` <span class="sg-old">${esc(when(t[col]))}</span>` : ''}`); });
+    if ('flagged' in s && !!s.flagged !== !!t.flagged) row('⚑', s.flagged ? 'Flag it' : 'Unflag');
+    if (s.add_tag_labels && s.add_tag_labels.length) row('🏷', `Add tags: ${s.add_tag_labels.map(esc).join(', ')}`);
+    if (s.remove_tag_labels && s.remove_tag_labels.length) row('🏷', `Remove tags: ${s.remove_tag_labels.map(esc).join(', ')}`);
+    row('✓', `<b>${esc(DECISION_LABEL[s.decision] || s.decision)}</b>${s.decision === 'keep' ? ` in ${esc(s.project_name || (p ? p.name : 'no project'))}` : ''}`);
+  }
+  return `<div class="sg-bar" role="group" aria-label="Suggested by Claude">
+    <div class="sg-h"><span>✦ Suggested by Claude${s.ahead ? ' <span class="chip">drafted ahead</span>' : ', from what you said'}</span><span class="hint">${esc(ago(s.at))}</span></div>
+    ${rows.join('')}${s.note ? `<p class="sg-note">${esc(s.note)}</p>` : ''}
+    <div class="sg-btns"><button class="btn primary" data-fr="submit">Submit <kbd>⏎</kbd></button><button class="btn" data-fr="edit-suggestion">Edit</button><button class="btn" data-fr="dismiss">Dismiss</button></div>
+  </div>`;
+}
+
 function taskCard(it) {
   const t = byId(db.tasks, it.task_id);
   if (!t) return '<div class="fr-card"><p class="hint">This action isn’t loaded (it may be closed).</p></div>';
@@ -130,7 +163,8 @@ function taskCard(it) {
     ${t.flagged ? row('Flag', 'flagged', '<span class="chip flagged-chip">⚑ Flagged</span>') : ''}
     ${t.notes ? `<details class="fr-notes"><summary>Notes</summary><p>${esc(t.notes.slice(0, 1200))}${t.notes.length > 1200 ? '…' : ''}</p></details>` : ''}
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
-    <div class="fr-btns">${[['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
+    ${suggestionBar(it, t)}
+    <div class="fr-btns ${pending(it) ? 'fr-btns-quiet' : ''}">${[['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
     <p class="hint fr-edit"><button class="link-btn" data-task="${t.id}">Edit details</button></p>
   </div>`;
 }
@@ -145,7 +179,8 @@ function groupCard(it) {
     <ul class="fr-sample">${ts.slice(0, 6).map((t) => `<li>${esc(t.title)}</li>`).join('')}${ts.length > 6 ? `<li class="hint">+ ${n(ts.length - 6)} more</li>` : ''}</ul>
     <div class="fr-field"><b>Proposal</b><span>${mark(it, 'proposal', esc(proposalText(g.proposal, ts.length)))}</span></div>
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
-    <div class="fr-btns">${[['accept', 'Accept'], ['one_by_one', 'One by one'], ['keep_all', 'Keep all'], ['skip', 'Skip']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
+    ${suggestionBar(it, null)}
+    <div class="fr-btns ${pending(it) ? 'fr-btns-quiet' : ''}">${[['accept', 'Accept'], ['one_by_one', 'One by one'], ['keep_all', 'Keep all'], ['skip', 'Skip']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
   </div>`;
 }
 
@@ -193,12 +228,44 @@ export async function fullReviewAction(el) {
     await loadSession(s.id);
     return;
   }
-  if ((a === 'undo' || a === 'decide') && f.busy) return; // one decision at a time (fast key presses)
-  if (a === 'undo' || a === 'decide') { f.busy = true; try { await act(a, el); } finally { f.busy = false; } }
+  if (['undo', 'decide', 'submit'].includes(a) && f.busy) return; // one decision at a time (fast key presses)
+  if (['undo', 'decide', 'submit'].includes(a)) { f.busy = true; try { await act(a, el); } finally { f.busy = false; } }
+  if (a === 'dismiss' || a === 'edit-suggestion') {
+    const cur = s && f.byId.get(s.current_item);
+    if (!cur) return;
+    const sug = pending(cur);
+    await run(sb.from('review_items').update({ suggestion: null }).eq('id', cur.id));
+    cur.suggestion = null;
+    if (a === 'edit-suggestion' && sug && cur.kind === 'task') {
+      // Open the action with Claude's values filled in; saving applies them, then you decide the card.
+      const t = byId(db.tasks, cur.task_id);
+      const { openEditor } = await import('../editors/task.js');
+      openEditor({ ...t, ...(sug.title ? { title: sug.title } : {}), ...('gain' in sug ? { gain: sug.gain, gain_by: sug.gain_suggested ? 'agent' : null } : {}),
+        ...('project_id' in sug ? { project_id: sug.project_id } : {}), ...('planned' in sug ? { planned_at: sug.planned } : {}), ...('due' in sug ? { due_at: sug.due } : {}),
+        ...('defer' in sug ? { defer_at: sug.defer } : {}), ...('flagged' in sug ? { flagged: sug.flagged } : {}) });
+    }
+    app.render();
+  }
 }
 async function act(a, el) {
   const f = F();
   const s = f.session;
+  if (a === 'submit') {
+    const cur = s && f.byId.get(s.current_item);
+    const sug = cur && pending(cur);
+    if (!sug) return;
+    const r = await run(sb.rpc('review_apply', { item: cur.id }));
+    const bulk = cur.kind === 'group' && sug.decision === 'accept';
+    f.undo.push({ id: cur.id, kind: cur.kind, task_id: cur.task_id, bulk: bulk || !!(sug.add_tag_names && sug.add_tag_names.length) });
+    if (bulk || (sug.add_tag_names && sug.add_tag_names.length)) await loadAll(); else if (cur.kind === 'task') await refreshCard(cur);
+    if (sug.decision === 'one_by_one' || bulk) { await loadSession(s.id); return; }
+    cur.status = sug.decision === 'skip' ? 'skipped' : 'reviewed'; cur.decision = sug.decision; cur.suggestion = { ...sug, applied_at: new Date().toISOString() };
+    f.session = { ...s, current_item: r.next, status: r.next ? 'active' : 'done' };
+    const nx = r.next && f.byId.get(r.next);
+    if (nx) await refreshCard(nx);
+    app.render();
+    return;
+  }
   if (a === 'undo') {
     const last = f.undo.pop();
     if (!last) return;
@@ -232,6 +299,7 @@ async function act(a, el) {
 export function fullReviewKey(e) {
   if (!location.hash.startsWith('#full/') || e.metaKey || e.ctrlKey || e.altKey) return false;
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return false;
+  if (e.key === 'Enter') { const b = document.querySelector('[data-fr="submit"]'); if (b) { e.preventDefault(); b.click(); return true; } }
   const btns = [...document.querySelectorAll('.fr-btns [data-fr="decide"]')];
   if (/^[1-4]$/.test(e.key) && btns[Number(e.key) - 1]) { e.preventDefault(); btns[Number(e.key) - 1].click(); return true; }
   if (e.key === 's') { const b = document.querySelector('.cl-bar [data-decision="skip"]'); if (b) { e.preventDefault(); b.click(); return true; } }

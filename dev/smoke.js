@@ -66,6 +66,7 @@ async function fullReview(check) {
   const t = T();
   t.imports.push({ id: 'imF', user_id: 'u1', source: 'omnifocus', counts: { tasks: 18, projects: 1 }, settle: {}, created_at: ago(0), undone_at: null });
   t.projects.push({ ...t.projects[0], id: 'pfM', name: 'Movies', status: 'active', folder_id: null, import_id: 'imF', created_at: ago(2000), updated_at: ago(2000) });
+  t.projects.push({ ...t.projects[0], id: 'pfE', name: 'Estate and legacy', status: 'active', folder_id: null, created_at: ago(10), updated_at: ago(10) });
   const T1 = (id, title, extra = {}) => t.tasks.push({ ...t.tasks[0], id, title, notes: '', project_id: null, parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, completed_at: null, dropped_at: null, gain: '', import_id: 'imF', created_at: ago(1800), updated_at: ago(1800), ...extra });
   T1('fW', 'Update my will');
   for (let i = 0; i < 14; i++) T1(`fM${i}`, `Movie ${i}`, { project_id: 'pfM', created_at: ago(1500 + i), updated_at: ago(1500 + i) });
@@ -91,9 +92,28 @@ async function fullReview(check) {
   Object.assign(ses, { agent_seen_at: stamp, agent_status: 'editing', updated_at: stamp });
   await until(() => has(undefined, 'family is not left guessing') && has(undefined, 'claude is here'));
   check('live: Claude’s gain appears, highlighted, with its note and presence', has(undefined, 'family is not left guessing', 'you said this matters more now', 'claude is here · editing') && !!$('.fr-new'));
+  // Claude suggests; nothing changes until Submit.
+  const sug = { decision: 'keep', title: 'Update my will and trust', gain: 'Nobody is left guessing', project_id: 'pfE', project_name: 'Estate and legacy', planned: new Date(Date.now() + 3 * 86400000).toISOString(), flagged: true, add_tag_names: ['Paperwork'], add_tag_labels: ['Paperwork (new)'], note: 'You said this one matters most', at: new Date().toISOString() };
+  Object.assign(cur, { suggestion: sug, updated_at: new Date().toISOString() });
+  await until(() => !!$('.sg-bar'));
+  check('the suggestion appears: every change spelled out, old values struck through', has('.sg-bar', 'suggested by claude', 'from what you said', 'update my will and trust', 'estate and legacy', 'planned', 'flag it', 'paperwork (new)', 'keep') && has('.sg-bar .sg-old', 'update my will') && $('.fr-btns').classList.contains('fr-btns-quiet'));
+  check('nothing changed yet', t.tasks.find((x) => x.id === 'fW').title === 'Update my will');
+  key('Enter'); await until(() => has(undefined, 'group · 14 actions'));
+  const w = t.tasks.find((x) => x.id === 'fW');
+  const paper = t.tags.find((g) => g.name === 'Paperwork');
+  check('Enter submits: all applied and decided, next card', w.title === 'Update my will and trust' && w.project_id === 'pfE' && w.flagged && w.planned_at && paper && t.task_tags.some((l) => l.task_id === 'fW' && l.tag_id === paper.id) && cur.status === 'reviewed' && cur.decided_by === 'user');
+  key('u'); await until(() => !!$('.sg-bar') && has(undefined, 'update my will'));
+  check('Undo puts it all back, suggestion ready again', t.tasks.find((x) => x.id === 'fW').title === 'Update my will' && !t.tasks.find((x) => x.id === 'fW').project_id && !t.task_tags.some((l) => l.task_id === 'fW' && l.tag_id === paper.id) && !!$('.sg-bar'));
+  $('[data-fr="dismiss"]').click(); await until(() => !$('.sg-bar'));
+  check('Dismiss clears it; the card is yours to decide', !$('.sg-bar') && cur.suggestion === null);
   // Keys: 1 keep → the group card.
   key('1'); await until(() => has(undefined, 'movies') && !!$('.fr-sample'));
   check('1 = Keep; next is the group card with a proposal', t.review_items.find((x) => x.task_id === 'fW').status === 'reviewed' && has(undefined, 'group · 14 actions', 'all 14 → someday'));
+  const gcard = t.review_items.find((x) => x.kind === 'group' && x.session_id === sid);
+  Object.assign(gcard, { suggestion: { decision: 'accept', proposal: { op: 'keep_newest', keep: 5 }, ahead: true, note: 'A watchlist', at: new Date().toISOString() }, updated_at: new Date().toISOString() });
+  await until(() => !!$('.sg-bar'));
+  check('drafted-ahead suggestion on a group card', has('.sg-bar', 'drafted ahead', 'keep the 5 newest', 'accept'));
+  $('[data-fr="dismiss"]').click(); await until(() => !$('.sg-bar'));
   key('2'); await until(() => !$('.fr-sample') && has(undefined, 'movie 0'));
   check('One by one: 14 single cards, right after', t.review_items.filter((x) => x.session_id === sid && x.kind === 'task' && /^fM/.test(x.task_id)).length === 14 && has(undefined, 'movie 0'));
   key('u'); await until(() => has(undefined, 'group · 14 actions') && T().review_items.filter((x) => x.status === 'void').length === 14);
