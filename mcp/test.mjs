@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -129,7 +129,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 53 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 53 tools, no internals leaked');
+assert(list.body.result.tools.length === 57 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 57 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -783,5 +783,50 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const sd = await tool('capture', { title: 'Learn Italian' });
   const sdo = await tool('clarify_item', { id: sd.id, decision: 'someday' });
   assert(sdo.item.tags.includes('Someday') && db.tags.find((g) => g.name === 'Someday').status === 'on_hold' && !sdo.item.in_inbox, 'clarify someday: on-hold Someday tag');
+}
+// ---------- Weekly Review, mind sweep, Someday/Maybe ----------
+{
+  const st0 = await tool('weekly_review', {});
+  assert(!st0.in_progress && st0.steps.length === 10 && st0.steps[0].key === 'papers' && st0.minutes_left > 0, 'weekly_review status before starting');
+  const started = await tool('weekly_review', { action: 'start' });
+  assert(started.in_progress && db.weekly_reviews.length === 1, 'weekly_review start saves a review');
+  const inboxStep = started.steps.find((x) => x.key === 'inbox');
+  assert(inboxStep.done || (inboxStep.data && typeof inboxStep.data.count === 'number'), 'inbox step carries its items');
+  const staleT = db.tasks.find((t) => !t.completed_at && !t.dropped_at && !t.in_inbox && t.project_id && !t.waiting_on && !t.agenda_for && !t.tickler && (db.projects.find((p) => p.id === t.project_id) || {}).status === 'active');
+  if (staleT) staleT.updated_at = new Date(Date.now() - 100 * 86400000).toISOString();
+  const st1 = await tool('weekly_review', { action: 'done_step', step: 'papers' });
+  const stale = st1.steps.find((x) => x.key === 'stale');
+  assert(st1.steps.find((x) => x.key === 'papers').done && (!staleT || (!stale.done && stale.data.items.some((i) => i.id === staleT.id && i.days_untouched >= 99))), 'done_step, and stale actions are listed');
+  let bad = ''; try { await tool('weekly_review', { action: 'done_step', step: 'nope' }); } catch (e) { bad = e.message; }
+  assert(/step must be/.test(bad), 'done_step checks the step');
+  const fin = await tool('weekly_review', { action: 'finish' });
+  assert(fin.finished && db.weekly_reviews[0].completed_at && fin.stats.captured >= 0 && fin.streak_weeks === 1, 'finish records stats and streak');
+  const prompts = await tool('mind_sweep_prompts', {});
+  assert(prompts.count === 56 && prompts.prompts[0].group === 'Work', 'mind_sweep_prompts: the full list');
+  db.user_settings.push({ user_id: UID, trigger_hidden: ['t1'], trigger_custom: [{ id: 'c1', group: 'Personal', text: 'Rental properties' }] });
+  const p2 = await tool('mind_sweep_prompts', { group: 'Personal' });
+  assert(p2.prompts.some((x) => x.prompt === 'Rental properties' && x.yours) && !(await tool('mind_sweep_prompts', {})).prompts.some((x) => x.prompt === 'Projects started but not finished' && x.group === 'Work'), 'mind_sweep_prompts: hidden left out, custom added');
+  const sd1 = await tool('capture', { title: 'Drive the Pacific Coast Highway' });
+  await tool('clarify_item', { id: sd1.id, decision: 'someday', category: 'Travel' });
+  const ls = await tool('list_someday', {});
+  assert(ls.by_category.Travel && ls.by_category.Travel[0].id === sd1.id && ls.by_category.Travel[0].parked_days === 0, 'clarify someday with a category; list_someday groups by it');
+  const act = await tool('activate_someday', { id: sd1.id, tags: ['Phone'] });
+  assert(act.item.tags.includes('Phone') && !act.item.tags.some((x) => /someday/i.test(x)) && !act.item.in_inbox, 'activate_someday: Someday tags off, next action');
+}
+{
+  const { sendReviewReminders, localDayMinutes } = await import('./src/reminders.js');
+  const fri4 = new Date('2026-09-25T21:00:00Z'); // Friday 4pm in Chicago
+  const ldm = localDayMinutes(fri4, 'America/Chicago');
+  assert(ldm.day === 5 && ldm.minutes === 960, 'local weekday and time in the user\'s zone');
+  const calls = []; const settings = [{ user_id: 'u9', review_day: 5, review_minutes: 900, review_notified_at: null, timezone: 'America/Chicago' }]; let reviews = [];
+  const fakeRest = async (path, opts = {}) => { calls.push([opts.method || 'GET', path, opts.body]); if (path.startsWith('user_settings?review_notify')) return settings; if (path.startsWith('weekly_reviews')) return reviews; if (path.startsWith('push_subscriptions')) return []; return []; };
+  assert(await sendReviewReminders(env, fakeRest, fri4) === 1 && calls.some(([m, p, b]) => m === 'POST' && p === 'push_log' && b.kind === 'review' && /Weekly Review/.test(b.title)), 'review reminder sent on the review day after the review time');
+  assert(calls.some(([m, p, b]) => m === 'PATCH' && p.startsWith('user_settings?user_id=eq.u9') && b.review_notified_at), 'marked so it is sent once');
+  settings[0].review_notified_at = fri4.toISOString();
+  assert(await sendReviewReminders(env, fakeRest, new Date(fri4.getTime() + 30 * 60000)) === 0, 'not sent twice');
+  settings[0].review_notified_at = null; reviews = [{ id: 'r1' }];
+  assert(await sendReviewReminders(env, fakeRest, fri4) === 0, 'not sent if a review was done in the last 5 days');
+  reviews = [];
+  assert(await sendReviewReminders(env, fakeRest, new Date('2026-09-24T21:00:00Z')) === 0 && await sendReviewReminders(env, fakeRest, new Date('2026-09-25T19:00:00Z')) === 0, 'not on other days or before the time');
 }
 console.log('ALL PASSED');

@@ -106,7 +106,7 @@ function viewReferenceItem(id) {
 // ---------- Waiting For ----------
 export const waitingBadgeCount = () => db.tasks.filter((t) => followUpDue(t) && isWaiting(t)).length;
 
-function waitingRow(t) {
+export function waitingRow(t) {
   const late = followUpDue(t);
   const p = waitingPerson(t);
   const bits = [t.follow_up_at ? `<span class="${late ? 'late' : ''}">follow up ${late && new Date(t.follow_up_at) < startOfToday() ? 'was ' : ''}${esc(fmtDate(t.follow_up_at))}</span>` : '', t.delegated_at ? `asked ${esc(daysAgo(t.delegated_at))}` : ''].filter(Boolean).join(' · ');

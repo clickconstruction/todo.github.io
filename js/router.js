@@ -17,19 +17,23 @@ import { viewTemplate } from './views/templates.js';
 import { isTickled } from './gtd.js';
 import { viewTickler, viewReference, viewWaiting, viewPerson, waitingBadgeCount, mountReferenceFiles } from './views/gtd.js';
 import { viewClarify, mountClarify } from './views/clarify.js';
+import { viewWeekly, isWeeklyDue, openReview } from './views/weekly.js';
+import { viewSweep, mountSweep } from './views/sweep.js';
+import { viewSomeday } from './views/someday.js';
 import { withFocus, getFocus, focusLabel, focusedProjectIds } from './prefs.js';
 
-const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person']);
+const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person', 'weekly', 'sweep', 'someday']);
 const VIEWS = {
   search: viewSearch, inbox: viewInbox, forecast: viewForecast, projects: viewProjects, project: viewProject,
   tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone, flagged: viewFlagged, review: viewReview,
   nearby: viewNearby, places: viewPlaces, alerts: viewAlerts, perspective: viewPerspective, perspectives: viewPerspectives, import: viewImport, template: viewTemplate,
   clarify: viewClarify, tickler: viewTickler, reference: viewReference, waiting: viewWaiting, person: viewPerson,
+  weekly: viewWeekly, sweep: viewSweep, someday: viewSomeday,
 };
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
-const AFTER = { nearby: mountNearbyMap, clarify: mountClarify, reference: (id) => id && mountReferenceFiles(id) };
+const AFTER = { nearby: mountNearbyMap, clarify: mountClarify, sweep: mountSweep, weekly: (step) => step === 'sweep' && mountSweep(), reference: (id) => id && mountReferenceFiles(id) };
 // Detail views highlight their parent tab.
-const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting' };
+const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting', review: 'weekly', sweep: 'inbox' };
 
 export function render() {
   if (location.hash === '#today') { history.replaceState(null, '', '#forecast'); } // old links
@@ -58,11 +62,11 @@ export function render() {
   $('#badge-inbox').textContent = inboxCount || '';
   $('#badge-forecast').textContent = dueCount || '';
   $('#badge-flagged').textContent = (ids ? withFocus(flaggedBadgeCount) : flaggedBadgeCount()) || '';
-  $('#badge-review').textContent = (ids ? withFocus(reviewDueCount) : reviewDueCount()) || '';
+  $('#badge-review').textContent = (ids ? withFocus(reviewDueCount) : reviewDueCount()) || (isWeeklyDue() || openReview() ? '•' : '');
   $('#badge-nearby').textContent = hereNowCount() || '';
   $('#badge-waiting').textContent = waitingBadgeCount() || '';
   // Views that live under "More" on phones light up the More tab.
-  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts', 'perspective', 'perspectives', 'import', 'waiting', 'person', 'tickler', 'reference'].includes(view));
+  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts', 'perspective', 'perspectives', 'import', 'waiting', 'person', 'tickler', 'reference', 'weekly', 'someday'].includes(view));
   const nav = $('#nav-perspectives');
   if (nav) nav.innerHTML = ids ? withFocus(() => perspectiveNav(view === 'perspective' ? args[0] : null)) : perspectiveNav(view === 'perspective' ? args[0] : null);
   renderInspector();

@@ -1,0 +1,33 @@
+-- Weekly Review, review settings, mind sweep prompts, tag-link dates (migration 20261005000001).
+-- One rolled-back transaction; every row should be ok = true.
+begin;
+insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000b1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','wr1@test.invalid'),('00000000-0000-0000-0000-0000000000b2','00000000-0000-0000-0000-000000000000','authenticated','authenticated','wr2@test.invalid');
+create temp table r (n int generated always as identity, test text, ok boolean, detail text); grant all on r to authenticated;
+insert into public.weekly_reviews (user_id) values ('00000000-0000-0000-0000-0000000000b2');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000b1","role":"authenticated"}', true);
+insert into public.weekly_reviews default values;
+insert into r (test, ok, detail) select 'owner starts a review; can''t see others', count(*) = 1, '' from public.weekly_reviews;
+do $$ begin insert into public.weekly_reviews default values; insert into r (test, ok, detail) values ('only one open review at a time', false, '');
+exception when unique_violation then insert into r (test, ok, detail) values ('only one open review at a time', true, sqlerrm); end $$;
+update public.weekly_reviews set steps = '{"papers":{"done_at":"2026-09-25T20:00:00Z","n":null}}';
+update public.weekly_reviews set completed_at = now(), stats = '{"captured":3}';
+insert into public.weekly_reviews default values;
+insert into r (test, ok, detail) select 'after finishing, a new one can start', count(*) = 2, '' from public.weekly_reviews;
+do $$ begin update public.weekly_reviews set steps = '[]' where completed_at is null; insert into r (test, ok, detail) values ('steps must be an object', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('steps must be an object', true, sqlerrm); end $$;
+delete from public.weekly_reviews;
+insert into r (test, ok, detail) select 'reviews can''t be deleted', count(*) = 2, '' from public.weekly_reviews;
+insert into public.user_settings (review_day, review_minutes, trigger_hidden, trigger_custom) values (1, 540, '["t1"]', '[{"id":"c1","group":"Work","text":"Rentals"}]');
+insert into r (test, ok, detail) select 'review day, time and prompts saved', review_day = 1 and review_notify and trigger_hidden = '["t1"]'::jsonb, '' from public.user_settings;
+do $$ begin update public.user_settings set review_day = 7; insert into r (test, ok, detail) values ('review day is 0-6', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('review day is 0-6', true, sqlerrm); end $$;
+insert into public.tags (id, name) values ('00000000-0000-0000-0000-0000000000c3', 'Someday');
+insert into public.tasks (id, title) values ('00000000-0000-0000-0000-0000000000c4', 'Telescope');
+insert into public.task_tags (task_id, tag_id) values ('00000000-0000-0000-0000-0000000000c4', '00000000-0000-0000-0000-0000000000c3');
+insert into r (test, ok, detail) select 'tag links record when they were added', created_at is not null, '' from public.task_tags where task_id = '00000000-0000-0000-0000-0000000000c4';
+reset role;
+insert into public.push_log (user_id, kind, title) values ('00000000-0000-0000-0000-0000000000b1', 'review', 'Weekly Review');
+insert into r (test, ok, detail) values ('push log accepts review reminders', true, '');
+select test, ok, detail from r order by n;
+rollback;

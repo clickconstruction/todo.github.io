@@ -51,6 +51,7 @@ export function viewSettings() {
       <button class="btn small danger" data-remove-sender="${e.id}">Remove</button></li>`).join('')}</ul>
     <form class="capture" data-add-sender style="margin-top:12px"><input type="email" name="email" placeholder="Add another address you send from" autocomplete="off"><button class="btn">Add</button></form>
     ${datesSection()}
+    ${reviewSection()}
     ${calendarsSection()}
     ${keyboardSection()}
     <h2 class="section-title">Import</h2>
@@ -232,6 +233,23 @@ function datesSection() {
     </div>`;
 }
 
+// ---------- Weekly Review: day, time, reminder, mind sweep prompts ----------
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function reviewSection() {
+  const st = { ...DEFAULT_SETTINGS, ...(app.settings || {}) };
+  const hidden = (st.trigger_hidden || []).length;
+  const custom = (st.trigger_custom || []).length;
+  return `<h2 class="section-title">Weekly Review</h2>
+    <p class="view-sub">The day you get clear, get current and get creative. On that day Forecast reminds you, and (if you like) your devices do too.</p>
+    <div class="settings-card">
+      <label class="set-row"><span class="set-text"><b>Review day</b><span class="hint">Friday afternoon clears your head for the weekend</span></span>
+        <select data-setting-review-day>${WEEKDAYS.map((d, i) => `<option value="${i}" ${Number(st.review_day) === i ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+      <label class="set-row"><span class="set-text"><b>Time</b><span class="hint">when it’s due that day</span></span><input type="time" step="900" data-setting-time="review_minutes" value="${minutesToInput(st.review_minutes)}"></label>
+      <label class="set-row"><span class="set-text"><b>Notification</b><span class="hint">a push to your devices at that time, unless you’ve already reviewed</span></span><input type="checkbox" data-setting-review-notify ${st.review_notify ? 'checked' : ''}></label>
+      <p class="hint">Mind sweep prompts: ${hidden ? `${hidden} hidden · ` : ''}${custom ? `${custom} of your own · ` : ''}<a href="#sweep">open the mind sweep</a> to add or change them.</p>
+    </div>`;
+}
+
 // ---------- Keyboard: the drawn keyboard and every shortcut ----------
 function keyboardSection() {
   return `<h2 class="section-title">Keyboard</h2>
@@ -243,7 +261,11 @@ document.addEventListener('change', async (e) => {
   const time = e.target.closest && e.target.closest('[data-setting-time]');
   if (time) { const m = inputToMinutes(time.value); if (m !== null) await saveSettings({ [time.dataset.settingTime]: m }); return; }
   const tag = e.target.closest && e.target.closest('[data-setting-forecast-tag]');
-  if (tag) await saveSettings({ forecast_tag_id: tag.value || null });
+  if (tag) { await saveSettings({ forecast_tag_id: tag.value || null }); return; }
+  const day = e.target.closest && e.target.closest('[data-setting-review-day]');
+  if (day) { await saveSettings({ review_day: Number(day.value) }); return; }
+  const notify = e.target.closest && e.target.closest('[data-setting-review-notify]');
+  if (notify) await saveSettings({ review_notify: notify.checked });
 });
 
 // ---------- Calendars: private iCal links shown in Forecast ----------

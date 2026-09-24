@@ -48,6 +48,7 @@ export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
           first_action: { type: 'string', description: 'project: the very next action' },
           date: { type: 'string', description: 'tickler: YYYY-MM-DD (after today)' },
           topic: { type: 'string', description: 'reference: topic to file under' },
+          category: { type: 'string', description: 'someday: optional category, e.g. Travel (becomes the tag Someday : Travel)' },
         },
         required: ['id', 'decision'],
       },
@@ -77,7 +78,8 @@ export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
             let g = tags.find((x) => /^someday/i.test(x.name));
             if (!g) [g] = await api.q('tags', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name: 'Someday', status: 'on_hold' } });
             else if (g.status !== 'on_hold') await api.q(`tags?${api.u}&id=eq.${g.id}`, { method: 'PATCH', body: { status: 'on_hold' } });
-            return { decision: a.decision, item: await tool('update_task').run(api, { id: t.id, add_tags: [g.name], tickle: null }), note: `Parked under the on-hold tag “${g.name}”; set the tag active (or remove it) to bring it back.` };
+            const label = a.category ? `${g.name} : ${String(a.category).trim()}` : g.name; // update_task creates the sub-tag
+            return { decision: a.decision, item: await tool('update_task').run(api, { id: t.id, add_tags: [label], tickle: null }), note: `Parked under the on-hold tag “${g.name}”; set the tag active (or remove it) to bring it back.` };
           }
           case 'project': {
             if (a.name && a.name.trim() !== t.title) await api.q(`tasks?${api.u}&id=eq.${t.id}`, { method: 'PATCH', body: { title: a.name.trim() } });

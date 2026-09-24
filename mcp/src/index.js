@@ -8,13 +8,14 @@
 
 import PostalMime from 'postal-mime';
 import { handleGeo, makePlaceResolver, loadPlaceData } from './geo.js';
-import { sendDueReminders } from './reminders.js';
+import { sendDueReminders, sendReviewReminders } from './reminders.js';
 import { deliver, sendQueuedTests } from './deliver.js';
 import { handleCalendarFetch, calendarEvents } from './calendar.js';
 import * as P from '../../js/perspective-engine.js';
 import * as OF from '../../js/omnifocus-import.js';
 import * as TPL from '../../js/templates.js';
 import { gtdTools } from './gtd.js';
+import { weeklyTools } from './weekly.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -27,7 +28,7 @@ Never complete, reschedule or re-file tasks the user did not ask you to change.
 Notifications: pass notifications (e.g. [{"kind":"before_due","minutes":60}]) to remind the user on their devices; they follow the item's dates.
 Attachments: add_attachment attaches text, base64 or a URL's file to an action or project; get_task returns download links; remove_attachment archives.
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
-For a weekly review: call list_review, go through each project with the user (use its hints), make the changes they want, then mark_reviewed.
+Weekly Review: call weekly_review (action start) and walk the user through each step in order (Get clear: papers, mind sweep with mind_sweep_prompts, inbox with clarify_item; Get current: calendars, stale actions, waiting, projects via list_review/mark_reviewed; Get creative: list_someday, anything new), marking each done_step, then finish. Someday/Maybe: clarify_item someday (with a category), list_someday, activate_someday.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
 Templates: for repeated projects (a new job, a trip), list_templates then create_from_template with the blanks' values; save_as_template turns a project into one.
 Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); undo_import takes an import back.
@@ -99,6 +100,7 @@ export default {
     ctx.waitUntil(Promise.all([
       sendDueReminders(env, r).then((x) => { if (x.due) console.log('reminders', x); }),
       sendQueuedTests(env, r).then((n) => { if (n) console.log('queued tests', n); }),
+      sendReviewReminders(env, r).then((n) => { if (n) console.log('review reminders', n); }).catch((e) => console.log('review cron', e.message)),
       r('rpc/run_template_schedules', { method: 'POST', body: {} }).then((n) => { if (n) console.log('scheduled templates', n); }).catch((e) => console.log('templates cron', e.message)),
     ]));
   },
@@ -1932,6 +1934,7 @@ const TOOLS = [
   },
 ];
 TOOLS.push(...gtdTools({ OPEN, zonedToIso, localDate, inList, tool: (name) => TOOLS.find((t) => t.name === name) }));
+TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 
 // ---------- repeat ----------
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

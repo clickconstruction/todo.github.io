@@ -16,7 +16,7 @@ export function viewInbox() {
   // Inbox items can be broken into steps before they're clarified: show them as a tree.
   const withSteps = items.flatMap((t) => [t, ...descendants(t).filter(visible)]);
   return `${alertsNudge()}<div class="view-head"><h1 class="inbox">Inbox</h1>${open ? '<a class="btn small primary" href="#clarify">Process Inbox</a>' : ''}</div>
-    <p class="view-sub">${open} item${open === 1 ? '' : 's'} to clarify${waitingInTickler ? ` · <a href="#tickler">${waitingInTickler} in the tickler</a>` : ''}</p>
+    <p class="view-sub">${open} item${open === 1 ? '' : 's'} to clarify${waitingInTickler ? ` · <a href="#tickler">${waitingInTickler} in the tickler</a>` : ''} · <a href="#sweep">Mind sweep</a></p>
     <form class="capture" data-capture><input type="text" name="title" placeholder="Capture anything…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
     ${treeList(flattenTree(withSteps)) || '<p class="empty">Inbox zero. Nice.</p>'}`;
 }

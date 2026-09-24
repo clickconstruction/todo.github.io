@@ -6,8 +6,9 @@ import { startOfToday, addDays, fmtDate, atDefaultTime } from '../dates.js';
 import { saveTask, setLinks, convertToProject, capture } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from '../editors/tagPicker.js';
 import { attachmentsFor } from '../editors/attachField.js';
-import { ENERGY, isTickled, returnedFromTickler, suggestFor, makeSomeday, fileToReference, topics, saveReference, dayKey } from '../gtd.js';
+import { ENERGY, isTickled, returnedFromTickler, suggestFor, makeSomeday, fileToReference, topics, saveReference, dayKey, somedayCategories } from '../gtd.js';
 import { openDelegate, openTickle } from '../editors/gtd.js';
+import { openReview } from './weekly.js';
 
 export const CHOICES = [
   ['next', 'Next action', 'I’ll do it'],
@@ -128,6 +129,17 @@ function referenceForm(t) {
   </form>`;
 }
 
+function somedayForm() {
+  const cats = somedayCategories();
+  return `<form class="cl-form" data-clarify-form="someday">
+    <div class="field"><span class="field-label">Category <span class="hint">optional</span></span><div class="segmented cl-cats" role="radiogroup" aria-label="Category">
+      <label><input type="radio" name="category" value="" checked><span>None</span></label>${cats.map((g) => `<label><input type="radio" name="category" value="${esc(g.name)}"><span>${esc(g.name)}</span></label>`).join('')}</div></div>
+    <label>Or a new category<input type="text" name="new_category" placeholder="Travel, Learn, Home…" maxlength="60" autocomplete="off"></label>
+    <p class="hint">Parked in Someday/Maybe: out of your lists, looked at in the Weekly Review.</p>
+    <div class="cl-foot"><button type="button" class="btn" data-clarify="back">‹ Back</button><button type="submit" class="btn primary">Park it ⏎</button></div>
+  </form>`;
+}
+
 function nowPanel() {
   return `<div class="cl-now"><div class="cl-timer" data-clarify-timer aria-live="off">2:00</div><p class="hint">The 2-minute rule: if it takes less than two minutes, do it now.</p>
     <div class="cl-foot"><button class="btn" data-clarify="longer">Taking longer: make it an action</button><button class="btn primary" data-clarify="did-it">✓ Done ⏎</button></div></div>`;
@@ -138,19 +150,20 @@ export function viewClarify() {
   const t = current();
   const remaining = clarifyQueue().filter((x) => !s.skipped.has(x.id)).length;
   const total = s.done + remaining + s.skipped.size;
-  const head = `<div class="view-head"><h1 class="inbox">Process Inbox</h1><span class="cl-count">${t ? `${s.done + 1} of ${total}` : ''}</span></div>${progressBar(s.done, total)}`;
+  const head = `${openReview() ? '<a class="back" href="#weekly/inbox">‹ Weekly Review</a>' : ''}<div class="view-head"><h1 class="inbox">Process Inbox</h1><span class="cl-count">${t ? `${s.done + 1} of ${total}` : ''}</span></div>${progressBar(s.done, total)}`;
   if (!t) {
     const c = s.counts;
     const summary = CHOICES.filter(([k]) => c[k]).map(([k, l]) => `${c[k]} ${l.toLowerCase()}`).join(' · ');
     return `${head}<div class="cl-done"><div class="cl-big">🎉</div><h2>${s.skipped.size ? `Done, except ${s.skipped.size} skipped` : 'Inbox zero'}</h2>
       ${s.done ? `<p>You clarified ${s.done} item${s.done === 1 ? '' : 's'}${summary ? `: ${summary}` : ''}.</p>` : '<p>Nothing to clarify.</p>'}
-      <p>${s.skipped.size ? '<button class="btn" data-clarify="unskip">Go through the skipped ones</button> ' : ''}${s.history.length ? '<button class="btn" data-clarify="undo">↶ Undo last</button> ' : ''}<a class="btn primary" href="#inbox">Back to the Inbox</a></p></div>`;
+      <p>${s.skipped.size ? '<button class="btn" data-clarify="unskip">Go through the skipped ones</button> ' : ''}${s.history.length ? '<button class="btn" data-clarify="undo">↶ Undo last</button> ' : ''}${openReview() ? '<a class="btn primary" href="#weekly/inbox">Back to the Weekly Review</a>' : '<a class="btn primary" href="#inbox">Back to the Inbox</a>'}</p></div>`;
   }
   let body;
   if (s.mode === 'next') body = nextForm(t);
   else if (s.mode === 'project') body = projectForm(t);
   else if (s.mode === 'reference') body = referenceForm(t);
   else if (s.mode === 'now') body = nowPanel();
+  else if (s.mode === 'someday') body = somedayForm();
   else {
     const sug = suggestFor(t);
     body = `${sug ? `<button class="cl-sug" data-clarify="suggested">Suggested: <b>${esc(sug.project.name)}</b>${sug.tags.map((g) => ` · ${esc(tagLabel(g))}`).join('')} ✓</button>` : ''}
@@ -208,6 +221,12 @@ async function submitForm(form) {
       if (p) { const [r] = await run(sb.from('projects').update({ status: 'dropped' }).eq('id', p.id).select()); syncRow('projects', p, r); }
     });
     toast(`Project “${name}” created`, [{ label: 'Open', run: () => { location.hash = `#project/${pid}`; } }]);
+  } else if (kind === 'someday') {
+    const f = new FormData(form);
+    const category = String(f.get('new_category') || '').trim() || String(f.get('category') || '');
+    await makeSomeday(t, category);
+    toast(`Parked in Someday/Maybe${category ? ` · ${category}` : ''}`);
+    record(snap, 'someday');
   } else if (kind === 'reference') {
     const topic = String(new FormData(form).get('topic') || '').trim();
     const files = attachmentsFor('task_id', t.id).map((a) => a.id);
@@ -245,7 +264,7 @@ export async function clarifyAction(action) {
     }
     case 'delegate': return openDelegate(t, { onDone: () => record(snap, 'delegate') });
     case 'tickler': return openTickle(t, { onDone: () => record(snap, 'tickler') });
-    case 'someday': await makeSomeday(t); toast('Parked in Someday (an on-hold tag)'); return record(snap, 'someday');
+    case 'someday': s.mode = 'someday'; break;
     case 'trash': {
       const [row] = await run(sb.from('tasks').update({ dropped_at: new Date().toISOString() }).eq('id', t.id).select());
       syncRow('tasks', t, row);

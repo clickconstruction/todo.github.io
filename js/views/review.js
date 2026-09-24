@@ -73,6 +73,9 @@ export function healthHints(p) {
   return hints;
 }
 
+// Back to the Weekly Review when this is its Projects step.
+const weeklyBack = (always = true) => ((db.weeklyReviews || []).some((r) => !r.completed_at && !r.abandoned_at) ? '<a class="back" href="#weekly/projects">‹ Weekly Review</a>' : always ? '<a class="back" href="#weekly">‹ Weekly Review</a>' : '');
+
 export function viewReview(which) {
   const q = reviewQueue();
   if (which && q.ids.includes(which) && !q.reviewed.includes(which)) q.current = which;
@@ -80,7 +83,7 @@ export function viewReview(which) {
   if (!remaining.length) {
     const n = q.reviewed.length;
     const nextDue = db.projects.filter(isReviewable).sort((a, b) => new Date(a.next_review_at) - new Date(b.next_review_at))[0];
-    return `<div class="view-head"><h1 class="review">Review</h1></div>
+    return `${weeklyBack()}<div class="view-head"><h1 class="review">Review</h1></div>
       <div class="review-done"><p class="review-big">✓ All caught up</p>
       <p class="view-sub">${n ? `You reviewed ${n} project${n === 1 ? '' : 's'} this session.` : 'No projects are due for review.'}
       ${nextDue ? ` Next up: <a href="#project/${nextDue.id}">${esc(nextDue.name)}</a> ${esc(fmtDate(nextDue.next_review_at))}.` : ''}</p></div>`;
@@ -94,7 +97,7 @@ export function viewReview(which) {
   const hints = healthHints(p);
   const interval = REVIEW_INTERVALS.find(([d]) => d === p.review_every_days) ? p.review_every_days : 'custom';
 
-  return `<div class="review-bar">
+  return `${weeklyBack(false)}<div class="review-bar">
       <h1 class="review">Review</h1>
       <span class="review-count">Project ${idx + 1} of ${remaining.length}</span>
       <span class="review-nav">

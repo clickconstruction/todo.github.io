@@ -33,6 +33,9 @@ import { hereNowCount } from './places.js';
 import { gtdAction, gtdSubmit, onRefSearch, waitingBadgeCount } from './views/gtd.js';
 import { clarifyAction, onClarifySubmit, clarifyKey } from './views/clarify.js';
 import { openDelegate, openTickle } from './editors/gtd.js';
+import { weeklyAction, staleAction, weeklySubmit } from './views/weekly.js';
+import { sweepAction, sweepSubmit, sweepKey } from './views/sweep.js';
+import { somedayAction, somedaySubmit, somedayCount } from './views/someday.js';
 
 const view = $('#view');
 const typing = () => /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
@@ -137,6 +140,10 @@ const CLICKS = [
   ['[data-act]', (el) => ACTIONS[el.dataset.act]()],
   ['[data-clarify]', (el, e) => { e.stopPropagation(); clarifyAction(el.dataset.clarify); }],
   ['[data-gtd]', (el, e) => { e.stopPropagation(); gtdAction(el); }],
+  ['[data-weekly]', (el, e) => { e.stopPropagation(); weeklyAction(el); }],
+  ['[data-stale]', (el, e) => { e.stopPropagation(); staleAction(el); }],
+  ['[data-sweep]', (el, e) => { e.stopPropagation(); sweepAction(el); }],
+  ['[data-someday]', (el, e) => { e.stopPropagation(); somedayAction(el); }],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
   ['[data-copy-geo]', (el) => copyGeoUrl(el)],
   ['[data-setup-auto]', (el) => openAutomationGuide(el.dataset.setupAuto)],
@@ -167,7 +174,7 @@ document.addEventListener('click', (e) => {
 });
 
 view.addEventListener('submit', async (e) => {
-  if (onClarifySubmit(e) || gtdSubmit(e)) return;
+  if (onClarifySubmit(e) || gtdSubmit(e) || weeklySubmit(e) || sweepSubmit(e) || somedaySubmit(e)) return;
   const senderForm = e.target.closest('[data-add-sender]');
   if (senderForm) { e.preventDefault(); await addSender(senderForm); return; }
   const form = e.target.closest('[data-capture]');
@@ -214,7 +221,7 @@ $('#more-tab').onclick = () => {
   const due = reviewDueCount();
   const here = hereNowCount();
   const waiting = waitingBadgeCount();
-  const links = [['#waiting', '⏳', `Waiting For${waiting ? ` <b class="badge due inline">${waiting}</b>` : ''}`], ['#tickler', '📆', 'Tickler'], ['#reference', '🗄️', 'Reference'], ['#review', '🔁', `Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
+  const links = [['#waiting', '⏳', `Waiting For${waiting ? ` <b class="badge due inline">${waiting}</b>` : ''}`], ['#tickler', '📆', 'Tickler'], ['#reference', '🗄️', 'Reference'], ['#someday', '💭', `Someday/Maybe${somedayCount() ? ` <span class="hint">${somedayCount()}</span>` : ''}`], ['#weekly', '🧭', `Weekly Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#sweep', '🧹', 'Mind sweep'], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
   const persp = livePerspectives().map((p) => { const n = badgeCount(p); return [`#perspective/${p.id}`, esc(p.icon), `${esc(p.name)}${n ? ` <b class="badge persp inline">${n}</b>` : ''}`]; });
   const sheet = openSheet(`<form method="dialog" class="more-sheet"><button type="button" class="btn focus-more" data-act="focus">🎯 ${getFocus() ? `Focused on ${esc(focusLabel())} · change` : 'Focus'}</button><h2>Perspectives</h2>
     <nav class="more-links">${persp.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}<a href="#perspectives" data-more-link><span>🔭</span>${persp.length ? 'All perspectives' : 'Perspectives: saved views'}</a></nav>
@@ -226,7 +233,7 @@ $('#more-tab').onclick = () => {
 };
 window.addEventListener('hashchange', render);
 document.addEventListener('keydown', (e) => {
-  if (clarifyKey(e)) return;
+  if (clarifyKey(e) || sweepKey(e)) return;
   if (!e.metaKey && !e.ctrlKey && !$('#sheet').open && !typing() && location.hash.startsWith('#review') && ['j', 'k', 'm'].includes(e.key)) {
     const btn = e.key === 'm' ? $('[data-mark-reviewed]') : $$review(e.key === 'j' ? 1 : 0);
     if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }

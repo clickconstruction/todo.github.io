@@ -18,7 +18,7 @@ async function reload() {
   const insp = await import('/js/state.js'); insp.app.selected = null;
   try { localStorage.removeItem('todo.filter'); localStorage.removeItem('todo.collapsed'); } catch { /* ignore */ }
   const { app } = await import('/js/state.js');
-  app.review = null; app.reviewStats = null; app.here = null; app.locationState = null; app.clarify = null; app.refQuery = '';
+  app.review = null; app.reviewStats = null; app.here = null; app.locationState = null; app.clarify = null; app.refQuery = ''; app.sweep = null; app.weeklyJust = null;
   window.__openLink = (url) => { window.__opened = url; };
   window.__noMaps = true; // never call Google from tests
   window.__noRefresh = true; // no background reloads mid-suite (the pane's visibility flips)
@@ -39,7 +39,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -55,6 +55,130 @@ export async function run({ only } = {}) {
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
 
+// Weekly Review: guided steps, saved progress, auto-done steps, stale actions, summary.
+async function weeklyReview(check) {
+  const { db } = await import('/js/state.js');
+  T().tasks.find((t) => t.id === 't5').updated_at = new Date(Date.now() - 90 * 86400000).toISOString(); // stale
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  await go('#weekly');
+  check('overview: three stages, ten steps, time estimate, start button', has(undefined, 'weekly review', 'get clear', 'get current', 'get creative', 'about') && $$('.wk-step').length === 10 && !!$('[data-weekly="start"]'), text());
+  check('steps with nothing to do are already ticked (waiting)', $('a.wk-step[href="#weekly/waiting"]').classList.contains('done'));
+  $('[data-weekly="start"]').click(); await wait(250);
+  check('starting saves a review row', T().weekly_reviews.length === 1 && !T().weekly_reviews[0].completed_at && has(undefined, '2 of 10 steps') === false && has(undefined, 'of 10 steps'));
+  await go('#weekly/papers');
+  check('a step page: title, step 1 of 10, hint, capture box', has(undefined, 'collect loose papers', '1 of 10', 'receipts') && !!$('[data-wk-capture]'));
+  const cap = $('[data-wk-capture] input'); cap.value = 'Receipt from the supply house'; cap.closest('form').requestSubmit(); await wait(250);
+  check('capture from a step lands in the Inbox', T().tasks.some((t) => t.title === 'Receipt from the supply house' && t.in_inbox));
+  $('[data-weekly="step-done"]').click(); await wait(300);
+  check('Step done saves it and moves on to the mind sweep', T().weekly_reviews[0].steps.papers && location.hash === '#weekly/sweep' && has(undefined, 'mind sweep') && !!$('#sweep-input'), location.hash);
+  await go('#weekly/inbox');
+  check('Inbox step links to Process Inbox with the count', has(undefined, '3', 'to clarify') && !!$('a[href="#clarify"]'));
+  await go('#clarify');
+  check('Clarify offers the way back to the review', !!$('a.back[href="#weekly/inbox"]'));
+  await go('#weekly/stale');
+  check('stale actions: only the ones untouched 60+ days', has(undefined, 'make funeral playlist', '9') && $$('.wk-stale').length === 1, text());
+  $('[data-stale="keep"]').click(); await wait(250);
+  check('Keep touches it, so it isn’t stale any more', new Date(T().tasks.find((t) => t.id === 't5').updated_at) > new Date(Date.now() - 60000) && has(undefined, 'every action has been touched'));
+  await go('#weekly/projects');
+  check('projects step: due count and Review projects', has(undefined, 'due for review') && !!$('a[href="#review"]'));
+  await go('#review');
+  check('project review links back to the Weekly Review', !!$('a.back[href="#weekly/projects"]'));
+  await go('#weekly/someday');
+  check('Someday step embeds the list', has(undefined, 'projects on hold', 'doctor integration'));
+  await go('#weekly/new');
+  const n = $('[data-wk-capture] input'); n.value = 'Idea: offer maintenance plans'; n.closest('form').requestSubmit(); await wait(250);
+  check('Anything new? captures ideas', T().tasks.some((t) => t.title === 'Idea: offer maintenance plans'));
+  $('[data-weekly="finish"]').click(); await wait(400);
+  const r = T().weekly_reviews[0];
+  check('Finish completes it with stats and shows the summary', r.completed_at && r.stats.captured >= 2 && location.hash === '#weekly/summary' && has(undefined, 'review done', 'captured'), JSON.stringify(r.stats));
+  await go('#weekly');
+  check('overview afterwards: last review today, recent list, can start again', has(undefined, 'last review', 'recent reviews') && !!$('[data-weekly="start"]'));
+  const { streak, reviewDue } = await import('/js/weekly.js');
+  const wk = (n) => new Date(Date.now() - n * 7 * 86400000).toISOString();
+  check('streak counts consecutive weeks', streak([wk(0), wk(1), wk(2), wk(4)]) === 3 && streak([wk(1), wk(2)]) === 2 && streak([wk(3)]) === 0);
+  const fri = new Date(2026, 8, 25, 16, 0); // a Friday, 4pm
+  check('review due: after the review day and time, unless done this week', reviewDue({ reviewDay: 5, reviewMinutes: 900, lastCompleted: null, now: fri }) && !reviewDue({ reviewDay: 5, reviewMinutes: 900, lastCompleted: new Date(2026, 8, 25, 15, 30).toISOString(), now: fri }) && !reviewDue({ reviewDay: 5, reviewMinutes: 900, lastCompleted: new Date(2026, 8, 24).toISOString(), now: fri }) && reviewDue({ reviewDay: 5, reviewMinutes: 900, lastCompleted: new Date(2026, 8, 18, 16).toISOString(), now: fri }));
+  // Settings: review day saves to the account.
+  await go('#settings');
+  const sel = $('[data-setting-review-day]'); sel.value = '1'; sel.dispatchEvent(new Event('change', { bubbles: true })); await wait(250);
+  check('Settings: review day saves', T().user_settings[0] && T().user_settings[0].review_day === 1 && db.weeklyReviews.length === 1);
+  let blocked = false; try { const x = await window.sb.from('weekly_reviews').delete().eq('id', r.id); blocked = !!x.error; } catch { blocked = true; }
+  check('reviews can’t be deleted', blocked);
+}
+
+// Mind sweep: prompts one at a time, captures to the Inbox, hide and add prompts.
+async function mindSweep(check) {
+  await go('#sweep');
+  check('first prompt, count and group', has(undefined, 'mind sweep', '1 of 56', 'work', 'projects started but not finished'), text());
+  const inp = () => $('#sweep-input');
+  inp().value = 'Finish the Smith bathroom punch list'; inp().closest('form').requestSubmit(); await wait(250);
+  inp().value = 'Invoice the Jones job'; inp().closest('form').requestSubmit(); await wait(250);
+  check('Enter captures to the Inbox and lists it under the prompt', T().tasks.filter((t) => ['Finish the Smith bathroom punch list', 'Invoice the Jones job'].includes(t.title) && t.in_inbox).length === 2 && $$('.sweep-caps li').length === 2 && has(undefined, '2 captured'));
+  inp().focus();
+  inp().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await wait(150);
+  check('→ on an empty box goes to the next prompt', has(undefined, '2 of 56', 'meaning to start'));
+  $('[data-sweep="hide"]').click(); await wait(250);
+  check('Hide this prompt: saved, and the list is one shorter', (T().user_settings[0].trigger_hidden || []).includes('t2') && has(undefined, '2 of 55'));
+  const { app } = await import('/js/state.js');
+  app.sweep.i = 54; (await import('/js/router.js')).render(); await wait(80);
+  $('[data-sweep="next"]').click(); await wait(150);
+  check('end: swept, with a link to clarify', has(undefined, 'swept', '2 captured') && !!$('a[href="#clarify"]'));
+  $('.sweep-edit').open = true;
+  const f = $('[data-sweep-add]'); f.elements.group.value = 'Work'; f.elements.text.value = 'Rental properties'; f.requestSubmit(); await wait(300);
+  check('add your own prompt', (T().user_settings[0].trigger_custom || []).some((c) => c.text === 'Rental properties' && c.group === 'Work'));
+  const { sweepPrompts } = await import('/js/weekly.js');
+  const ps = sweepPrompts(T().user_settings[0]);
+  check('custom prompts join their group; hidden ones stay out', ps.length === 56 && !ps.some((p) => p.id === 't2') && ps.findIndex((p) => p.text === 'Rental properties') < ps.findIndex((p) => p.group === 'Personal'));
+  app.sweep.i = 999; (await import('/js/router.js')).render(); await wait(80);
+  $('.sweep-edit').open = true;
+  $('[data-sweep="restore"]').click(); await wait(250);
+  check('show hidden prompts again', (T().user_settings[0].trigger_hidden || []).length === 0);
+}
+
+// Someday/Maybe: categories, activate, revisit, drop, on-hold projects.
+async function someday(check) {
+  const { db } = await import('/js/state.js');
+  const g = await import('/js/gtd.js');
+  await g.makeSomeday(db.tasks.find((t) => t.id === 't13'), 'Learn');
+  const [row] = (await window.sb.from('tasks').insert({ title: 'Drive the Pacific Coast Highway', in_inbox: false }).select()).data; db.tasks.push(row);
+  await g.makeSomeday(db.tasks.find((t) => t.id === row.id), 'Travel');
+  const link = T().task_tags.find((x) => x.task_id === row.id); link.created_at = new Date(Date.now() - 240 * 86400000).toISOString();
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  await go('#someday');
+  check('grouped by category, with on-hold projects', has(undefined, 'someday/maybe', 'learn · 1', 'travel · 1', 'projects on hold · 1', 'doctor integration'), text());
+  check('parked 6+ months asks “still want this?”', has(undefined, 'still want this?', '8 months'));
+  const someTag = T().tags.find((x) => x.name === 'Someday');
+  check('categories are tags under an on-hold Someday tag', someTag.status === 'on_hold' && T().tags.some((x) => x.name === 'Learn' && x.parent_id === someTag.id));
+  const { isAvailable } = await import('/js/availability.js');
+  check('someday items aren’t available', !isAvailable(db.tasks.find((t) => t.id === 't13')));
+  $(`[data-someday="activate"][data-id="t13"]`).click(); await wait(100);
+  const f = $('#sheet form'); f.elements.project_id.value = 'p3'; f.requestSubmit(); await wait(300);
+  const t13 = T().tasks.find((t) => t.id === 't13');
+  check('Activate: into a project, Someday tags removed, available', t13.project_id === 'p3' && !T().task_tags.some((x) => x.task_id === 't13' && [someTag.id, T().tags.find((x) => x.name === 'Learn').id].includes(x.tag_id)) && isAvailable(db.tasks.find((t) => t.id === 't13')));
+  $(`[data-someday="revisit"][data-id="${row.id}"]`).click(); await wait(100);
+  $('#sheet [data-day]').click(); $('#sheet form').requestSubmit(); await wait(400);
+  const pch = T().tasks.find((t) => t.id === row.id);
+  check('Revisit on…: in the tickler, out of Someday', pch.tickler && pch.in_inbox && !T().task_tags.some((x) => x.task_id === row.id));
+  $('[data-someday="activate-project"][data-id="p5"]').click(); await wait(250);
+  check('Activate a project on hold', T().projects.find((p) => p.id === 'p5').status === 'active');
+  const add = $('[data-someday-add] input'); add.value = 'Learn to weld'; add.closest('form').requestSubmit(); await wait(400);
+  const weld = T().tasks.find((t) => t.title === 'Learn to weld');
+  check('add straight to Someday', weld && !weld.in_inbox && T().task_tags.some((x) => x.task_id === weld.id && x.tag_id === someTag.id));
+  $(`[data-someday="drop"][data-id="${weld.id}"]`).click(); await wait(250);
+  check('Drop (not delete)', !!T().tasks.find((t) => t.id === weld.id).dropped_at);
+  // Clarify's Someday decision asks for a category.
+  const { capture } = await import('/js/data.js'); await capture('Visit Iceland in winter');
+  const { app } = await import('/js/state.js'); app.clarify = null;
+  await go('#clarify');
+  while ($('.cl-item b') && $('.cl-item b').textContent !== 'Visit Iceland in winter') { $('[data-clarify="skip"]').click(); await wait(80); }
+  key('5'); await wait(150);
+  const cf = $('[data-clarify-form="someday"]');
+  check('Clarify → Someday offers categories', cf && has(undefined, 'category', 'travel'));
+  cf.querySelector('input[value="Travel"]').checked = true; cf.requestSubmit(); await wait(300);
+  const ice = byTitle('Visit Iceland in winter');
+  check('parked under Someday : Travel', T().task_tags.some((x) => x.task_id === ice.id && x.tag_id === T().tags.find((y) => y.name === 'Travel').id) && !ice.in_inbox);
+}
+
 // Clarify: one item at a time, each decision recorded and undoable.
 async function clarify(check) {
   await go('#inbox');
@@ -68,7 +192,8 @@ async function clarify(check) {
   check('shows the first item, 1 of N, and 8 choices', has(undefined, 'process inbox', '1 of 6', 'frog pond ein', 'what is it?') && $$('.cl-choice').length === 8, text());
   $('[data-clarify="skip"]').click(); await wait(120);
   check('Skip moves to the next item', has(undefined, 'build a 2m telescope', '1 of 6'), text());
-  key('5'); await wait(250);
+  key('5'); await wait(150);
+  $('[data-clarify-form="someday"]').requestSubmit(); await wait(250);
   const tele = byTitle('Build a 2m telescope');
   const someday = T().tags.find((g) => g.name === 'Someday');
   check('5 = Someday: an on-hold Someday tag, out of the Inbox', someday && someday.status === 'on_hold' && !tele.in_inbox && T().task_tags.some((x) => x.task_id === tele.id && x.tag_id === someday.id));
@@ -1009,7 +1134,7 @@ async function datesSettings(check) {
   const { db, app } = await import('/js/state.js');
   const { HOURS } = await import('/js/dates.js');
   await go('#settings');
-  check('dates section with three times and the Today tag', $$('[data-setting-time]').length === 3 && !!$('[data-setting-forecast-tag]') && has(undefined, 'due dates', 'defer dates', 'planned dates', 'always show in today'));
+  check('dates section with three times and the Today tag (plus the review time)', $$('[data-setting-time]').length === 4 && !!$('[data-setting-forecast-tag]') && has(undefined, 'due dates', 'defer dates', 'planned dates', 'always show in today'));
   const due = $('[data-setting-time="due_minutes"]'); due.value = '15:30'; due.dispatchEvent(new Event('change', { bubbles: true }));
   await wait(200);
   check('saved to the account and used right away', T().user_settings[0].due_minutes === 930 && HOURS.due_at === 15.5);
@@ -1325,7 +1450,7 @@ async function review(check) {
 
   for (let i = 0; i < 5 && $('[data-mark-reviewed]'); i++) { $('[data-mark-reviewed]').click(); await wait(250); }
   check('all caught up screen', has(undefined, 'All caught up', 'You reviewed 4 projects'), text());
-  check('badge clears', $('#badge-review').textContent === '');
+  check('project count clears (• only while the Weekly Review is due)', ['', '•'].includes($('#badge-review').textContent));
 }
 
 // P8: desktop inspector.

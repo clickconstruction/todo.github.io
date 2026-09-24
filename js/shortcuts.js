@@ -35,7 +35,7 @@ export const SHORTCUTS = [
   { key: '3', group: 'Go to', label: 'Flagged', run: () => { location.hash = '#flagged'; } },
   { key: '4', group: 'Go to', label: 'Projects', run: () => { location.hash = '#projects'; } },
   { key: '5', group: 'Go to', label: 'Tags', run: () => { location.hash = '#tags'; } },
-  { key: '6', group: 'Go to', label: 'Review', run: () => { location.hash = '#review'; } },
+  { key: '6', group: 'Go to', label: 'Weekly Review', run: () => { location.hash = '#weekly'; } },
   { key: '7', group: 'Go to', label: 'Perspectives', run: () => { location.hash = '#perspectives'; } },
   { key: '8', group: 'Go to', label: 'Nearby', run: () => { location.hash = '#nearby'; } },
   { key: '9', group: 'Go to', label: 'Done', run: () => { location.hash = '#done'; } },
@@ -44,6 +44,8 @@ export const SHORTCUTS = [
   { key: 'w', group: 'Go to', label: 'Waiting For', run: () => { location.hash = '#waiting'; } },
   { key: 'r', group: 'Go to', label: 'Reference', run: () => { location.hash = '#reference'; } },
   { key: 'T', shift: true, group: 'Go to', label: 'Tickler', run: () => { location.hash = '#tickler'; } },
+  { key: 'S', shift: true, group: 'Go to', label: 'Someday/Maybe', run: () => { location.hash = '#someday'; } },
+  { key: 'M', shift: true, group: 'Go to', label: 'Mind sweep', run: () => { location.hash = '#sweep'; } },
   { key: 'j', alt: 'ArrowDown', group: 'Lists', label: 'Select the next item', run: () => H.move(1) },
   { key: 'k', alt: 'ArrowUp', group: 'Lists', label: 'Select the previous item', run: () => H.move(-1) },
   { key: 'e', alt: 'Enter', group: 'Lists', label: 'Open the selected item', run: needTask((t) => H.open(t)) },
@@ -114,7 +116,7 @@ export function shortcutListHtml() {
 }
 
 export function tipFor(k) {
-  if (k === 'Shift') return '⇧ Shift with a letter: N new project · F focus · U unfocus · D drop · T tickler · ? this list';
+  if (k === 'Shift') return '⇧ Shift with a letter: N new project · F focus · U unfocus · D drop · T tickler · S someday · M mind sweep · ? this list';
   if (k === 'ArrowUp' || k === 'ArrowDown') return `${k === 'ArrowUp' ? '↑' : '↓'}: select the ${k === 'ArrowUp' ? 'previous' : 'next'} item`;
   const list = shortcutsOn(k);
   if (!list.length) return `${labelFor(k)}: no shortcut`;

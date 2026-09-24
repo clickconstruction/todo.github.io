@@ -127,9 +127,37 @@ export async function somedayTag() {
   else if (tag.status !== 'on_hold') { const [row] = await run(sb.from('tags').update({ status: 'on_hold' }).eq('id', tag.id).select()); syncRow('tags', tag, row); }
   return tag;
 }
-export async function makeSomeday(t) {
-  const tag = await somedayTag();
+// Park it in Someday/Maybe, optionally in a category ("Travel" → the tag Someday : Travel).
+export async function makeSomeday(t, category = '') {
+  const root = await somedayTag();
+  let tag = root;
+  const c = String(category || '').trim();
+  if (c) {
+    tag = db.tags.find((g) => g.parent_id === root.id && g.name.toLowerCase() === c.toLowerCase());
+    if (!tag) { const [row] = await run(sb.from('tags').insert({ name: c, parent_id: root.id }).select()); db.tags.push(row); tag = row; }
+  }
   await saveTask(t, { in_inbox: false, tickler: false }, [...new Set([...tagsFor(t.id).map((g) => g.id), tag.id])]);
+}
+// Someday/Maybe: open items with the Someday tag (or one under it), and on-hold projects.
+export const somedayRoot = () => db.tags.find((g) => !g.parent_id && /^someday/i.test(g.name)) || null;
+export const somedayCategories = () => { const r = somedayRoot(); return r ? db.tags.filter((g) => g.parent_id === r.id).sort((a, b) => a.name.localeCompare(b.name)) : []; };
+const somedayIds = () => { const r = somedayRoot(); return r ? new Set([r.id, ...somedayCategories().map((g) => g.id)]) : new Set(); };
+export const somedayLink = (t) => { const ids = somedayIds(); return db.taskTags.find((x) => x.task_id === t.id && ids.has(x.tag_id)) || null; };
+export const isSomeday = (t) => isOpen(t) && !!somedayLink(t);
+export function somedayItems() {
+  const ids = somedayIds();
+  const tasks = ids.size ? db.tasks.filter((t) => isOpen(t) && db.taskTags.some((x) => x.task_id === t.id && ids.has(x.tag_id))) : [];
+  const projects = db.projects.filter((p) => p.status === 'on_hold');
+  return { tasks, projects };
+}
+// When it was parked (the Someday tag was put on; else when it was last changed).
+export const parkedSince = (t) => { const l = somedayLink(t); return (l && l.created_at) || t.updated_at || t.created_at; };
+export const daysSince = (iso) => Math.max(0, Math.floor((Date.now() - new Date(iso)) / 86400000));
+// Out of Someday: the Someday tags come off; with a project and/or tags it becomes a next action.
+export async function activateSomeday(t, { project_id = null, tagIds = [] } = {}) {
+  const ids = somedayIds();
+  const keep = tagsFor(t.id).map((g) => g.id).filter((id) => !ids.has(id));
+  await saveTask(t, { project_id: project_id || t.project_id || null }, [...new Set([...keep, ...tagIds])]);
 }
 
 // ---------- Clarify suggestions ----------

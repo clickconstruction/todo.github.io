@@ -43,3 +43,25 @@ export async function sendDueReminders(env, rest, now = new Date()) {
   }
   return { due: due.length, sent };
 }
+
+// Weekly Review reminder: on the user's review day, from their review time (up to 2 hours after),
+// one push per week, unless they've completed a review in the last 5 days.
+export function localDayMinutes(now, tz) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(now).map((x) => [x.type, x.value]));
+  return { day: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday), minutes: Number(p.hour) * 60 + Number(p.minute) };
+}
+export async function sendReviewReminders(env, rest, now = new Date()) {
+  const rows = await rest('user_settings?review_notify=is.true&select=user_id,review_day,review_minutes,review_notified_at,timezone');
+  let sent = 0;
+  for (const s of rows) {
+    const { day, minutes } = localDayMinutes(now, s.timezone || env.TIMEZONE || 'America/Chicago');
+    if (day !== s.review_day || minutes < s.review_minutes || minutes >= s.review_minutes + 120) continue;
+    if (s.review_notified_at && now - new Date(s.review_notified_at) < 5 * 86400000) continue;
+    await rest(`user_settings?user_id=eq.${s.user_id}`, { method: 'PATCH', body: { review_notified_at: now.toISOString() } });
+    const done = await rest(`weekly_reviews?user_id=eq.${s.user_id}&completed_at=gte.${new Date(now - 5 * 86400000).toISOString()}&select=id&limit=1`);
+    if (done.length) continue;
+    await deliver(env, rest, s.user_id, { title: '🧭 Weekly Review', body: 'Time to get clear, get current and get creative.', tag: 'weekly-review', url: '#weekly' }, { kind: 'review' });
+    sent += 1;
+  }
+  return sent;
+}
