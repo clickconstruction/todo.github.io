@@ -32,6 +32,7 @@ import { moreSheetHtml, openCustomize } from './sidebar.js';
 import { initUpdates, resumeAfterUpdate, tryApply } from './updates.js';
 import { slipAction, slipSubmit, slipInput } from './views/slipbox.js';
 import { readingAction, readingSubmit } from './views/reading.js';
+import { matrixAction, matrixChange } from './views/matrix.js';
 import { keepSession, signedIn, markSignedOutOnPurpose, lastEmail, signInNotice } from './session.js';
 import { importBusy } from './views/import.js';
 import { newFeedLink } from './views/settings.js';
@@ -173,6 +174,7 @@ const CLICKS = [
   ['[data-fr]', (el, e) => { e.stopPropagation(); fullReviewAction(el); }],
   ['[data-slip]', (el, e) => { e.stopPropagation(); slipAction(el); }],
   ['[data-rd]', (el, e) => { e.stopPropagation(); readingAction(el); }],
+  ['[data-mx]', (el, e) => { e.stopPropagation(); matrixAction(el); }],
   ['[data-fr-start]', async (el, e) => {
     e.stopPropagation();
     const key = el.dataset.frStart === 'import' ? 'import_id' : 'project_id';
@@ -232,6 +234,7 @@ view.addEventListener('submit', async (e) => {
 view.addEventListener('change', (e) => {
   if (e.target.closest('[data-hz-link-area], [data-hz-link-goal]')) { horizonsChange(e); return; }
   if (planChange(e)) return;
+  if (matrixChange(e)) return;
   if (e.target.closest('[data-cl-tick]') && location.hash.startsWith('#checklist/')) { checklistChange(e); return; }
   const doneCtl = e.target.closest('[data-done]');
   if (doneCtl) { onDoneFilterChange(doneCtl); return; }

@@ -29,6 +29,7 @@ import { viewDaily } from './views/daily.js';
 import { viewSettle } from './views/settle.js';
 import { viewSlipbox } from './views/slipbox.js';
 import { viewReading } from './views/reading.js';
+import { viewMatrix } from './views/matrix.js';
 import { viewFullReview, stopListening } from './views/fullreview.js';
 import { withFocus, getFocus, focusLabel, focusedProjectIds } from './prefs.js';
 import { applySidebar } from './sidebar.js';
@@ -36,14 +37,14 @@ import { somedayCount } from './views/someday.js';
 import { rowFor } from './views/daily.js';
 import { bigDue } from './views/horizons.js';
 
-const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person', 'weekly', 'sweep', 'someday', 'horizons', 'area', 'goal', 'share', 'checklists', 'checklist', 'daily', 'settle', 'full', 'slipbox', 'reading']);
+const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person', 'weekly', 'sweep', 'someday', 'horizons', 'area', 'goal', 'share', 'checklists', 'checklist', 'daily', 'settle', 'full', 'slipbox', 'reading', 'matrix']);
 const VIEWS = {
   search: viewSearch, inbox: viewInbox, forecast: viewForecast, projects: viewProjects, project: viewProject,
   tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone, flagged: viewFlagged, review: viewReview,
   nearby: viewNearby, places: viewPlaces, alerts: viewAlerts, perspective: viewPerspective, perspectives: viewPerspectives, import: viewImport, template: viewTemplate,
   clarify: viewClarify, tickler: viewTickler, reference: viewReference, waiting: viewWaiting, person: viewPerson,
   weekly: viewWeekly, sweep: viewSweep, someday: viewSomeday,
-  horizons: viewHorizons, area: viewArea, goal: viewGoal, now: viewNow, plan: viewPlan, share: viewShare, checklists: viewChecklists, checklist: viewChecklist, daily: viewDaily, settle: viewSettle, full: viewFullReview, slipbox: viewSlipbox, reading: viewReading,
+  horizons: viewHorizons, area: viewArea, goal: viewGoal, now: viewNow, plan: viewPlan, share: viewShare, checklists: viewChecklists, checklist: viewChecklist, daily: viewDaily, settle: viewSettle, full: viewFullReview, slipbox: viewSlipbox, reading: viewReading, matrix: viewMatrix,
 };
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
 const AFTER = { share: mountShare, plan: mountPlan, nearby: mountNearbyMap, clarify: mountClarify, sweep: mountSweep, weekly: (step) => step === 'sweep' && mountSweep(), reference: (id) => id && mountReferenceFiles(id) };
@@ -92,7 +93,7 @@ export function render() {
   const big = bigDue();
   $('#badge-horizons').textContent = big.yearly.length || big.quarterly ? '•' : '';
   // Views that live under "More" on phones light up the More tab.
-  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts', 'perspective', 'perspectives', 'import', 'waiting', 'person', 'tickler', 'reference', 'weekly', 'someday', 'horizons', 'area', 'goal', 'now', 'checklists', 'checklist', 'settle', 'daily', 'slipbox', 'reading'].includes(view));
+  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts', 'perspective', 'perspectives', 'import', 'waiting', 'person', 'tickler', 'reference', 'weekly', 'someday', 'horizons', 'area', 'goal', 'now', 'checklists', 'checklist', 'settle', 'daily', 'slipbox', 'reading', 'matrix'].includes(view));
   const nav = $('#nav-perspectives');
   if (nav) nav.innerHTML = ids ? withFocus(() => perspectiveNav(view === 'perspective' ? args[0] : null)) : perspectiveNav(view === 'perspective' ? args[0] : null);
   applySidebar();

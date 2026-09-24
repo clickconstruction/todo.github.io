@@ -230,7 +230,7 @@
   const DEFAULTS = {
     tasks: () => ({ project_id: null, parent_id: null, in_inbox: true, notes: '', completion_note: '', flagged: false, defer_at: null, planned_at: null,
       due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null, repeat_rule: null, steps_in_order: false, scheduled_at: null, scheduled_minutes: null, checklist_id: null,
-      energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, gain: '', gain_cost: '', gain_by: null, gain_met: null, clarify_skips: 0, reading_type: null, reading_state: null, reading_url: null, reading_notes_done: false }),
+      energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, gain: '', gain_cost: '', gain_by: null, gain_met: null, clarify_skips: 0, reading_type: null, reading_state: null, reading_url: null, reading_notes_done: false, important: null }),
     projects: () => ({ folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
       review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null, defer_at: null, planned_at: null, due_at: null, estimate_minutes: null,
       place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null, repeat_rule: null, outcome: '', area_id: null, goal_id: null, purpose: '', purpose_by: null, principles: '', plan: null }),
@@ -238,7 +238,7 @@
     tags: () => ({ parent_id: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null }),
     places: () => ({ address: '', google_place_id: null, radius_m: 402, notes: '', archived_at: null }),
     calendars: () => ({ color: '#1D9E75', enabled: true, sort: 0, last_ok_at: null, last_error: null, event_count: null, archived_at: null }),
-    user_settings: () => ({ due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, review_notified_at: null, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true, daily_notified_at: null, horizons_quarter_at: null, sidebar: {} }),
+    user_settings: () => ({ due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, review_notified_at: null, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true, daily_notified_at: null, horizons_quarter_at: null, sidebar: {}, matrix_urgent_days: 7 }),
     daily_reviews: () => ({ started_at: null, shutdown_at: null, focus: [] }),
     slipbox_notes: () => ({ body: '', source: '', source_url: null, kind: 'fleeting', from_task_id: null, reading_task_id: null, processed_at: null, archived_at: null }),
     review_sessions: () => ({ title: 'Full Review', scope: {}, current_item: null, status: 'active', agent_seen_at: null, agent_status: '', finished_at: null }),
@@ -510,6 +510,19 @@
         // Mirrors reading_set() / slipbox_from_task() (migration 20261017000001).
         const guessType = (s) => (/\b(watch|video|youtube|film|movie|documentary)\b/i.test(s) ? 'video' : /\b(listen|podcast|episode|audiobook)\b/i.test(s) ? 'podcast' : /\b(book|novel)\b|archive\.org/i.test(s) ? 'book' : /https?:\/\//i.test(s) ? 'article' : /^\s*read\b/i.test(s) ? 'book' : 'other');
         const somedayOf = (create) => { let g = tables.tags.find((x) => !x.parent_id && /^someday/i.test(x.name)); if (!g && create) { g = { ...DEFAULTS.tags(), id: id(), user_id: uid, name: 'Someday', status: 'on_hold', sort: 0, created_at: now() }; tables.tags.push(g); } return g; };
+        // Mirrors matrix_park() / matrix_unpark() (migration 20261018000001).
+        if (name === 'matrix_park') {
+          const g = somedayOf(true); g.status = 'on_hold';
+          const parked = (args.ids || []).filter((x) => { const t = tables.tasks.find((y) => y.id === x); return t && t.user_id === uid && !t.completed_at && !t.dropped_at && !tables.task_tags.some((l) => l.task_id === x && l.tag_id === g.id); });
+          parked.forEach((x) => { tables.task_tags.push({ task_id: x, tag_id: g.id, user_id: uid, created_at: now() }); const t = tables.tasks.find((y) => y.id === x); if (t.in_inbox || t.tickler) Object.assign(t, { in_inbox: false, tickler: false }); });
+          return { data: { parked, tag: g.id }, error: null };
+        }
+        if (name === 'matrix_unpark') {
+          const g = somedayOf(false); const set = new Set(args.ids || []);
+          const before = tables.task_tags.length;
+          if (g) tables.task_tags = tables.task_tags.filter((l) => !(set.has(l.task_id) && l.tag_id === g.id));
+          return { data: { unparked: before - tables.task_tags.length }, error: null };
+        }
         if (name === 'reading_set') {
           const t = tables.tasks.find((x) => x.id === args.task);
           if (!t) return { data: null, error: { message: 'Action not found.' } };

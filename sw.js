@@ -4,7 +4,7 @@
 // A new version installs in the background and waits; the page switches to it at a safe moment
 // (js/updates.js sends SKIP_WAITING). MIN_VERSION: pages older than this switch at the next safe moment
 // even mid-screen (raise it only when old code can't work with the data or has a security problem).
-const VERSION = 'v62';
+const VERSION = 'v63';
 const MIN_VERSION = 'v1';
 const SHELL = [
   './',
@@ -34,6 +34,8 @@ const SHELL = [
   'js/editors/historyField.js',
   'js/pushResult.js',
   'js/tree.js', 'js/perspective-engine.js', 'js/perspectives.js', 'js/views/perspective.js', 'js/editors/perspective.js', 'js/editors/props.js', 'js/omnifocus-import.js', 'js/views/import.js', 'js/templates.js', 'js/views/templates.js', 'js/prefs.js', 'js/shortcuts.js', 'js/editors/focus.js', 'js/ics.js', 'js/calendars.js', 'js/gtd.js', 'js/views/gtd.js', 'js/views/clarify.js', 'js/editors/gtd.js', 'js/weekly.js', 'js/views/weekly.js', 'js/views/sweep.js', 'js/views/someday.js', 'js/whatnow.js', 'js/views/horizons.js', 'js/views/now.js', 'js/views/plan.js', 'js/views/capture.js', 'js/schedule.js', 'js/checklists.js', 'js/editors/schedule.js', 'js/views/checklists.js', 'js/views/daily.js', 'js/settle.js', 'js/views/settle.js', 'js/gain.js', 'js/editors/gainField.js', 'js/sidebar.js', 'js/updates.js', 'js/session.js', 'js/review.js', 'js/views/fullreview.js', 'js/slipbox.js', 'js/views/slipbox.js', 'js/views/reading.js',
+  'js/matrix.js',
+  'js/views/matrix.js',
   'js/editors/breakdown.js',
   'js/editors/steps.js',
   'js/editors/place.js',

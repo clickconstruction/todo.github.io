@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -56,6 +56,85 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Matrix: available actions in the four boxes, sorted from due dates, flags and goals; ★ corrects;
+// each box has its move (plan today, planned date, hand off, park in Someday with Undo).
+async function matrix(check) {
+  const { db, app } = await import('/js/state.js');
+  app.mx = null;
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const t = T(); const d = (n) => new Date(Date.now() + n * 86400000).toISOString();
+  t.goals.push({ id: 'gMx', user_id: 'u1', title: 'Family ready', status: 'active', sort: 0, created_at: d(-30), updated_at: d(-30) });
+  t.projects.push({ ...t.projects[0], id: 'pMx', name: 'Estate', status: 'active', folder_id: null, goal_id: 'gMx', kind: 'parallel', flagged: false, defer_at: null });
+  t.people.push({ id: 'peMx', user_id: 'u1', name: 'Hiro', email: null, phone: null, notes: '', tag_id: null, sort: 0, archived_at: null, added_via: 'app', created_at: d(-5) });
+  const T1 = (id, title, extra = {}) => t.tasks.push({ ...t.tasks[0], id, title, notes: '', project_id: null, parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, completed_at: null, dropped_at: null, important: null, waiting_on: null, follow_up_at: null, agenda_for: null, reading_state: null, created_at: d(-400), updated_at: d(-400), ...extra });
+  T1('mx1', 'Renew contractor license', { flagged: true, due_at: d(3) });
+  T1('mx2', 'Update my will', { project_id: 'pMx' });
+  T1('mx3', 'Gate code for HOA', { due_at: d(2) });
+  T1('mx4', 'Frog pond');
+  T1('mx5', 'Build a 2m telescope');
+  T1('mx6', 'Invoice copy from Hiro', { waiting_on: 'peMx', follow_up_at: d(-2) });
+  T1('mx7', 'Due next month', { due_at: d(30) });
+  T1('mx8', 'Someday already', { in_inbox: true });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const { matrixBoxes } = await import('/js/views/matrix.js');
+  const where = (id) => Object.entries(matrixBoxes()).find(([, l]) => l.some((x) => x.t.id === id))?.[0] || null;
+  check('Matrix in the sidebar under Reflect', !!$('#sidebar a[href="#matrix"], nav a[href="#matrix"]'));
+  check('sorted: flagged+due soon → Do; goal → Schedule; due soon → Delegate; neither → Park', where('mx1') === 'do' && where('mx2') === 'schedule' && where('mx3') === 'delegate' && where('mx4') === 'park' && where('mx5') === 'park', ['mx1', 'mx2', 'mx3', 'mx4'].map(where).join());
+  check('late follow-up counts as urgent; far due date isn’t; Inbox stays out', where('mx6') === 'delegate' && where('mx7') === 'park' && where('mx8') === null, [where('mx6'), where('mx7'), where('mx8')].join());
+  await go('#matrix');
+  check('four boxes, reasons shown, Schedule stands out', $$('.mx-box').length === 4 && has('[data-box="do"]', 'renew contractor license', 'flagged') && has('[data-box="schedule"]', 'update my will', 'goal: family ready') && !!$('.mx-box.key[data-box="schedule"]') && has('[data-box="delegate"]', 'follow-up late'));
+  // ★ corrects: Frog pond becomes important → Schedule; "auto" puts it back
+  await go('#matrix/park');
+  $('[data-mx="star"][data-id="mx4"]').click();
+  await until(() => t.tasks.find((x) => x.id === 'mx4').important === true);
+  check('★ marks it important: moves to Schedule', t.tasks.find((x) => x.id === 'mx4').important === true && where('mx4') === 'schedule');
+  await go('#matrix/schedule');
+  $('[data-mx="auto"][data-id="mx4"]').click();
+  await until(() => t.tasks.find((x) => x.id === 'mx4').important === null);
+  check('“auto” clears the override: back in Park', where('mx4') === 'park');
+  // urgent window: 1 day → the 3-day due date is no longer urgent
+  await go('#matrix');
+  const sel = $('[data-mx-days]'); sel.value = '1'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+  await until(() => Number((app.settings || {}).matrix_urgent_days) === 1);
+  check('urgent window is a setting: 1 day moves the Fri deadline to Schedule', where('mx1') === 'schedule');
+  sel.value = '7'; $('[data-mx-days]').value = '7'; $('[data-mx-days]').dispatchEvent(new Event('change', { bubbles: true }));
+  await until(() => Number((app.settings || {}).matrix_urgent_days) === 7);
+  // Do: plan all for today, with Undo
+  await go('#matrix');
+  $('[data-box="do"] [data-mx="plan-all"]').click();
+  await until(() => !!t.tasks.find((x) => x.id === 'mx1').planned_at);
+  check('Do → Plan all for today', !!t.tasks.find((x) => x.id === 'mx1').planned_at && new Date(t.tasks.find((x) => x.id === 'mx1').planned_at).toDateString() === new Date().toDateString());
+  // Schedule: a planned date per row
+  await go('#matrix/schedule');
+  const inp = $('[data-mx-plan="mx2"]'); inp.value = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10); inp.dispatchEvent(new Event('change', { bubbles: true }));
+  await until(() => !!t.tasks.find((x) => x.id === 'mx2').planned_at);
+  check('Schedule → a planned date from the list', !!t.tasks.find((x) => x.id === 'mx2').planned_at);
+  // Park: all ticked; untick one; park the rest; Undo brings them back
+  await go('#matrix/park');
+  const parkN = matrixBoxes().park.length;
+  check('Park list: everything ticked to start', $$('[data-mx-keep]').length === parkN && $$('[data-mx-keep]:checked').length === parkN && has(undefined, `park ${parkN} in someday`));
+  const keep = $('[data-mx-keep="mx5"]'); keep.checked = false; keep.dispatchEvent(new Event('change', { bubbles: true })); await wait(30);
+  check('untick one: the count drops', has(undefined, `park ${parkN - 1} in someday`));
+  $('[data-mx="park"]').click();
+  await until(() => location.hash === '#matrix' && where('mx4') === null);
+  const { isSomeday } = await import('/js/gtd.js');
+  check('parked in Someday; the unticked one stays live', isSomeday(db.tasks.find((x) => x.id === 'mx4')) && where('mx5') === 'park' && !isSomeday(db.tasks.find((x) => x.id === 'mx5')));
+  await until(() => !!$('#toast button'));
+  const undo = [...document.querySelectorAll('#toast button')].find((b) => /undo/i.test(b.textContent));
+  if (undo) undo.click();
+  await until(() => where('mx4') === 'park');
+  check('Undo: back on your lists', where('mx4') === 'park' && !isSomeday(db.tasks.find((x) => x.id === 'mx4')));
+  // Weekly Review someday step offers the park
+  await go('#weekly/someday');
+  check('Weekly Review Someday step: “N neither urgent nor important. Park them?”', has('.wk-park', 'neither urgent nor important', 'park them') && !!$('.wk-park a[href="#matrix/park"]'));
+  // Task editor: Important Auto / ★ / ☆
+  window.__forceSheet = true;
+  const { openEditor } = await import('/js/editors/task.js');
+  openEditor(db.tasks.find((x) => x.id === 'mx5')); await wait(80);
+  check('task editor has Important: Auto, ★, ☆', !!$('#sheet select[name=important]') && $$('#sheet select[name=important] option').length === 3);
+  window.__forceSheet = false;
+}
 
 // Slipbox and reading list: notes with [[links]], a reading list apart from actions, and the bridges.
 async function slipboxReading(check) {

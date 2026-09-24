@@ -60,7 +60,8 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
         ${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select><span class="prop-val follows" data-project-follows hidden></span>`)}
       ${prop('tags', 'Tags', tagPickerHtml())}
       ${prop('waiting', 'Waiting on', waitingFieldHtml(t, task))}
-      ${propInline('Energy', `<select name="energy"><option value="">None</option>${ENERGY.map(([v, l]) => `<option value="${v}" ${t.energy === v ? 'selected' : ''}>${ENERGY_ICON[v]} ${l}</option>`).join('')}</select>`)}`)}
+      ${propInline('Energy', `<select name="energy"><option value="">None</option>${ENERGY.map(([v, l]) => `<option value="${v}" ${t.energy === v ? 'selected' : ''}>${ENERGY_ICON[v]} ${l}</option>`).join('')}</select>`)}
+      ${propInline('Important', `<select name="important" title="For the Matrix: auto decides from flags, flagged projects and goals"><option value="">Auto</option><option value="yes" ${t.important === true ? 'selected' : ''}>★ Important</option><option value="no" ${t.important === false ? 'selected' : ''}>☆ Not important</option></select>`)}`)}
     ${section('dates', 'Dates', `
       ${prop('defer_at', 'Defer until', dateField('defer_at', 'Defer until', t.defer_at))}
       ${prop('planned_at', 'Planned', dateField('planned_at', 'Planned', t.planned_at))}
@@ -144,6 +145,7 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
       due_at: fromDateInput(f.get('due_at'), HOURS.due_at),
       estimate_minutes: f.get('estimate_minutes') === '' ? null : Math.max(0, Math.round(Number(f.get('estimate_minutes')))),
       energy: f.get('energy') || null,
+      ...(form.elements.important ? { important: f.get('important') === 'yes' ? true : f.get('important') === 'no' ? false : null } : {}),
       waiting_on: f.get('waiting_on') || null,
       follow_up_at: f.get('waiting_on') ? fromDateInput(f.get('follow_up_at'), 9) : null,
       agenda_for: f.get('agenda_for') || null,

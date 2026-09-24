@@ -14,6 +14,7 @@ import { waitingFor, followUpDue, isTickled, somedayItems, isSomeday, dayKey } f
 import { waitingRow } from './gtd.js';
 import { sweepHtml } from './sweep.js';
 import { somedayListHtml } from './someday.js';
+import { parkCount } from './matrix.js';
 import { horizonsDue, liveAreas, bigDue, quarterlyBody } from './horizons.js';
 import { readingNow, notesToWrite, ensureFinished } from './reading.js';
 
@@ -192,7 +193,7 @@ const STEP_BODY = {
       ${stuck.length ? `<h2 class="section-title">Stuck · ${stuck.length} <span class="hint">no next action</span></h2>${stuck.map((p) => `<div class="wk-stuck">${projectRow(p)}
         <form class="capture" data-capture data-project="${p.id}"><input type="text" name="title" placeholder="Next action for ${esc(p.name)}…" autocomplete="off" enterkeyhint="done"><button class="btn">Add</button></form></div>`).join('')}` : ''}`;
   },
-  someday: () => somedayListHtml({ embedded: true }),
+  someday: () => { const n = parkCount(); return `${n ? `<p class="wk-park">🔲 ${n.toLocaleString()} action${n === 1 ? ' is' : 's are'} neither urgent nor important. <a href="#matrix/park">Park them?</a></p>` : ''}${somedayListHtml({ embedded: true })}`; },
   notes: () => {
     const fleeting = (db.slipbox || []).filter((n) => n.kind === 'fleeting' && !n.archived_at);
     const toWrite = notesToWrite(); const now = readingNow();

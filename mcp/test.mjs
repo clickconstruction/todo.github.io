@@ -146,7 +146,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 72 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 72 tools, no internals leaked');
+assert(list.body.result.tools.length === 73 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 73 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -1229,5 +1229,31 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const b4 = rpcCalls.length;
   const cs = await tool('clarify_item', { id: inb2.id, decision: 'slipbox', source: 'Ahrens' });
   assert(cs.decision === 'slipbox' && rpcCalls.slice(b4).some((c) => c.fn === 'slipbox_from_task' && c.body.source === 'Ahrens'), 'clarify_item slipbox');
+}
+// ---------- matrix ----------
+{
+  const d = (n) => new Date(Date.now() + n * 86400000).toISOString();
+  db.goals.push({ id: 'gMx', user_id: UID, title: 'Family ready', status: 'active' });
+  db.projects.push({ id: 'pMx', user_id: UID, name: 'Estate', status: 'active', kind: 'parallel', goal_id: 'gMx', flagged: false, defer_at: null });
+  const mk = async (title, extra) => { const t = await tool('capture', { title }); Object.assign(db.tasks.find((x) => x.id === t.id), { in_inbox: false, ...extra }); return t.id; };
+  const m1 = await mk('Mx renew license', { flagged: true, due_at: d(2) });
+  const m2 = await mk('Mx update will', { project_id: 'pMx' });
+  const m3 = await mk('Mx gate code', { due_at: d(1) });
+  const m4 = await mk('Mx frog pond', { created_at: '2001-01-01T00:00:00Z' });
+  const g = await tool('matrix', { action: 'get', limit: 200 });
+  const box = (id) => Object.entries(g.boxes).find(([, b]) => b.items.some((x) => x.id === id))?.[0];
+  assert(box(m1) === 'do' && box(m2) === 'schedule' && box(m3) === 'delegate' && box(m4) === 'park', `matrix get: the four boxes (${[m1, m2, m3, m4].map(box).join()})`);
+  assert(g.boxes.schedule.items.find((x) => x.id === m2).why.includes('goal: Family ready') && g.urgent_days === 7, 'matrix get: reasons and the urgent window');
+  await tool('matrix', { action: 'mark', task_id: m4, important: true });
+  const g2 = await tool('matrix', { action: 'get', box: 'schedule', limit: 200 });
+  assert(g2.boxes.schedule.items.some((x) => x.id === m4 && x.override === '★') && !g2.boxes.park, 'matrix mark ★ → schedule; box filter');
+  await tool('matrix', { action: 'mark', task_id: m4, important: null });
+  assert(db.tasks.find((x) => x.id === m4).important === null, 'matrix mark null → auto');
+  const b0 = rpcCalls.length;
+  await tool('matrix', { action: 'park', task_ids: [m4] });
+  await tool('matrix', { action: 'unpark', task_ids: [m4] });
+  assert(rpcCalls.slice(b0).some((c) => c.fn === 'matrix_park' && c.body.ids[0] === m4 && c.body.owner === UID) && rpcCalls.slice(b0).some((c) => c.fn === 'matrix_unpark'), 'matrix park / unpark → rpc');
+  let bad = false; try { await tool('matrix', { action: 'urgent_days', days: 0 }); } catch { bad = true; }
+  assert(bad, 'matrix urgent_days: 1 to 60');
 }
 console.log('ALL PASSED');
