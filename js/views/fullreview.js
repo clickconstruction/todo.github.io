@@ -220,7 +220,9 @@ function stepsRow(t, row) {
   const open = stepsOf(t);
   const done = db.tasks.filter((c) => c.parent_id === t.id && c.completed_at).length;
   if (!open.length && !done) return '';
-  return row('Steps', 'steps', `<span class="hint">${done ? `${n(done)} done · ` : ''}${n(open.length)} to go${t.steps_in_order ? ' · in order' : ''}</span><ol class="fr-steps">${open.slice(0, 12).map((c) => `<li>${esc(c.title)}</li>`).join('')}${open.length > 12 ? `<li class="hint">+ ${n(open.length - 12)} more</li>` : ''}</ol>`);
+  const pct = Math.round((done / (done + open.length)) * 100);
+  return row('Steps', 'steps', `<span class="hint">${done ? `${n(done)} done · ` : ''}${n(open.length)} to go${t.steps_in_order ? ' · in order' : ''}</span>
+    <div class="step-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${done + open.length}" aria-valuenow="${done}" aria-label="${done} of ${done + open.length} steps done"><i style="width:${pct}%"></i></div><ol class="fr-steps">${open.slice(0, 12).map((c) => `<li>${esc(c.title)}</li>`).join('')}${open.length > 12 ? `<li class="hint">+ ${n(open.length - 12)} more</li>` : ''}</ol>`);
 }
 
 function taskCard(it) {

@@ -334,7 +334,7 @@ async function fullReview(check) {
   // A card with steps shows them.
   t.tasks.push({ ...t.tasks.find((x) => x.id === 'fW'), id: 'fWs1', title: 'Find the old will', parent_id: 'fW', sort: 10, completed_at: null, dropped_at: null, steps_in_order: false });
   (await import('/js/state.js')).db.tasks.push({ ...t.tasks.find((x) => x.id === 'fWs1') }); app.render(); await wait(30);
-  check('the card lists its open steps', has('.fr-card', 'steps', '1 to go', 'find the old will'));
+  check('the card lists its open steps, with a progress bar', has('.fr-card', 'steps', '1 to go', 'find the old will') && !!$('.fr-card .step-progress[role="progressbar"]'));
   { const drop = new Date().toISOString(); t.tasks.find((x) => x.id === 'fWs1').dropped_at = drop; (await import('/js/state.js')).db.tasks.find((x) => x.id === 'fWs1').dropped_at = drop; app.render(); await wait(30); }
   // Keys: 1 keep → the group card.
   key('1'); await until(() => has(undefined, 'movies') && !!$('.fr-sample'));

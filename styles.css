@@ -1427,3 +1427,4 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .fr-steps li, .sg-steps li { margin: 1px 0; }
 .fr-edit kbd { opacity: .6; font-size: .72rem; }
 @media (max-width: 520px) { .fr-btns2 kbd, .fr-edit kbd { display: none; } }
+.fr-field .step-progress { margin: 4px 0 2px; max-width: 260px; }
