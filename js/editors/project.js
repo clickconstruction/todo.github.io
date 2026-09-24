@@ -13,6 +13,7 @@ import { PROJECT_KINDS } from '../availability.js';
 import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
 import { fromDateInput, fromDateTimeInput, toDateInput, fmtStamp, HOURS } from '../dates.js';
 import { section, prop, propInline, wireProps } from './props.js';
+import { folderFieldHtml } from '../folders.js';
 
 export const REVIEW_UNITS = [['day', 'Days'], ['week', 'Weeks'], ['month', 'Months'], ['year', 'Years']];
 
@@ -35,6 +36,7 @@ function projectFieldsHtml(p, project) {
     ${gainFieldHtml(p, 'project')}
     <label class="outcome-field"><span class="field-label">Done looks like</span><input type="text" name="outcome" value="${esc(p.outcome || '')}" maxlength="1000" placeholder="Final inspection passed, paid in full" autocomplete="off"></label>
     <label class="notes-field"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes: purpose, ideas, details…" rows="2">${esc(p.notes)}</textarea></label>
+    <div class="outcome-field"><span class="field-label">Folder on your Mac</span>${folderFieldHtml(p.folder_path, p.name)}</div>
     ${section('organize', 'Organize', `
       ${propInline('Folder', `<select name="folder_id"><option value="">No folder</option>${folderOptions}<option value="__new">+ New folder…</option></select>`)}
       <input type="text" name="new_folder" placeholder="New folder name" autocomplete="off" hidden>
@@ -98,7 +100,8 @@ function wireProjectForm(form, project, onTagsChange) {
     }
     const fields = { name: (f.get('name') || '').trim(), folder_id, notes: f.get('notes'), kind: f.get('kind') || 'parallel',
       complete_with_last: f.get('complete_with_last') === 'on', flagged: f.get('flagged') === 'on', ...collectLocation(),
-      outcome: String(f.get('outcome') || '').trim(), ...collectGain() };
+      outcome: String(f.get('outcome') || '').trim(), ...collectGain(),
+      ...(form.elements.folder_path ? { folder_path: form.elements.folder_path.value.trim() || null } : {}) };
     if (form.elements.area_id) fields.area_id = f.get('area_id') || null;
     if (form.elements.goal_id) fields.goal_id = f.get('goal_id') || null;
     Object.assign(fields, {

@@ -7,6 +7,7 @@ import { flattenTree } from '../tree.js';
 import { PROJECT_KINDS, nextAction } from '../availability.js';
 import { filterBar, applyFilter, closedFor, withClosed, filterNote } from '../filter.js';
 import { templatesSectionHtml } from './templates.js';
+import { folderButton } from '../folders.js';
 
 export function viewProjects() {
   const isLive = (p) => p.status === 'active' || p.status === 'on_hold';
@@ -51,7 +52,7 @@ export function viewProject(id) {
   const ordered = entries.map((e) => e.t);
   const folder = p.folder_id && byId(db.folders, p.folder_id);
   return `<a class="back" href="#projects">‹ Projects${folder ? ` / 📁 ${esc(folder.name)}` : ''}</a>
-    <div class="view-head"><h1>${esc(p.name)}</h1>${headMenu([
+    <div class="view-head"><h1>${esc(p.name)}</h1>${folderButton(p.folder_path)}${headMenu([
       `<a href="#plan/${p.id}">Plan it <span class="hint">purpose, outcome, next actions</span></a>`,
       `<button type="button" data-edit-project="${p.id}">Edit project</button>`,
       `<button type="button" data-flag-project="${p.id}" class="flag-btn ${p.flagged ? 'on' : ''}" aria-pressed="${!!p.flagged}">${p.flagged ? 'Unflag' : 'Flag'}</button>`,

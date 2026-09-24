@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -56,6 +56,49 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Folders on your Mac: a Folder field on actions and projects, 📂 opens it through a Shortcut link.
+async function folders(check) {
+  const { db, app } = await import('/js/state.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const t = T(); const now = new Date().toISOString();
+  // no navigation to shortcuts:// during the test
+  const stop = (e) => { if (e.target.closest && e.target.closest('[data-open-folder]')) e.preventDefault(); };
+  document.addEventListener('click', stop, true);
+  await go('#settings');
+  check('Settings: Folders on your Mac, with the Shortcut steps and a test button', has(undefined, 'folders on your mac', 'allow running scripts', 'run shell script', 'as arguments') && !!$('[data-setting-text="todo_folder"]') && /^shortcuts:\/\/run-shortcut\?name=Open%20in%20Finder&input=text&text=/.test($('a[data-open-folder]').getAttribute('href')));
+  const inp = $('[data-setting-text="todo_folder"]'); inp.value = '~/_SYNC/MAGA/_Todo'; inp.dispatchEvent(new Event('change', { bubbles: true }));
+  await until(() => (app.settings || {}).todo_folder === '~/_SYNC/MAGA/_Todo');
+  check('your _Todo folder is saved', (app.settings || {}).todo_folder === '~/_SYNC/MAGA/_Todo' && (t.user_settings[0] || {}).todo_folder === '~/_SYNC/MAGA/_Todo');
+  // Task editor: "Use ~/…/_Todo/<title>" fills the path; 📂 appears; saving keeps it.
+  t.tasks.push({ ...t.tasks[0], id: 'fo1', title: 'Clean up bookmarks: redistribute', notes: '', project_id: null, parent_id: null, in_inbox: false, completed_at: null, dropped_at: null, folder_path: null, created_at: now, updated_at: now });
+  await (await import('/js/data.js')).loadAll();
+  const { openEditor } = await import('/js/editors/task.js');
+  openEditor(db.tasks.find((x) => x.id === 'fo1')); await wait(80);
+  check('task editor: a Folder field, suggesting _Todo/<action> (no slashes or colons)', !!$('#sheet [name=folder_path]') && has('#sheet', 'use ~/_sync/maga/_todo/clean up bookmarks redistribute'));
+  $('#sheet [data-folder-suggest]').click(); await wait(30);
+  const link = $('#sheet .folder-open a[data-open-folder]');
+  check('filled, and 📂 Open folder runs the Shortcut with the path', $('#sheet [name=folder_path]').value === '~/_SYNC/MAGA/_Todo/Clean up bookmarks redistribute' && link && decodeURIComponent(link.getAttribute('href')).endsWith('text=~/_SYNC/MAGA/_Todo/Clean up bookmarks redistribute'));
+  $('#sheet form').requestSubmit(); await until(() => t.tasks.find((x) => x.id === 'fo1').folder_path);
+  check('saved on the action', t.tasks.find((x) => x.id === 'fo1').folder_path === '~/_SYNC/MAGA/_Todo/Clean up bookmarks redistribute');
+  if ($('#sheet').open) $('#sheet').close();
+  // Rows: a 📂 that opens the folder, not the action.
+  await go('#search'); const si = $('#search-input'); if (si) { si.value = 'redistribute'; si.dispatchEvent(new Event('input', { bubbles: true })); await wait(150); }
+  const rowLink = $('.row a.meta-folder[data-open-folder]');
+  check('list rows show 📂', !!rowLink);
+  if (rowLink) { rowLink.click(); await wait(80); check('clicking 📂 on a row doesn’t open the editor', !$('#sheet').open); }
+  // Projects: the field in the editor, 📂 on the project page.
+  const pj = { ...t.projects[0], id: 'foP', name: 'Sort Tooling', status: 'active', folder_id: null, folder_path: null };
+  t.projects.push(pj); await (await import('/js/data.js')).loadAll();
+  const { openProjectEditor } = await import('/js/editors/project.js');
+  openProjectEditor(db.projects.find((x) => x.id === 'foP')); await wait(80);
+  const pin = $('#sheet [name=folder_path]'); pin.value = '~/_SYNC/github/sort-tooling'; pin.dispatchEvent(new Event('input', { bubbles: true }));
+  $('#sheet form').requestSubmit(); await until(() => t.projects.find((x) => x.id === 'foP').folder_path);
+  if ($('#sheet').open) $('#sheet').close();
+  await go('#project/foP');
+  check('project: saved, and 📂 on the project page', t.projects.find((x) => x.id === 'foP').folder_path === '~/_SYNC/github/sort-tooling' && !!$('.view-head a[data-open-folder]'));
+  document.removeEventListener('click', stop, true);
+}
 
 // Matrix: available actions in the four boxes, sorted from due dates, flags and goals; ★ corrects;
 // each box has its move (plan today, planned date, hand off, park in Someday with Undo).
@@ -336,6 +379,14 @@ async function fullReview(check) {
   (await import('/js/state.js')).db.tasks.push({ ...t.tasks.find((x) => x.id === 'fWs1') }); app.render(); await wait(30);
   check('the card lists its open steps, with a progress bar', has('.fr-card', 'steps', '1 to go', 'find the old will') && !!$('.fr-card .step-progress[role="progressbar"]'));
   { const drop = new Date().toISOString(); t.tasks.find((x) => x.id === 'fWs1').dropped_at = drop; (await import('/js/state.js')).db.tasks.find((x) => x.id === 'fWs1').dropped_at = drop; app.render(); await wait(30); }
+  // A folder in a suggestion: shown on the bar; Submit sets it (card shows it with 📂); Undo clears it.
+  Object.assign(cur, { suggestion: { decision: 'keep', folder: '~/_SYNC/MAGA/_Todo/Will', at: new Date().toISOString() }, updated_at: new Date().toISOString() });
+  await until(() => !!$('.sg-bar') && has('.sg-bar', 'folder'));
+  check('suggested folder on the bar, with Open', has('.sg-bar', 'folder: ~/_sync/maga/_todo/will') && !!$('.sg-bar a[data-open-folder]'));
+  key('Enter'); await until(() => t.tasks.find((x) => x.id === 'fW').folder_path === '~/_SYNC/MAGA/_Todo/Will' && !app.fr.busy && has(undefined, 'group · 14 actions'));
+  key('u'); await until(() => !!$('.sg-bar') && has(undefined, 'update my will') && t.tasks.find((x) => x.id === 'fW').folder_path === null);
+  check('Submit set the folder; Undo cleared it', t.tasks.find((x) => x.id === 'fW').folder_path === null && !!$('.sg-bar'));
+  $('[data-fr="dismiss"]').click(); await until(() => !$('.sg-bar'));
   // Keys: 1 keep → the group card.
   key('1'); await until(() => has(undefined, 'movies') && !!$('.fr-sample'));
   check('1 = Keep; next is the group card with a proposal', t.review_items.find((x) => x.task_id === 'fW').status === 'reviewed' && has(undefined, 'group · 14 actions', 'all 14 → someday'));

@@ -101,6 +101,7 @@ const ACTIONS = {
 
 // Click handlers keyed by data-attribute; first match wins.
 const CLICKS = [
+  ['[data-open-folder]', (el, e) => { e.stopPropagation(); }], // a shortcuts:// link: the browser follows it
   ['[data-check]', (el, e) => {
     e.stopPropagation();
     const t = byId(db.tasks, el.dataset.check);

@@ -47,6 +47,7 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
       if (steps.length) s.steps = steps;
     }
     if (a.steps_in_order !== undefined) s.steps_in_order = !!a.steps_in_order;
+    if (a.mac_folder !== undefined) s.folder = String(a.mac_folder || '').trim().slice(0, 500) || null;
     const find = (name) => { const n = String(name).trim().toLowerCase(); return L.tags.find((g) => g.id === name) || L.tags.find((g) => L.label(g).toLowerCase() === n) || L.tags.find((g) => g.name.toLowerCase() === n); };
     if (Array.isArray(a.add_tags) && a.add_tags.length) {
       s.add_tag_ids = []; s.add_tag_names = []; s.add_tag_labels = [];
@@ -120,7 +121,7 @@ Draft ahead: call "upcoming" and "suggest" with items [...] for the next few car
 actions:
   start {import_id | project | all:true, min_age_days?, title?} → a new session (give the user app_link)
   status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
-  suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down), steps_in_order?, proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
+  suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down), steps_in_order?, mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
   upcoming {count? ≤10} → the next cards in full, for drafting ahead
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
   annotate {…same fields…} / decide {decision, note?} → apply now (only when asked to just do it)
@@ -139,7 +140,8 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
         all: { type: 'boolean' }, min_age_days: { type: 'integer' }, title: { type: 'string' },
         gain: { type: 'string' }, gain_suggested: { type: 'boolean' },
         tags: { type: 'array', items: { type: 'string' } }, add_tags: { type: 'array', items: { type: 'string' } }, remove_tags: { type: 'array', items: { type: 'string' } },
-        steps: { type: 'array', items: { type: 'string' }, description: 'suggest: break the action down: step titles, first to last (added on Submit)' }, steps_in_order: { type: 'boolean', description: 'suggest: only the first open step is available' },
+        steps: { type: 'array', items: { type: 'string' }, description: 'suggest: break the action down: step titles, first to last (added on Submit)' },
+        mac_folder: { type: ['string', 'null'], description: 'suggest: a folder on the user\'s Mac for the action\'s files (e.g. ~/_SYNC/MAGA/_Todo/<action>); null to clear' }, steps_in_order: { type: 'boolean', description: 'suggest: only the first open step is available' },
         planned: { type: ['string', 'null'] }, due: { type: ['string', 'null'] }, defer: { type: ['string', 'null'] },
         flagged: { type: 'boolean' }, note: { type: 'string', description: 'One line: why you changed or decided it, shown on the card' },
         proposal: { type: 'object', properties: { op: { type: 'string', enum: ['someday', 'drop', 'park', 'keep_newest'] }, keep: { type: 'integer' } } },

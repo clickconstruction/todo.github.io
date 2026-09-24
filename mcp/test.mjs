@@ -857,6 +857,14 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(goal.status === 'active' && db.projects.find((p) => p.id === pr.id).goal_id === goal.id, 'save_goal links projects');
   const up = await tool('update_project', { project: pr.id, outcome: 'Ten customers signed up' });
   assert(up.outcome === 'Ten customers signed up', 'update_project outcome');
+  const before = db.projects.find((p) => p.id === pr.id).folder_id;
+  const upf = await tool('update_project', { project: pr.id, mac_folder: '~/_SYNC/MAGA/_Todo/Maintenance plan' });
+  assert(upf.mac_folder === '~/_SYNC/MAGA/_Todo/Maintenance plan' && db.projects.find((p) => p.id === pr.id).folder_id === before, 'update_project mac_folder (the app folder stays put)');
+  const tf = await tool('capture', { title: 'Sort the bookmarks' });
+  const tf2 = await tool('update_task', { id: tf.id, mac_folder: '  ~/_SYNC/MAGA/_Todo/Bookmarks cleanup ' });
+  assert(tf2.mac_folder === '~/_SYNC/MAGA/_Todo/Bookmarks cleanup', 'update_task mac_folder (trimmed)');
+  await tool('update_task', { id: tf.id, mac_folder: null });
+  assert(db.tasks.find((t) => t.id === tf.id).folder_path === null, 'update_task mac_folder null clears it');
   await tool('save_horizon', { kind: 'purpose', text: 'Build things that last.\nTreat people fairly.', read: true });
   await tool('save_horizon', { kind: 'vision', text: 'Two crews, no nights on the phone.', year: 2029 });
   const hz = await tool('list_horizons', {});
@@ -1184,6 +1192,8 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(s1.suggestion.steps.join('|') === 'Cut out the spot|Run power|Insulate' && s1.suggestion.steps_in_order === true && !db.tasks.some((t) => t.parent_id === S1 && t.title === 'Run power'), 'suggest steps: blanks skipped, in order, nothing added until Submit');
   let bad4 = ''; try { await tool('full_review', { action: 'suggest', decision: 'drop', steps: ['x'] }); } catch (e) { bad4 = e.message; }
   assert(/Steps go with keep or someday/.test(bad4), 'steps only with keep / someday');
+  await tool('full_review', { action: 'suggest', decision: 'keep', mac_folder: '~/_SYNC/MAGA/_Todo/Gate latch' });
+  assert(s1.suggestion.folder === '~/_SYNC/MAGA/_Todo/Gate latch', 'suggest mac_folder');
   await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Fix the gate latch before winter', gain: 'Goats stay in', project: 'Estate and legacy', planned: '2026-10-05', flagged: false, add_tags: ['Brand new tag'], note: 'You said before the cold snap' });
   const st2 = await tool('full_review', { action: 'status' });
   assert(st2.current.suggestion && st2.current.suggestion.note === 'You said before the cold snap', 'status shows the pending suggestion');

@@ -50,7 +50,8 @@ const SUMMARIES = {
       : f.elements.folder_id && f.elements.folder_id.value && f.elements.folder_id.value !== '__new' ? `📁 ${optText(f.elements.folder_id)}` : '';
     const tags = f.querySelectorAll('.tag-picker .tag-toggle.on').length;
     const w = f.elements.waiting_on && f.elements.waiting_on.value ? `⏳ ${optText(f.elements.waiting_on)}` : '';
-    return [part ? `in ${part.textContent.split(' › ').pop()}` : proj, tags ? `${tags} tag${tags === 1 ? '' : 's'}` : '', w].filter(Boolean).join(' · ');
+    const folder = f.elements.folder_path && f.elements.folder_path.value.trim() ? '📂' : '';
+    return [part ? `in ${part.textContent.split(' › ').pop()}` : proj, tags ? `${tags} tag${tags === 1 ? '' : 's'}` : '', w, folder].filter(Boolean).join(' · ');
   },
   dates: (f) => [['due_at', 'Due'], ['planned_at', 'Planned'], ['defer_at', 'Defer']]
     .map(([k, l]) => (VALUES[k](f) ? `${l} ${VALUES[k](f).replace(/,.*$/, '')}` : '')).filter(Boolean).slice(0, 2).join(' · '),

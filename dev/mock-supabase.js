@@ -230,15 +230,15 @@
   const DEFAULTS = {
     tasks: () => ({ project_id: null, parent_id: null, in_inbox: true, notes: '', completion_note: '', flagged: false, defer_at: null, planned_at: null,
       due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null, repeat_rule: null, steps_in_order: false, scheduled_at: null, scheduled_minutes: null, checklist_id: null,
-      energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, gain: '', gain_cost: '', gain_by: null, gain_met: null, clarify_skips: 0, reading_type: null, reading_state: null, reading_url: null, reading_notes_done: false, important: null }),
-    projects: () => ({ folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
+      energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, gain: '', gain_cost: '', gain_by: null, gain_met: null, clarify_skips: 0, reading_type: null, reading_state: null, reading_url: null, reading_notes_done: false, important: null, folder_path: null }),
+    projects: () => ({ folder_id: null, folder_path: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
       review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null, defer_at: null, planned_at: null, due_at: null, estimate_minutes: null,
       place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null, repeat_rule: null, outcome: '', area_id: null, goal_id: null, purpose: '', purpose_by: null, principles: '', plan: null }),
     folders: () => ({ archived_at: null }),
     tags: () => ({ parent_id: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null }),
     places: () => ({ address: '', google_place_id: null, radius_m: 402, notes: '', archived_at: null }),
     calendars: () => ({ color: '#1D9E75', enabled: true, sort: 0, last_ok_at: null, last_error: null, event_count: null, archived_at: null }),
-    user_settings: () => ({ due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, review_notified_at: null, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true, daily_notified_at: null, horizons_quarter_at: null, sidebar: {}, matrix_urgent_days: 7 }),
+    user_settings: () => ({ due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, review_notified_at: null, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true, daily_notified_at: null, horizons_quarter_at: null, sidebar: {}, matrix_urgent_days: 7, todo_folder: null, folder_shortcut: 'Open in Finder' }),
     daily_reviews: () => ({ started_at: null, shutdown_at: null, focus: [] }),
     slipbox_notes: () => ({ body: '', source: '', source_url: null, kind: 'fleeting', from_task_id: null, reading_task_id: null, processed_at: null, archived_at: null }),
     review_sessions: () => ({ title: 'Full Review', scope: {}, current_item: null, status: 'active', agent_seen_at: null, agent_status: '', finished_at: null }),
@@ -555,11 +555,11 @@
           if (it.kind === 'group') { if (s.proposal) it.grp = { ...it.grp, proposal: s.proposal }; }
           else {
             const t = tables.tasks.find((x) => x.id === it.task_id);
-            snap = { t: 'fields', id: t.id, title: t.title, gain: t.gain, gain_by: t.gain_by, project_id: t.project_id, in_inbox: t.in_inbox, planned_at: t.planned_at, due_at: t.due_at, defer_at: t.defer_at, flagged: t.flagged, tags: tables.task_tags.filter((l) => l.task_id === t.id).map((l) => l.tag_id) };
+            snap = { t: 'fields', id: t.id, title: t.title, gain: t.gain, gain_by: t.gain_by, project_id: t.project_id, in_inbox: t.in_inbox, folder_path: t.folder_path ?? null, planned_at: t.planned_at, due_at: t.due_at, defer_at: t.defer_at, flagged: t.flagged, tags: tables.task_tags.filter((l) => l.task_id === t.id).map((l) => l.tag_id) };
             if (s.title) t.title = s.title;
             if ('gain' in s) { t.gain = s.gain || ''; t.gain_by = s.gain_suggested ? 'agent' : null; }
             if ('project_id' in s) { t.project_id = s.project_id; if (s.project_id) t.in_inbox = false; }
-            if ('planned' in s) t.planned_at = s.planned; if ('due' in s) t.due_at = s.due; if ('defer' in s) t.defer_at = s.defer; if ('flagged' in s) t.flagged = !!s.flagged;
+            if ('folder' in s) t.folder_path = String(s.folder || '').trim() || null; if ('planned' in s) t.planned_at = s.planned; if ('due' in s) t.due_at = s.due; if ('defer' in s) t.defer_at = s.defer; if ('flagged' in s) t.flagged = !!s.flagged;
             (s.add_tag_ids || []).forEach((g) => { if (!tables.task_tags.some((l) => l.task_id === t.id && l.tag_id === g)) tables.task_tags.push({ task_id: t.id, tag_id: g, user_id: uid }); });
             (s.add_tag_names || []).forEach((nm) => { let g = tables.tags.find((x) => x.name.toLowerCase() === nm.toLowerCase()); if (!g) { g = { ...DEFAULTS.tags(), id: id(), user_id: uid, name: nm, sort: 0, created_at: now() }; tables.tags.push(g); } if (!tables.task_tags.some((l) => l.task_id === t.id && l.tag_id === g.id)) tables.task_tags.push({ task_id: t.id, tag_id: g.id, user_id: uid }); });
             tables.task_tags = tables.task_tags.filter((l) => !(l.task_id === t.id && (s.remove_tag_ids || []).includes(l.tag_id)));
@@ -594,7 +594,7 @@
               if (e.t === 'reading') { Object.assign(tables.tasks.find((t) => t.id === e.id), { reading_state: e.reading_state, reading_type: e.reading_type }); if (e.someday_added) { const g = somedayOf(false); if (g) tables.task_tags = tables.task_tags.filter((l) => !(l.task_id === e.id && l.tag_id === g.id)); } }
               if (e.t === 'slipbox') { const n = tables.slipbox_notes.find((x) => x.id === e.note); if (n) n.archived_at = now(); tables.tasks.find((t) => t.id === e.id).dropped_at = e.dropped_at; }
               if (e.t === 'steps') { tables.tasks.forEach((c) => { if (e.ids.includes(c.id) && !c.completed_at && !c.dropped_at) c.dropped_at = now(); }); const p0 = tables.tasks.find((t) => t.id === e.id); if (p0) p0.steps_in_order = !!e.steps_in_order; }
-              if (e.t === 'fields') { Object.assign(tables.tasks.find((t) => t.id === e.id), { title: e.title, gain: e.gain, gain_by: e.gain_by, project_id: e.project_id, in_inbox: e.in_inbox, planned_at: e.planned_at, due_at: e.due_at, defer_at: e.defer_at, flagged: e.flagged });
+              if (e.t === 'fields') { Object.assign(tables.tasks.find((t) => t.id === e.id), { folder_path: e.folder_path ?? null, title: e.title, gain: e.gain, gain_by: e.gain_by, project_id: e.project_id, in_inbox: e.in_inbox, planned_at: e.planned_at, due_at: e.due_at, defer_at: e.defer_at, flagged: e.flagged });
                 tables.task_tags = tables.task_tags.filter((l) => l.task_id !== e.id).concat(e.tags.map((g) => ({ task_id: e.id, tag_id: g, user_id: uid }))); }
               if (e.t === 'expanded') tables.review_items.filter((x) => x.session_id === it.session_id && x.sort > it.sort && x.sort < it.sort + 1 && x.kind === 'task' && x.status === 'pending').forEach((x) => { x.status = 'void'; });
             });

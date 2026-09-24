@@ -473,6 +473,7 @@ class Api {
   async horizonsPatch(a) {
     const patch = {};
     if (a.outcome !== undefined) patch.outcome = String(a.outcome || '').trim();
+    if (a.mac_folder !== undefined) patch.folder_path = String(a.mac_folder || '').trim().slice(0, 500) || null;
     if (a.gain !== undefined) { patch.purpose = String(a.gain || '').trim().slice(0, 2000); patch.purpose_by = a.gain_suggested ? 'agent' : null; }
     const pick = async (table, key, ref) => {
       if (ref === null || ref === '') return null;
@@ -521,6 +522,7 @@ class Api {
       project_tags: pLinks.filter((l) => l.project_id === t.project_id).map((l) => tags.find((x) => x.id === l.tag_id)).filter(Boolean).map(tagLabel),
       estimate_minutes: t.estimate_minutes ?? undefined,
       energy: t.energy || undefined,
+      mac_folder: t.folder_path || undefined,
       waiting_on: t.waiting_on ? ((people.find((p) => p.id === t.waiting_on) || {}).name || 'someone') : undefined,
       delegated: t.waiting_on ? localDate(t.delegated_at, this.tz) : undefined,
       follow_up: t.waiting_on ? localDate(t.follow_up_at, this.tz) : undefined,
@@ -1177,6 +1179,7 @@ const TOOLS = [
         tags: { type: 'array', items: { type: 'string' }, description: 'Replaces all tags. Labels like "Laptop" or "Waiting : Hiro"; missing tags are created.' },
         add_tags: { type: 'array', items: { type: 'string' }, description: 'Tags to add, keeping existing ones' },
         remove_tags: { type: 'array', items: { type: 'string' }, description: 'Tags to remove' },
+        mac_folder: { type: ['string', 'null'], description: 'A folder on the user\'s Mac for its files (support material), e.g. "~/_SYNC/MAGA/_Todo/Bookmarks cleanup"; the app\'s 📂 button opens it. null to clear' },
         flagged: { type: 'boolean' },
         planned: { type: ['string', 'null'], description: 'YYYY-MM-DD when the user intends to work on it (9am local), or null. Prefer this over due for intentions.' },
         due: { type: ['string', 'null'], description: 'YYYY-MM-DD hard deadline only (due 5pm local), or null' },
@@ -1248,6 +1251,7 @@ const TOOLS = [
         else { const all = await api.q(`checklists?${api.u}&archived_at=is.null&select=id,name`); const hit = all.find((c) => c.id === a.checklist) || all.find((c) => c.name.toLowerCase() === String(a.checklist).toLowerCase()); if (!hit) throw new Error(`No checklist called “${a.checklist}”`); patch.checklist_id = hit.id; }
       }
       if (a.energy !== undefined) { if (a.energy !== null && !['low', 'medium', 'high'].includes(a.energy)) throw new Error('energy must be low, medium or high'); patch.energy = a.energy; }
+      if (a.mac_folder !== undefined) patch.folder_path = String(a.mac_folder || '').trim().slice(0, 500) || null;
       if (a.waiting_on !== undefined) {
         patch.waiting_on = a.waiting_on === null || a.waiting_on === '' ? null : (await api.resolvePerson(a.waiting_on, { create: true })).id;
         if (patch.waiting_on && patch.waiting_on !== task.waiting_on) { patch.delegated_at = new Date().toISOString(); if (a.follow_up === undefined && !task.follow_up_at) a.follow_up = localDate(new Date(Date.now() + 7 * 86400000).toISOString(), api.tz); }
@@ -1728,6 +1732,7 @@ const TOOLS = [
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
         outcome: { type: 'string', description: 'What done looks like, e.g. "Final inspection passed, paid in full"' },
+        mac_folder: { type: ['string', 'null'], description: 'A folder on the user\'s Mac for its files (support material), e.g. "~/_SYNC/MAGA/_Todo/Bookmarks cleanup"; the app\'s 📂 button opens it. null to clear' },
         gain: { type: 'string', description: 'What doing it gains the user, in their words (one or two sentences). Ask for it; never invent it as theirs — use gain_suggested for your own draft' },
         gain_suggested: { type: 'boolean', description: 'true when the gain is your suggestion (the app shows "Claude suggested" until the user keeps or edits it)' },
         area: { type: ['string', 'null'], description: 'Area of focus (name or id); null to remove' },
@@ -1781,6 +1786,7 @@ const TOOLS = [
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
         outcome: { type: 'string', description: 'What done looks like, e.g. "Final inspection passed, paid in full"' },
+        mac_folder: { type: ['string', 'null'], description: 'A folder on the user\'s Mac for its files (support material), e.g. "~/_SYNC/MAGA/_Todo/Bookmarks cleanup"; the app\'s 📂 button opens it. null to clear' },
         gain: { type: 'string', description: 'What doing it gains the user, in their words (one or two sentences). Ask for it; never invent it as theirs — use gain_suggested for your own draft' },
         gain_suggested: { type: 'boolean', description: 'true when the gain is your suggestion (the app shows "Claude suggested" until the user keeps or edits it)' },
         area: { type: ['string', 'null'], description: 'Area of focus (name or id); null to remove' },
@@ -2203,7 +2209,7 @@ function projectOut(api, p, folders = []) {
   return {
     id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, flagged: p.flagged,
     notes: p.notes || undefined,
-    outcome: p.outcome || undefined, gain: p.purpose || undefined, gain_suggested: p.purpose_by === 'agent' || undefined, principles: p.principles ? p.principles.split('\n').filter(Boolean) : undefined, area_id: p.area_id || undefined, goal_id: p.goal_id || undefined,
+    outcome: p.outcome || undefined, mac_folder: p.folder_path || undefined, gain: p.purpose || undefined, gain_suggested: p.purpose_by === 'agent' || undefined, principles: p.principles ? p.principles.split('\n').filter(Boolean) : undefined, area_id: p.area_id || undefined, goal_id: p.goal_id || undefined,
     folder: (folders.find((f) => f.id === p.folder_id) || {}).name || null,
     defer: localDate(p.defer_at, api.tz), planned: localDate(p.planned_at, api.tz), due: localDate(p.due_at, api.tz),
     estimate_minutes: p.estimate_minutes ?? undefined,

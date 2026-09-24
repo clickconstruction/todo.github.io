@@ -9,6 +9,7 @@ import { distanceM, fmtDistance } from './geo.js';
 import { app } from './state.js';
 import { waitingPerson, agendaPerson, followUpDue, ENERGY_ICON, returnedFromTickler, isTickled } from './gtd.js';
 import { progress, nextStep, ancestors, rootOf, depthOf, heightOf, MAX_DEPTH } from './tree.js';
+import { folderButton } from './folders.js';
 
 // Meta icons are small and monochrome: the words carry the meaning, the icon only helps scanning.
 const ic = (e, sp = ' ') => `<i class="mi" aria-hidden="true">${e}</i>${sp}`;
@@ -43,6 +44,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   }
   const bells = isOpen(t) ? db.notifications.filter((n) => n.task_id === t.id && !n.sent_at).length : 0;
   const clips = db.attachments.filter((a) => a.task_id === t.id && !a.archived_at).length;
+  if (t.folder_path && isOpen(t)) meta.push(folderButton(t.folder_path, { label: ic('📂', ''), cls: 'meta-folder' }));
   if (clips) meta.push(`<span class="meta-clip" title="${clips} attachment${clips === 1 ? '' : 's'}">${ic('📎', '')}${clips > 1 ? clips : ''}</span>`);
   if (bells) meta.push(`<span class="meta-bell" title="${bells} notification${bells === 1 ? '' : 's'}">${ic('🔔', '')}</span>`);
   if (t.repeat_rule && isOpen(t)) meta.push(`<span class="meta-repeat" title="${esc(describe(t.repeat_rule))}">${ic('🔁', '')}</span>`);

@@ -7,6 +7,7 @@ import { sb, app, esc, run, toast, openSheet, $, sortedTags, tagLabel } from '..
 import { fmtDate } from '../dates.js';
 import { resultLines, stripIcon, when, timeOnly } from '../pushResult.js';
 import { captureSection, createCaptureKey, openCaptureGuide } from './capture.js';
+import { openFolderUrl } from '../folders.js';
 
 const MCP_URL = 'https://mcp.todotooling.com/mcp';
 const CAPTURE_EMAIL = 'inbox@todotooling.com';
@@ -41,7 +42,7 @@ export function viewSettings() {
       <button class="btn small danger" data-revoke="${t.id}">Revoke</button></li>`).join('');
   return `<div class="view-head"><h1>Settings</h1></div>
     <p class="view-sub">Signed in as ${esc(app.user.email)}</p>
-    <nav class="set-index" aria-label="Settings sections">${[['Sidebar', 'Sidebar'], ['Agents', 'Agent access'], ['Notifications', 'Notifications'], ['Email', 'Email capture'], ['Dates', 'Dates'], ['Reviews', 'Weekly and daily'], ['Calendars', 'Calendars'], ['Keyboard', 'Keyboard'], ['Import', 'Import'], ['Account', 'Account']]
+    <nav class="set-index" aria-label="Settings sections">${[['Sidebar', 'Sidebar'], ['Agents', 'Agent access'], ['Notifications', 'Notifications'], ['Email', 'Email capture'], ['Dates', 'Dates'], ['Reviews', 'Weekly and daily'], ['Calendars', 'Calendars'], ['Keyboard', 'Keyboard'], ['Folders', 'Folders on your Mac'], ['Import', 'Import'], ['Account', 'Account']]
       .map(([l, h]) => `<button type="button" class="chip" data-scroll-to="${h}">${l}</button>`).join('')}</nav>
     <h2 class="section-title">Sidebar</h2>
     <p class="view-sub" style="margin-bottom:8px">Hide views you don’t use, order each group, and pin perspectives to Do.</p>
@@ -65,6 +66,7 @@ export function viewSettings() {
     ${calendarsSection()}
     ${feedSection()}
     ${keyboardSection()}
+    ${foldersSection()}
     <h2 class="section-title">Import</h2>
     <p class="view-sub" style="margin-bottom:8px">Moving from OmniFocus? Bring folders, projects, tags, repeats and review schedules over; you'll see a preview first.</p>
     <a class="btn" href="#import">Import from OmniFocus</a>
@@ -267,6 +269,29 @@ function reviewSection() {
 }
 
 // ---------- Keyboard: the drawn keyboard and every shortcut ----------
+// Folders on your Mac: where your _Todo folder is, and the Shortcut that opens folders (browsers can't).
+export const FOLDER_SCRIPT = 'p="${1/#\\~/$HOME}"\nmkdir -p "$p" && open "$p"';
+function foldersSection() {
+  const st = { ...DEFAULT_SETTINGS, ...(app.settings || {}) };
+  const test = st.todo_folder || '~/Desktop';
+  return `<h2 class="section-title">Folders on your Mac</h2>
+    <p class="view-sub">An action or project can name the folder that holds its files. Its <b>📂 Open folder</b> button opens it in Finder through a Shortcut (websites can’t open folders themselves). Mac only.</p>
+    <div class="settings-card">
+      <label class="set-row"><span class="set-text"><b>Your _Todo folder</b><span class="hint">support files for live actions; “Use …” suggests a subfolder named like the action</span></span><input type="text" data-setting-text="todo_folder" value="${esc(st.todo_folder || '')}" placeholder="~/_SYNC/MAGA/_Todo" spellcheck="false" style="max-width:280px"></label>
+      <label class="set-row"><span class="set-text"><b>Shortcut name</b><span class="hint">the Shortcut the button runs</span></span><input type="text" data-setting-text="folder_shortcut" value="${esc(st.folder_shortcut || 'Open in Finder')}" maxlength="100" style="max-width:200px"></label>
+      <p style="margin:12px 0 4px"><b>Set up the Shortcut once</b> (on your Mac):</p>
+      <ol class="folder-steps">
+        <li>Open the <b>Shortcuts</b> app → <b>Settings → Advanced</b> → turn on <b>Allow Running Scripts</b>.</li>
+        <li><b>File → New Shortcut</b>, and name it <b>${esc(st.folder_shortcut || 'Open in Finder')}</b>.</li>
+        <li>Add a <b>Run Shell Script</b> action. Set <b>Input</b> to <b>Shortcut Input</b> and <b>Pass Input</b> to <b>as arguments</b>, then paste:
+          <pre class="code-block"><code>${esc(FOLDER_SCRIPT)}</code></pre><button type="button" class="btn small" data-copy-folder-script>Copy script</button></li>
+        <li>At the top, set it to receive <b>Text</b>. Close the window (it saves itself).</li>
+        <li>Press <b>Test</b>: Brave asks to open Shortcuts the first time; tick <b>Always allow</b>. Missing folders are created, then opened.</li>
+      </ol>
+      <p style="margin-top:10px"><a class="btn" href="${esc(openFolderUrl(test))}" data-open-folder>📂 Test: open ${esc(test)}</a></p>
+    </div>`;
+}
+
 function keyboardSection() {
   return `<h2 class="section-title">Keyboard</h2>
     <p class="view-sub">With a keyboard (Mac, PC, iPad), plain keys do things when you’re not typing. Highlighted keys have shortcuts; hover or tap one to see what it does. Press <kbd>?</kbd> anywhere for this list.</p>
@@ -274,6 +299,8 @@ function keyboardSection() {
 }
 
 document.addEventListener('click', async (e) => {
+  const cp = e.target.closest && e.target.closest('[data-copy-folder-script]');
+  if (cp) { try { await navigator.clipboard.writeText(FOLDER_SCRIPT); toast('Script copied'); } catch { toast('Select the script and copy it'); } return; }
   const dd = e.target.closest && e.target.closest('[data-setting-daily-days]');
   if (dd) { await saveSettings({ daily_weekdays_only: !(app.settings || {}).daily_weekdays_only }); app.render(); }
 });
@@ -288,6 +315,8 @@ document.addEventListener('change', async (e) => {
   if (wdays) { await saveSettings({ waiting_followup_days: Number(wdays.value) }); return; }
   const dn = e.target.closest && e.target.closest('[data-setting-daily-notify]');
   if (dn) { await saveSettings({ daily_notify: dn.checked }); return; }
+  const txt = e.target.closest && e.target.closest('[data-setting-text]');
+  if (txt) { const k = txt.dataset.settingText; const v = txt.value.trim(); await saveSettings({ [k]: v || (k === 'folder_shortcut' ? 'Open in Finder' : null) }); app.render(); return; }
   const notify = e.target.closest && e.target.closest('[data-setting-review-notify]');
   if (notify) await saveSettings({ review_notify: notify.checked });
 });

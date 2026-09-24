@@ -17,6 +17,7 @@ import { openBreakdown } from './breakdown.js';
 import { section, prop, propInline, wireProps } from './props.js';
 import { ENERGY, ENERGY_ICON, livePeople } from '../gtd.js';
 import { checklistFieldHtml, wireChecklistField } from '../views/checklists.js';
+import { folderFieldHtml } from '../folders.js';
 import { openSchedule, addToGoogle, addToApple, scheduledLabel } from './schedule.js';
 import { openDelegate, openTickle } from './gtd.js';
 import { gainFieldHtml, wireGainField, offerPlacement } from './gainField.js';
@@ -61,7 +62,8 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
       ${prop('tags', 'Tags', tagPickerHtml())}
       ${prop('waiting', 'Waiting on', waitingFieldHtml(t, task))}
       ${propInline('Energy', `<select name="energy"><option value="">None</option>${ENERGY.map(([v, l]) => `<option value="${v}" ${t.energy === v ? 'selected' : ''}>${ENERGY_ICON[v]} ${l}</option>`).join('')}</select>`)}
-      ${propInline('Important', `<select name="important" title="For the Matrix: auto decides from flags, flagged projects and goals"><option value="">Auto</option><option value="yes" ${t.important === true ? 'selected' : ''}>★ Important</option><option value="no" ${t.important === false ? 'selected' : ''}>☆ Not important</option></select>`)}`)}
+      ${propInline('Important', `<select name="important" title="For the Matrix: auto decides from flags, flagged projects and goals"><option value="">Auto</option><option value="yes" ${t.important === true ? 'selected' : ''}>★ Important</option><option value="no" ${t.important === false ? 'selected' : ''}>☆ Not important</option></select>`)}
+      <div class="prop prop-inline prop-folder"><span class="prop-label">Folder</span>${folderFieldHtml(t.folder_path, t.title)}</div>`)}
     ${section('dates', 'Dates', `
       ${prop('defer_at', 'Defer until', dateField('defer_at', 'Defer until', t.defer_at))}
       ${prop('planned_at', 'Planned', dateField('planned_at', 'Planned', t.planned_at))}
@@ -145,6 +147,7 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
       due_at: fromDateInput(f.get('due_at'), HOURS.due_at),
       estimate_minutes: f.get('estimate_minutes') === '' ? null : Math.max(0, Math.round(Number(f.get('estimate_minutes')))),
       energy: f.get('energy') || null,
+      ...(form.elements.folder_path ? { folder_path: form.elements.folder_path.value.trim() || null } : {}),
       ...(form.elements.important ? { important: f.get('important') === 'yes' ? true : f.get('important') === 'no' ? false : null } : {}),
       waiting_on: f.get('waiting_on') || null,
       follow_up_at: f.get('waiting_on') ? fromDateInput(f.get('follow_up_at'), 9) : null,

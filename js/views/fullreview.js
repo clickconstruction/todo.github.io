@@ -6,6 +6,7 @@ import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen,
 import { loadAll, refreshTasks } from '../data.js';
 import { fmtDate } from '../dates.js';
 import { buildQueue, priorityReason, proposalText } from '../review.js';
+import { folderButton, shortPath } from '../folders.js';
 
 const F = () => (app.fr ||= { id: null, session: null, items: [], byId: new Map(), undo: [], loading: false });
 
@@ -200,6 +201,7 @@ function suggestionBar(it, t) {
     if ('project_id' in s && s.project_id !== t.project_id) row('🗂', `Project: ${esc(s.project_name || 'none')}${p ? ` <span class="sg-old">${esc(p.name)}</span>` : ''}`);
     [['planned', 'planned_at', 'Planned'], ['due', 'due_at', 'Due'], ['defer', 'defer_at', 'Defer until']].forEach(([k, col, l]) => { if (k in s && s[k] !== t[col]) row('🗓', `${l}: ${s[k] ? esc(when(s[k])) : 'clear'}${t[col] ? ` <span class="sg-old">${esc(when(t[col]))}</span>` : ''}`); });
     if ('flagged' in s && !!s.flagged !== !!t.flagged) row('⚑', s.flagged ? 'Flag it' : 'Unflag');
+    if ('folder' in s && (s.folder || null) !== (t.folder_path || null)) row('📂', s.folder ? `Folder: <span class="fr-folder">${esc(shortPath(s.folder))}</span>${folderButton(s.folder, { label: 'Open', cls: 'link-btn' })}${t.folder_path ? ` <span class="sg-old">${esc(shortPath(t.folder_path))}</span>` : ''}` : 'Remove the folder');
     if (s.add_tag_labels && s.add_tag_labels.length) row('🏷', `Add tags: ${s.add_tag_labels.map(esc).join(', ')}`);
     if (s.remove_tag_labels && s.remove_tag_labels.length) row('🏷', `Remove tags: ${s.remove_tag_labels.map(esc).join(', ')}`);
     if (Array.isArray(s.steps) && s.steps.length && ['keep', 'someday'].includes(s.decision)) {
@@ -240,6 +242,7 @@ function taskCard(it) {
     ${row('When', 'dates', [t.planned_at && `planned ${esc(fmtDate(t.planned_at))}`, t.due_at && `due ${esc(fmtDate(t.due_at))}`, t.defer_at && `from ${esc(fmtDate(t.defer_at))}`].filter(Boolean).join(' · ') || '<span class="hint">no dates</span>')}
     ${row('Tags', 'tags', tags.length ? tags.map((g) => `<span class="chip">${esc(tagLabel(g))}</span>`).join(' ') : '<span class="hint">none</span>')}
     ${t.flagged ? row('Flag', 'flagged', '<span class="chip flagged-chip">⚑ Flagged</span>') : ''}
+    ${t.folder_path ? row('Folder', 'folder', `<span class="fr-folder">${esc(shortPath(t.folder_path))}</span>${folderButton(t.folder_path)}`) : ''}
     ${stepsRow(t, row)}
     ${t.notes ? `<details class="fr-notes"><summary>Notes</summary><p>${esc(t.notes.slice(0, 1200))}${t.notes.length > 1200 ? '…' : ''}</p></details>` : ''}
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
