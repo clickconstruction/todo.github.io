@@ -88,6 +88,7 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
 
 const secondaryButtons = (task) => `
   ${task && isOpen(task) ? '<button type="button" class="btn danger" data-drop>Drop</button><button type="button" class="btn" data-tickle-task title="Out of sight until a day, then back in the Inbox">Tickle…</button>' : ''}
+  ${task && isOpen(task) && !task.reading_state ? '<button type="button" class="btn" data-to-reading title="Something to read, watch or listen to: onto your reading list (up next)">→ Reading list</button>' : ''}
 `;
 
 // Wire behaviour shared by sheet and panel; returns collect() → { fields, tagIds } or null.
@@ -116,6 +117,8 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
   });
   const del = $('[data-delegate-task]', form);
   if (del && task) del.onclick = () => openDelegate(byId(db.tasks, task.id) || task);
+  const rl = $('[data-to-reading]', form);
+  if (rl && task) rl.onclick = async () => { const d = form.closest('dialog'); if (d) d.close(); const { toReadingList } = await import('../views/reading.js'); await toReadingList(task.id); };
   const tk = $('[data-tickle-task]', form);
   if (tk && task) tk.onclick = () => openTickle(byId(db.tasks, task.id) || task);
   const skip = $('[data-skip-occurrence]', form);
@@ -262,6 +265,21 @@ export function openQuickEntry(opts = {}) {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
+    // "slip: an idea" → a slipbox note; "read: a title" → the reading list (up next).
+    const pre = !opts.onCaptured && String(f.get('title') || '').match(/^\s*(slip|read)\s*:\s*(.+)$/i);
+    if (pre) {
+      sheet.close();
+      if (pre[1].toLowerCase() === 'slip') {
+        const { addNote } = await import('../views/slipbox.js');
+        const note = await addNote({ title: pre[2].trim().slice(0, 300) });
+        app.render();
+        toast('Added to your slipbox', { label: 'Open', run: () => { location.hash = `#slipbox/${note.id}`; } });
+      } else {
+        const row = await capture(pre[2].trim());
+        if (row) { const { toReadingList } = await import('../views/reading.js'); await toReadingList(row.id); }
+      }
+      return;
+    }
     // "Idea → gain" in the title works too.
     const split = splitGain(f.get('title'));
     const gain = String(f.get('gain') || '').trim() || split.gain;

@@ -30,6 +30,8 @@ import { settleAction, settleKey } from './views/settle.js';
 import { fullReviewAction, fullReviewKey, startFullReview, activeSession } from './views/fullreview.js';
 import { moreSheetHtml, openCustomize } from './sidebar.js';
 import { initUpdates, resumeAfterUpdate, tryApply } from './updates.js';
+import { slipAction, slipSubmit, slipInput } from './views/slipbox.js';
+import { readingAction, readingSubmit } from './views/reading.js';
 import { keepSession, signedIn, markSignedOutOnPurpose, lastEmail, signInNotice } from './session.js';
 import { importBusy } from './views/import.js';
 import { newFeedLink } from './views/settings.js';
@@ -169,6 +171,8 @@ const CLICKS = [
   ['[data-daily]', (el, e) => { e.stopPropagation(); dailyAction(el); }],
   ['[data-settle]', (el, e) => { e.stopPropagation(); if (!el.disabled) settleAction(el); }],
   ['[data-fr]', (el, e) => { e.stopPropagation(); fullReviewAction(el); }],
+  ['[data-slip]', (el, e) => { e.stopPropagation(); slipAction(el); }],
+  ['[data-rd]', (el, e) => { e.stopPropagation(); readingAction(el); }],
   ['[data-fr-start]', async (el, e) => {
     e.stopPropagation();
     const key = el.dataset.frStart === 'import' ? 'import_id' : 'project_id';
@@ -210,7 +214,7 @@ document.addEventListener('click', (e) => {
 });
 
 view.addEventListener('submit', async (e) => {
-  if (onClarifySubmit(e) || gtdSubmit(e) || weeklySubmit(e) || sweepSubmit(e) || somedaySubmit(e) || planSubmit(e) || dailySubmit(e)) return;
+  if (onClarifySubmit(e) || gtdSubmit(e) || weeklySubmit(e) || sweepSubmit(e) || somedaySubmit(e) || planSubmit(e) || dailySubmit(e) || slipSubmit(e) || readingSubmit(e)) return;
   const senderForm = e.target.closest('[data-add-sender]');
   if (senderForm) { e.preventDefault(); await addSender(senderForm); return; }
   const form = e.target.closest('[data-capture]');
@@ -252,6 +256,7 @@ view.addEventListener('input', (e) => {
   if (e.target.id === 'ref-search') onRefSearch(e.target);
   horizonsInput(e);
   planInput(e);
+  slipInput(e);
 });
 
 $('#fab').onclick = openQuickEntry;

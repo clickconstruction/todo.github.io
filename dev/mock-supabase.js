@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      perspectives: [], imports: [], settle_ops: [], review_sessions: [], review_items: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      perspectives: [], imports: [], settle_ops: [], review_sessions: [], review_items: [], slipbox_notes: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -230,7 +230,7 @@
   const DEFAULTS = {
     tasks: () => ({ project_id: null, parent_id: null, in_inbox: true, notes: '', completion_note: '', flagged: false, defer_at: null, planned_at: null,
       due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null, repeat_rule: null, steps_in_order: false, scheduled_at: null, scheduled_minutes: null, checklist_id: null,
-      energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, gain: '', gain_cost: '', gain_by: null, gain_met: null, clarify_skips: 0 }),
+      energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, gain: '', gain_cost: '', gain_by: null, gain_met: null, clarify_skips: 0, reading_type: null, reading_state: null, reading_url: null, reading_notes_done: false }),
     projects: () => ({ folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
       review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null, defer_at: null, planned_at: null, due_at: null, estimate_minutes: null,
       place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null, repeat_rule: null, outcome: '', area_id: null, goal_id: null, purpose: '', purpose_by: null, principles: '', plan: null }),
@@ -240,6 +240,7 @@
     calendars: () => ({ color: '#1D9E75', enabled: true, sort: 0, last_ok_at: null, last_error: null, event_count: null, archived_at: null }),
     user_settings: () => ({ due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, review_notified_at: null, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true, daily_notified_at: null, horizons_quarter_at: null, sidebar: {} }),
     daily_reviews: () => ({ started_at: null, shutdown_at: null, focus: [] }),
+    slipbox_notes: () => ({ body: '', source: '', source_url: null, kind: 'fleeting', from_task_id: null, reading_task_id: null, processed_at: null, archived_at: null }),
     review_sessions: () => ({ title: 'Full Review', scope: {}, current_item: null, status: 'active', agent_seen_at: null, agent_status: '', finished_at: null }),
     review_items: () => ({ task_id: null, grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: null }),
     checklists: () => ({ items: [], complete_action: true, sort: 0, archived_at: null }),
@@ -506,6 +507,30 @@
           rec.undone_at = now();
           return { data: { tasks_dropped: tasksDropped, projects_dropped: projectsDropped, folders_archived: folders }, error: null };
         }
+        // Mirrors reading_set() / slipbox_from_task() (migration 20261017000001).
+        const guessType = (s) => (/\b(watch|video|youtube|film|movie|documentary)\b/i.test(s) ? 'video' : /\b(listen|podcast|episode|audiobook)\b/i.test(s) ? 'podcast' : /\b(book|novel)\b|archive\.org/i.test(s) ? 'book' : /https?:\/\//i.test(s) ? 'article' : /^\s*read\b/i.test(s) ? 'book' : 'other');
+        const somedayOf = (create) => { let g = tables.tags.find((x) => !x.parent_id && /^someday/i.test(x.name)); if (!g && create) { g = { ...DEFAULTS.tags(), id: id(), user_id: uid, name: 'Someday', status: 'on_hold', sort: 0, created_at: now() }; tables.tags.push(g); } return g; };
+        if (name === 'reading_set') {
+          const t = tables.tasks.find((x) => x.id === args.task);
+          if (!t) return { data: null, error: { message: 'Action not found.' } };
+          const url = t.reading_url || ((`${t.title} ${t.notes || ''}`).match(/https?:\/\/[^\s)>\]]+/) || [null])[0];
+          const type = args.rtype || t.reading_type || guessType(t.title);
+          if (args.state === 'up_next') { const g = somedayOf(true); if (!tables.task_tags.some((l) => l.task_id === t.id && l.tag_id === g.id)) tables.task_tags.push({ task_id: t.id, tag_id: g.id, user_id: uid }); Object.assign(t, { reading_state: 'up_next', reading_type: type, reading_url: url, flagged: false }); }
+          else if (args.state === 'reading' || args.state === 'finished') {
+            const g = somedayOf(false); if (g) tables.task_tags = tables.task_tags.filter((l) => !(l.task_id === t.id && l.tag_id === g.id));
+            Object.assign(t, { reading_state: args.state, reading_type: type, reading_url: url }, args.state === 'reading' ? { completed_at: null, dropped_at: null } : { completed_at: t.completed_at || now(), reading_notes_done: false });
+          } else t.reading_state = null;
+          t.updated_at = now();
+          return { data: { id: t.id, reading_state: t.reading_state, reading_type: t.reading_type }, error: null };
+        }
+        if (name === 'slipbox_from_task') {
+          const t = tables.tasks.find((x) => x.id === args.task);
+          if (!t) return { data: null, error: { message: 'Action not found.' } };
+          const n = { ...DEFAULTS.slipbox_notes(), id: id(), user_id: uid, title: String(args.title || t.title).slice(0, 300), body: args.body ?? t.notes ?? '', source: args.source || '', from_task_id: t.id, created_at: now(), updated_at: now() };
+          tables.slipbox_notes.push(n);
+          t.dropped_at = t.dropped_at || now();
+          return { data: n.id, error: null };
+        }
         // Mirrors review_apply() (migration 20261016000001): apply the suggestion's fields, then decide.
         if (name === 'review_apply') {
           const it = tables.review_items.find((x) => x.id === args.item);
@@ -547,6 +572,8 @@
               if (e.t === 'someday_tag') tables.task_tags = tables.task_tags.filter((x) => !(x.tag_id === e.tag && e.ids.includes(x.task_id)));
               if (e.t === 'task') Object.assign(tables.tasks.find((t) => t.id === e.id), { completed_at: e.completed_at, dropped_at: e.dropped_at });
               if (e.t === 'project') tables.projects.find((p) => p.id === e.id).status = e.status;
+              if (e.t === 'reading') { Object.assign(tables.tasks.find((t) => t.id === e.id), { reading_state: e.reading_state, reading_type: e.reading_type }); if (e.someday_added) { const g = somedayOf(false); if (g) tables.task_tags = tables.task_tags.filter((l) => !(l.task_id === e.id && l.tag_id === g.id)); } }
+              if (e.t === 'slipbox') { const n = tables.slipbox_notes.find((x) => x.id === e.note); if (n) n.archived_at = now(); tables.tasks.find((t) => t.id === e.id).dropped_at = e.dropped_at; }
               if (e.t === 'fields') { Object.assign(tables.tasks.find((t) => t.id === e.id), { title: e.title, gain: e.gain, gain_by: e.gain_by, project_id: e.project_id, in_inbox: e.in_inbox, planned_at: e.planned_at, due_at: e.due_at, defer_at: e.defer_at, flagged: e.flagged });
                 tables.task_tags = tables.task_tags.filter((l) => l.task_id !== e.id).concat(e.tags.map((g) => ({ task_id: e.id, tag_id: g, user_id: uid }))); }
               if (e.t === 'expanded') tables.review_items.filter((x) => x.session_id === it.session_id && x.sort > it.sort && x.sort < it.sort + 1 && x.kind === 'task' && x.status === 'pending').forEach((x) => { x.status = 'void'; });
@@ -564,6 +591,8 @@
           if (op === 'someday') { const g = somedayTag(); const add = ids.filter((x) => !tables.task_tags.some((l) => l.task_id === x && l.tag_id === g.id)); add.forEach((x) => tables.task_tags.push({ task_id: x, tag_id: g.id, user_id: uid, created_at: now() })); before = [{ t: 'someday_tag', tag: g.id, ids: add }]; }
           if (op === 'done' || op === 'drop') { before = ids.map((x) => { const t = tables.tasks.find((y) => y.id === x); return { t: 'task', id: x, completed_at: t.completed_at, dropped_at: t.dropped_at }; }); ids.forEach((x) => { const t = tables.tasks.find((y) => y.id === x); if (op === 'done') t.completed_at = now(); else t.dropped_at = now(); }); }
           if (op === 'park') { const ps = tables.projects.filter((p) => p.status === 'active' && ids.some((x) => (tables.tasks.find((t) => t.id === x) || {}).project_id === p.id)); before = ps.map((p) => ({ t: 'project', id: p.id, status: p.status })); ps.forEach((p) => { p.status = 'on_hold'; }); }
+          if (d === 'reading') { const t = tables.tasks.find((x) => x.id === ids[0]); const g0 = somedayOf(false); before = [{ t: 'reading', id: t.id, reading_state: t.reading_state, reading_type: t.reading_type, someday_added: !(g0 && tables.task_tags.some((l) => l.task_id === t.id && l.tag_id === g0.id)) }]; await this.rpc('reading_set', { task: t.id, state: 'up_next' }); }
+          if (d === 'slipbox') { const t = tables.tasks.find((x) => x.id === ids[0]); const n = { ...DEFAULTS.slipbox_notes(), id: id(), user_id: uid, title: t.title.slice(0, 300), body: t.notes || '', from_task_id: t.id, created_at: now(), updated_at: now() }; tables.slipbox_notes.push(n); before = [{ t: 'slipbox', note: n.id, id: t.id, dropped_at: t.dropped_at }]; t.dropped_at = now(); }
           if (d === 'one_by_one') { ids.forEach((x, i) => tables.review_items.push({ ...DEFAULTS.review_items(), id: id(), session_id: it.session_id, user_id: uid, sort: it.sort + (i + 1) / (ids.length + 1), kind: 'task', task_id: x, created_at: now(), updated_at: now() })); before = [{ t: 'expanded' }]; }
           Object.assign(it, { status: d === 'skip' ? 'skipped' : 'reviewed', decision: d, decided_by: args.by === 'agent' ? 'agent' : 'user', note: args.note ?? it.note, before, reviewed_at: now(), updated_at: now() });
           const nx = next(it.session_id, it.sort);

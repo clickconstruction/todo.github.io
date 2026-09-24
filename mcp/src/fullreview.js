@@ -5,7 +5,7 @@ import { buildQueue, priorityReason, proposalText } from '../../js/review.js';
 
 export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
   // ---------- suggestions: Claude proposes, the user Submits in the app ----------
-  const TASK_DECISIONS = ['keep', 'someday', 'done', 'drop', 'skip'];
+  const TASK_DECISIONS = ['keep', 'someday', 'done', 'drop', 'skip', 'reading', 'slipbox'];
   const GROUP_DECISIONS = ['accept', 'one_by_one', 'keep_all', 'skip'];
   async function lookups(api) {
     const [projects, tags] = await Promise.all([
@@ -88,7 +88,7 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
         tags: tags.map((g) => g.name), gain: raw.gain || undefined, gain_suggested: raw.gain_by === 'agent' || undefined, flagged: raw.flagged || undefined,
         due: day(raw.due_at), planned: day(raw.planned_at), defer: day(raw.defer_at), in_inbox: raw.in_inbox || undefined, repeating: raw.repeat_rule ? true : undefined,
         added: day(raw.created_at), age_days: raw.created_at ? Math.floor((Date.now() - Date.parse(raw.created_at)) / 86400000) : undefined },
-      decisions: 'keep | someday | done | drop | skip' };
+      decisions: 'keep | someday | done | drop | skip | reading | slipbox' };
   }
   async function stateOut(api, s, list) {
     const live = list.filter((x) => x.status !== 'void');
@@ -117,7 +117,7 @@ actions:
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
   annotate {…same fields…} / decide {decision, note?} → apply now (only when asked to just do it)
   prioritize {task_ids} · goto {item_id | "next" | "previous"} · undo {item_id?} · list
-Decisions: action cards keep|someday|done|drop|skip; group cards accept|one_by_one|keep_all|skip.`,
+Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, up next)|slipbox (an idea, not an action → fleeting note); group cards accept|one_by_one|keep_all|skip.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -134,7 +134,7 @@ Decisions: action cards keep|someday|done|drop|skip; group cards accept|one_by_o
         planned: { type: ['string', 'null'] }, due: { type: ['string', 'null'] }, defer: { type: ['string', 'null'] },
         flagged: { type: 'boolean' }, note: { type: 'string', description: 'One line: why you changed or decided it, shown on the card' },
         proposal: { type: 'object', properties: { op: { type: 'string', enum: ['someday', 'drop', 'park', 'keep_newest'] }, keep: { type: 'integer' } } },
-        decision: { type: 'string', enum: ['keep', 'someday', 'done', 'drop', 'skip', 'accept', 'one_by_one', 'keep_all'] },
+        decision: { type: 'string', enum: ['keep', 'someday', 'done', 'drop', 'skip', 'reading', 'slipbox', 'accept', 'one_by_one', 'keep_all'] },
         task_ids: { type: 'array', items: { type: 'string' } },
         item_id: { type: 'string' },
       },

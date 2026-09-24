@@ -15,6 +15,7 @@ import { waitingRow } from './gtd.js';
 import { sweepHtml } from './sweep.js';
 import { somedayListHtml } from './someday.js';
 import { horizonsDue, liveAreas, bigDue, quarterlyBody } from './horizons.js';
+import { readingNow, notesToWrite, ensureFinished } from './reading.js';
 
 // ---------- the review row ----------
 export const openReview = () => (db.weeklyReviews || []).find((r) => !r.completed_at && !r.abandoned_at) || null;
@@ -63,15 +64,19 @@ function ctx() {
   const some = somedayItems();
   const big = bigDue();
   const hz = horizonsDue().length + big.yearly.length + (big.quarterly ? 1 : 0);
-  const count = { inbox, stale, waiting: waiting.length, projects: projectsDue + stuck, someday: some.tasks.length + some.projects.length, horizons: hz };
+  ensureFinished();
+  const fleeting = (db.slipbox || []).filter((n) => n.kind === 'fleeting' && !n.archived_at).length;
+  const toWrite = notesToWrite().length;
+  const count = { inbox, stale, waiting: waiting.length, projects: projectsDue + stuck, someday: some.tasks.length + some.projects.length, horizons: hz, notes: fleeting + toWrite };
   // Nothing to do = done without a click.
-  const auto = { inbox: inbox === 0, stale: stale === 0, waiting: dueFollow === 0, projects: projectsDue === 0 && stuck === 0, horizons: hz === 0 };
+  const auto = { inbox: inbox === 0, stale: stale === 0, waiting: dueFollow === 0, projects: projectsDue === 0 && stuck === 0, horizons: hz === 0, notes: fleeting + toWrite === 0 };
   const note = {
     inbox: inbox ? `${inbox} to clarify` : 'empty',
     stale: stale ? `${stale}` : 'none',
     waiting: waiting.length ? `${waiting.length}${dueFollow ? ` · ${dueFollow} to follow up` : ' · none due'}` : 'nothing',
     projects: [projectsDue && `${projectsDue} due`, stuck && `${stuck} stuck`].filter(Boolean).join(' · ') || 'all current',
     someday: `${count.someday}`,
+    notes: fleeting + toWrite ? [fleeting && `${fleeting} fleeting`, toWrite && `${toWrite} finished`].filter(Boolean).join(' · ') : 'nothing waiting',
     horizons: hz ? `${hz} due` : liveAreas().length ? 'none due' : 'not set up',
   };
   return { count, auto, note };
@@ -188,6 +193,14 @@ const STEP_BODY = {
         <form class="capture" data-capture data-project="${p.id}"><input type="text" name="title" placeholder="Next action for ${esc(p.name)}…" autocomplete="off" enterkeyhint="done"><button class="btn">Add</button></form></div>`).join('')}` : ''}`;
   },
   someday: () => somedayListHtml({ embedded: true }),
+  notes: () => {
+    const fleeting = (db.slipbox || []).filter((n) => n.kind === 'fleeting' && !n.archived_at);
+    const toWrite = notesToWrite(); const now = readingNow();
+    const card = (n, label, href) => `<a class="wk-card wk-mini" href="${href}"><p class="wk-big">${n}</p><p>${label}</p></a>`;
+    return `<div class="wk-cards">${card(fleeting.length, `fleeting note${fleeting.length === 1 ? '' : 's'} waiting`, '#slipbox')}${card(toWrite.length, 'finished, notes to write', '#reading')}${card(now.length, 'reading now', '#reading')}</div>
+      <p class="hint">Turn each into a permanent note: one idea, in your own words, linked to what you already have. Then mark it permanent.</p>
+      ${fleeting.length ? `<div class="sl-list">${fleeting.slice(0, 10).map((n) => `<a class="sl-row" href="#slipbox/${n.id}"><span class="sl-kind fleeting">Fleeting</span><span class="sl-main"><b>${esc(n.title)}</b></span></a>`).join('')}</div>` : ''}`;
+  },
   horizons: () => {
     const due = horizonsDue();
     const big = bigDue();

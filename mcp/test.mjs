@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [], slipbox_notes: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -146,7 +146,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 70 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 70 tools, no internals leaked');
+assert(list.body.result.tools.length === 72 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 72 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -804,7 +804,7 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
 // ---------- Weekly Review, mind sweep, Someday/Maybe ----------
 {
   const st0 = await tool('weekly_review', {});
-  assert(!st0.in_progress && st0.steps.length === 11 && st0.steps[0].key === 'papers' && st0.minutes_left > 0, 'weekly_review status before starting');
+  assert(!st0.in_progress && st0.steps.length === 12 && st0.steps[0].key === 'papers' && st0.steps.some((x) => x.key === 'notes') && st0.minutes_left > 0, 'weekly_review status before starting');
   const started = await tool('weekly_review', { action: 'start' });
   assert(started.in_progress && db.weekly_reviews.length === 1, 'weekly_review start saves a review');
   const inboxStep = started.steps.find((x) => x.key === 'inbox');
@@ -1189,5 +1189,45 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(newTask && newTask.in_inbox !== false && newTask.gain === 'Cash for the barn without selling' && newCard && db.review_items.length === before2 + 1 && newCard.sort === Math.max(...db.review_items.filter((x) => x.session_id === st.session_id).map((x) => x.sort)) && ad.added.title === 'Ask the bank about a HELOC', 'add: a new idea is captured and becomes the last card');
   const ls = await tool('full_review', { action: 'list' });
   assert(ls.some((x) => x.id === st.session_id), 'list sessions');
+}
+// ---------- slipbox and reading ----------
+{
+  const a1 = await tool('slipbox', { action: 'add', title: 'Links beat folders', body: 'A note can live in many places at once.' });
+  const a2 = await tool('slipbox', { action: 'add', title: 'Surprise is the test', body: 'Keep what surprises me. See [[Links beat folders]] and [[Not written yet]].', source: 'Ahrens p.112' });
+  assert(a1.kind === 'fleeting' && a2.links.includes('Links beat folders'), 'slipbox add: fleeting, [[links]] read from the body');
+  const g = await tool('slipbox', { action: 'get', note: 'Links beat folders' });
+  assert(g.linked_from.includes('Surprise is the test') && g.links.length === 0, 'slipbox get: backlinks');
+  const g2 = await tool('slipbox', { action: 'get', note: a2.id });
+  assert(g2.links.join() === 'Links beat folders' && g2.missing_links.join() === 'Not written yet', 'slipbox get: resolved links and ones not written yet');
+  const up = await tool('slipbox', { action: 'update', note: a1.id, kind: 'permanent' });
+  assert(up.kind === 'permanent' && up.processed, 'slipbox update: permanent = processed');
+  const ls = await tool('slipbox', { action: 'list', kind: 'fleeting' });
+  assert(ls.fleeting === 1 && ls.notes.length === 1 && ls.notes[0].title === 'Surprise is the test', 'slipbox list: fleeting ones waiting');
+  const fq = await tool('slipbox', { action: 'list', q: 'surprises' });
+  assert(fq.notes.length === 1, 'slipbox list: search');
+  await tool('slipbox', { action: 'archive', note: a1.id });
+  assert(db.slipbox_notes.find((n) => n.id === a1.id).archived_at, 'slipbox archive (never deleted)');
+  const ft = await tool('capture', { title: 'Idea: a feeder funnels Austin to Kingsbury' });
+  const b0 = rpcCalls.length;
+  await tool('slipbox', { action: 'from_task', task_id: ft.id, source: 'Robert' });
+  assert(rpcCalls.slice(b0).some((c) => c.fn === 'slipbox_from_task' && c.body.task === ft.id && c.body.owner === UID), 'slipbox from_task → slipbox_from_task');
+  const b1 = rpcCalls.length;
+  const ra = await tool('reading', { action: 'add', title: 'Tales of the Nuclear Age', type: 'book' });
+  assert(db.tasks.some((t) => t.title === 'Tales of the Nuclear Age') && rpcCalls.slice(b1).some((c) => c.fn === 'reading_set' && c.body.state === 'up_next' && c.body.rtype === 'book'), 'reading add: captured and put up next');
+  const b2 = rpcCalls.length;
+  await tool('reading', { action: 'move', task_id: ra.id, state: 'reading' });
+  assert(rpcCalls.slice(b2).some((c) => c.fn === 'reading_set' && c.body.state === 'reading'), 'reading move → reading_set');
+  const tn = await tool('reading', { action: 'take_notes', task_id: ra.id, body: 'Deterrence depends on belief' });
+  assert(db.slipbox_notes.some((n) => n.id === tn.note.id && n.reading_task_id === ra.id && n.source === 'Tales of the Nuclear Age'), 'reading take_notes: a fleeting note linked to it');
+  await tool('reading', { action: 'notes_done', task_id: ra.id });
+  assert(db.tasks.find((t) => t.id === ra.id).reading_notes_done === true, 'reading notes_done');
+  const inb = await tool('capture', { title: 'Read the untools article' });
+  const b3 = rpcCalls.length;
+  const cr = await tool('clarify_item', { id: inb.id, decision: 'reading', type: 'article' });
+  assert(cr.decision === 'reading' && rpcCalls.slice(b3).some((c) => c.fn === 'reading_set' && c.body.rtype === 'article'), 'clarify_item reading');
+  const inb2 = await tool('capture', { title: 'Luhmann on surprise' });
+  const b4 = rpcCalls.length;
+  const cs = await tool('clarify_item', { id: inb2.id, decision: 'slipbox', source: 'Ahrens' });
+  assert(cs.decision === 'slipbox' && rpcCalls.slice(b4).some((c) => c.fn === 'slipbox_from_task' && c.body.source === 'Ahrens'), 'clarify_item slipbox');
 }
 console.log('ALL PASSED');

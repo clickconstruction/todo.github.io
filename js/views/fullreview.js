@@ -122,7 +122,7 @@ const mark = (it, field, html) => (fresh(it, field) ? `<span class="fr-new">${ht
 const added = (t) => { const ms = Date.parse(t.created_at || 0) || 0; if (!ms) return ''; const d = Math.floor((Date.now() - ms) / 86400000); return d >= 730 ? `added ${Math.round(d / 365)} years ago` : d >= 60 ? `added ${Math.round(d / 30)} months ago` : d >= 1 ? `added ${d} day${d === 1 ? '' : 's'} ago` : 'added today'; };
 
 // Claude's suggestion, waiting for your Submit: every change spelled out, the old value struck through.
-const DECISION_LABEL = { keep: 'Keep', someday: 'Someday', done: 'Done', drop: 'Drop', skip: 'Skip', accept: 'Accept', one_by_one: 'One by one', keep_all: 'Keep all' };
+const DECISION_LABEL = { keep: 'Keep', someday: 'Someday', done: 'Done', drop: 'Drop', skip: 'Skip', reading: '→ Reading list', slipbox: '→ Slipbox', accept: 'Accept', one_by_one: 'One by one', keep_all: 'Keep all' };
 const pending = (it) => it.suggestion && !it.suggestion.applied_at && it.status === 'pending' ? it.suggestion : null;
 const when = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : 'no date');
 const ago = (iso) => { const m = Math.round((Date.now() - Date.parse(iso || 0)) / 60000); return !iso ? '' : m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
@@ -173,6 +173,7 @@ function taskCard(it) {
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
     ${suggestionBar(it, t)}
     <div class="fr-btns ${pending(it) ? 'fr-btns-quiet' : ''}">${[['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
+    <div class="fr-btns2 ${pending(it) ? 'fr-btns-quiet' : ''}"><button class="btn small" data-fr="decide" data-decision="reading" title="Something to read, watch or listen to: onto the reading list (up next)"><kbd>5</kbd> → Reading list</button><button class="btn small" data-fr="decide" data-decision="slipbox" title="An idea to think with, not an action: a fleeting note in your slipbox"><kbd>6</kbd> → Slipbox</button></div>
     <p class="hint fr-edit"><button class="link-btn" data-task="${t.id}">Edit details</button></p>
   </div>`;
 }
@@ -217,7 +218,7 @@ export function viewFullReview(id) {
   return `<div class="fr">${head}
     <button class="fab fr-fab" data-fr="capture" aria-label="Capture an idea (added to this review)" title="Capture an idea: it's added to this review as a later card (N)">+</button>
     ${cur.kind === 'group' ? groupCard(cur) : taskCard(cur)}
-    <div class="cl-bar"><button class="btn small" data-fr="undo" ${f.undo.length ? '' : 'disabled'}>↶ Undo</button><span class="hint cl-keys">1–4 decide · s skip · u undo · Esc close</span><button class="btn small" data-fr="decide" data-decision="skip">Skip →</button></div></div>`;
+    <div class="cl-bar"><button class="btn small" data-fr="undo" ${f.undo.length ? '' : 'disabled'}>↶ Undo</button><span class="hint cl-keys">1–6 decide · s skip · u undo · n capture · Esc close</span><button class="btn small" data-fr="decide" data-decision="skip">Skip →</button></div></div>`;
 }
 
 // ---------- capture during the review ----------
@@ -325,6 +326,7 @@ async function act(a, el) {
     const bulk = cur.kind === 'group' && decision === 'accept';
     f.undo.push({ id: cur.id, kind: cur.kind, task_id: cur.task_id, bulk });
     if (bulk) await loadAll(); else if (cur.kind === 'task') await refreshCard(cur);
+    if (decision === 'slipbox') db.slipbox = await run(sb.from('slipbox_notes').select('*').is('archived_at', null));
     if (decision === 'one_by_one' || bulk) await loadSession(s.id);
     else {
       cur.status = decision === 'skip' ? 'skipped' : 'reviewed'; cur.decision = decision;
@@ -342,8 +344,8 @@ export function fullReviewKey(e) {
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return false;
   if (e.key === 'n') { e.preventDefault(); captureIntoReview(); return true; }
   if (e.key === 'Enter') { const b = document.querySelector('[data-fr="submit"]'); if (b) { e.preventDefault(); b.click(); return true; } }
-  const btns = [...document.querySelectorAll('.fr-btns [data-fr="decide"]')];
-  if (/^[1-4]$/.test(e.key) && btns[Number(e.key) - 1]) { e.preventDefault(); btns[Number(e.key) - 1].click(); return true; }
+  const btns = [...document.querySelectorAll('.fr-btns [data-fr="decide"], .fr-btns2 [data-fr="decide"]')];
+  if (/^[1-6]$/.test(e.key) && btns[Number(e.key) - 1]) { e.preventDefault(); btns[Number(e.key) - 1].click(); return true; }
   if (e.key === 's') { const b = document.querySelector('.cl-bar [data-decision="skip"]'); if (b) { e.preventDefault(); b.click(); return true; } }
   if (e.key === 'u') { const b = document.querySelector('[data-fr="undo"]'); if (b && !b.disabled) { e.preventDefault(); b.click(); return true; } }
   if (e.key === 'Escape') { const c = document.querySelector('.fr-close'); if (c) { e.preventDefault(); location.hash = c.getAttribute('href'); return true; } }

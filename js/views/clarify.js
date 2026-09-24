@@ -20,6 +20,7 @@ export const CHOICES = [
   ['tickler', 'Tickler', 'remind me later'],
   ['trash', 'Trash', 'not needed'],
   ['reference', 'Reference', 'just info'],
+  ['slipbox', 'Slipbox', 'an idea to think with'],
 ];
 // Columns an undo puts back.
 const COLS = ['in_inbox', 'project_id', 'parent_id', 'completed_at', 'dropped_at', 'completion_note', 'planned_at', 'defer_at', 'flagged', 'energy', 'waiting_on', 'follow_up_at', 'delegated_at', 'agenda_for', 'tickler', 'reference_id'];
@@ -138,6 +139,15 @@ function referenceForm(t) {
   </form>`;
 }
 
+function slipboxForm(t) {
+  return `<form class="cl-form" data-clarify-form="slipbox">
+    <label>One idea, in your own words<input type="text" name="title" value="${esc(t.title)}" maxlength="300" autocomplete="off"></label>
+    <label>Source <span class="hint">optional</span><input type="text" name="source" maxlength="500" placeholder="Book and page, article, conversation…" autocomplete="off"></label>
+    <p class="hint">A fleeting note in your slipbox (its notes come too); it leaves the Inbox. Not an action: it never shows up in your lists.</p>
+    <div class="cl-foot"><button type="button" class="btn" data-clarify="back">‹ Back</button><button type="submit" class="btn primary">Save to slipbox ⏎</button></div>
+  </form>`;
+}
+
 function somedayForm() {
   const cats = somedayCategories();
   return `<form class="cl-form" data-clarify-form="someday">
@@ -173,6 +183,7 @@ export function viewClarify() {
   else if (s.mode === 'reference') body = referenceForm(t);
   else if (s.mode === 'now') body = nowPanel();
   else if (s.mode === 'someday') body = somedayForm();
+  else if (s.mode === 'slipbox') body = slipboxForm(t);
   else {
     const sug = suggestFor(t);
     body = `${sug ? `<button class="cl-sug" data-clarify="suggested">Suggested: <b>${esc(sug.project.name)}</b>${sug.tags.map((g) => ` · ${esc(tagLabel(g))}`).join('')} ✓</button>` : ''}
@@ -180,7 +191,7 @@ export function viewClarify() {
       <div class="cl-grid">${CHOICES.map(([k, l, sub], i) => `<button class="cl-choice ${i === 0 ? 'pri' : ''}" data-clarify="${k}"><kbd>${i + 1}</kbd><b>${l}</b><span>${sub}</span></button>`).join('')}</div>`;
   }
   return `${head}${itemCard(t)}${body}
-    <div class="cl-bar"><button class="btn small" data-clarify="undo" ${s.history.length ? '' : 'disabled'}>↶ Undo</button><span class="hint cl-keys">1–8 choose · ⏎ save · Esc back</span><button class="btn small" data-clarify="skip">Skip →</button></div>`;
+    <div class="cl-bar"><button class="btn small" data-clarify="undo" ${s.history.length ? '' : 'disabled'}>↶ Undo</button><span class="hint cl-keys">1–9 choose · ⏎ save · Esc back</span><button class="btn small" data-clarify="skip">Skip →</button></div>`;
 }
 
 // After render: wire the next-action form's tag chips (prefilled from the suggestion).
@@ -238,6 +249,16 @@ async function submitForm(form) {
     await makeSomeday(t, category);
     toast(`Parked in Someday/Maybe${category ? ` · ${category}` : ''}`);
     record(snap, 'someday');
+  } else if (kind === 'slipbox') {
+    const f = new FormData(form);
+    const noteId = await run(sb.rpc('slipbox_from_task', { task: t.id, title: String(f.get('title') || '').trim() || t.title, body: t.notes || '', source: String(f.get('source') || '').trim() }));
+    const [row] = await run(sb.from('tasks').select('*').eq('id', t.id)); syncRow('tasks', t, row);
+    const [note] = await run(sb.from('slipbox_notes').select('*').eq('id', noteId)); if (note) (db.slipbox ||= []).push(note);
+    record(snap, 'slipbox', async () => {
+      const [r] = await run(sb.from('slipbox_notes').update({ archived_at: new Date().toISOString() }).eq('id', noteId).select());
+      const n = byId(db.slipbox || [], noteId); if (n) syncRow('slipbox', n, r);
+    });
+    toast('Saved to your slipbox', [{ label: 'Open', run: () => { location.hash = `#slipbox/${noteId}`; } }]);
   } else if (kind === 'reference') {
     const topic = String(new FormData(form).get('topic') || '').trim();
     const files = attachmentsFor('task_id', t.id).map((a) => a.id);
@@ -280,6 +301,7 @@ export async function clarifyAction(action) {
     case 'delegate': return openDelegate(t, { onDone: () => record(snap, 'delegate') });
     case 'tickler': return openTickle(t, { onDone: () => record(snap, 'tickler') });
     case 'someday': s.mode = 'someday'; break;
+    case 'slipbox': s.mode = 'slipbox'; break;
     case 'trash': {
       const [row] = await run(sb.from('tasks').update({ dropped_at: new Date().toISOString() }).eq('id', t.id).select());
       syncRow('tasks', t, row);
@@ -298,7 +320,7 @@ export function onClarifySubmit(e) {
   return true;
 }
 
-// Keys while clarifying: 1–8 choose, ⏎ save/done, Esc back, s/→ skip, z/u undo.
+// Keys while clarifying: 1–9 choose, ⏎ save/done, Esc back, s/→ skip, z/u undo.
 export function clarifyKey(e) {
   if (!location.hash.startsWith('#clarify') || e.metaKey || e.ctrlKey || e.altKey) return false;
   if (document.querySelector('#sheet').open || document.querySelector('#sheet2').open) return false;
@@ -312,7 +334,7 @@ export function clarifyKey(e) {
     return false;
   }
   if (typing) return false;
-  if (!s.mode && /^[1-8]$/.test(e.key)) { e.preventDefault(); clarifyAction(CHOICES[Number(e.key) - 1][0]); return true; }
+  if (!s.mode && /^[1-9]$/.test(e.key)) { e.preventDefault(); clarifyAction(CHOICES[Number(e.key) - 1][0]); return true; }
   if (e.key === 's' || e.key === 'ArrowRight') { e.preventDefault(); clarifyAction('skip'); return true; }
   if (e.key === 'z' || e.key === 'u') { e.preventDefault(); clarifyAction('undo'); return true; }
   return false;

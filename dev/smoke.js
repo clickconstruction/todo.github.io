@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -56,6 +56,86 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Slipbox and reading list: notes with [[links]], a reading list apart from actions, and the bridges.
+async function slipboxReading(check) {
+  const { db, app } = await import('/js/state.js');
+  app.slip = null; app.reading = null;
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const t = T(); const now = new Date().toISOString();
+  // Quick capture: slip: and read:
+  const { openQuickEntry } = await import('/js/editors/task.js');
+  openQuickEntry(); await wait(60);
+  $('#sheet [name=title]').value = 'slip: Links beat folders'; $('#quick').requestSubmit();
+  await until(() => t.slipbox_notes.some((n) => n.title === 'Links beat folders'));
+  check('“slip: …” → a fleeting slipbox note, not an action', t.slipbox_notes.some((n) => n.title === 'Links beat folders' && n.kind === 'fleeting') && !t.tasks.some((x) => /Links beat folders/.test(x.title)));
+  openQuickEntry(); await wait(60);
+  $('#sheet [name=title]').value = 'read: Tales of the Nuclear Age'; $('#quick').requestSubmit();
+  await until(() => t.tasks.some((x) => x.title === 'Tales of the Nuclear Age' && x.reading_state === 'up_next'));
+  const book = t.tasks.find((x) => x.title === 'Tales of the Nuclear Age');
+  const some = t.tags.find((g) => g.name === 'Someday');
+  check('“read: …” → the reading list, up next (parked in Someday)', book && book.reading_state === 'up_next' && some && t.task_tags.some((l) => l.task_id === book.id && l.tag_id === some.id));
+  // Slipbox view: new note, [[link]], backlinks, permanent, archive.
+  await go('#slipbox');
+  check('Slipbox: fleeting count, search, add', has(undefined, 'slipbox', 'fleeting 1', '1 fleeting note') && !!$('[data-slip-new]'));
+  const nf = $('[data-slip-new]'); nf.elements.title.value = 'Surprise is the test'; nf.requestSubmit();
+  await until(() => location.hash.startsWith('#slipbox/') && !!$('[data-slip-note]'));
+  const surprise = t.slipbox_notes.find((n) => n.title === 'Surprise is the test');
+  const form = $('[data-slip-note]');
+  form.elements.body.value = 'Keep notes that surprise me. See [[Links beat folders]] and [[Not written yet]].';
+  form.elements.source.value = 'How to Take Smart Notes, p. 112';
+  form.requestSubmit(); await until(() => surprise.body.includes('surprise me'));
+  await wait(100);
+  check('links render; a missing one offers to create it', !!$('.sl-read .sl-link') && has('.sl-read', 'links beat folders') && !!$('.sl-read [data-slip="new-linked"]') && has(undefined, 'links · 1', 'not written yet'));
+  const lbf = t.slipbox_notes.find((n) => n.title === 'Links beat folders');
+  await go(`#slipbox/${lbf.id}`);
+  check('backlinks: “Linked from” the other note', has(undefined, 'linked from · 1', 'surprise is the test'));
+  $(`[data-slip="permanent"]`).click(); await until(() => lbf.kind === 'permanent');
+  check('Mark permanent: processed', lbf.kind === 'permanent' && lbf.processed_at);
+  await go('#slipbox');
+  const q = $('[data-slip-q]'); q.value = 'surprise'; q.dispatchEvent(new Event('input', { bubbles: true })); await wait(80);
+  const titles = $$('.sl-list .sl-row b').map((b) => b.textContent);
+  check('search', titles.length === 1 && titles[0] === 'Surprise is the test', titles.join('|'));
+  app.slip = null;
+  let exported = null; window.__slipExport = (files) => { exported = files; };
+  await go('#inbox'); await go('#slipbox');
+  $('[data-slip="export"]').click(); await wait(50);
+  window.__slipExport = undefined;
+  check('Export: one Markdown file per note, links kept, fleeting in its own folder', exported && exported.some((f) => f.name === 'Surprise is the test.md' || f.name === 'Fleeting/Surprise is the test.md') && exported.some((f) => f.text.includes('[[Links beat folders]]')) && exported.some((f) => f.name.startsWith('Fleeting/')));
+  // Reading view: start, finish, take notes, notes done.
+  await go('#reading');
+  check('Reading: Now, Finished, Up next; the book is up next', has(undefined, 'now · 0', 'up next · 1', 'tales of the nuclear age'));
+  $(`[data-rd="start"][data-id="${book.id}"]`).click(); await until(() => book.reading_state === 'reading');
+  await wait(100);
+  check('Start: reading now, a live action (out of Someday)', has(undefined, 'now · 1') && !t.task_tags.some((l) => l.task_id === book.id && l.tag_id === some.id) && $('#badge-reading').textContent === '1');
+  $(`[data-rd="finish"][data-id="${book.id}"]`).click(); await until(() => book.reading_state === 'finished' && has('#toast', 'take notes'));
+  check('Finished: completed, asks to take notes, listed under notes to write', book.completed_at && has(undefined, 'finished · notes to write · 1'));
+  $$('#toast button').find((b) => b.textContent === 'Take notes').click();
+  await until(() => t.slipbox_notes.some((n) => n.reading_task_id === book.id));
+  check('Take notes: a fleeting note linked to the book, opened to write', t.slipbox_notes.some((n) => n.reading_task_id === book.id && n.source === 'Tales of the Nuclear Age') && location.hash.startsWith('#slipbox/'));
+  await go('#reading');
+  $(`[data-rd="notes-done"][data-id="${book.id}"]`).click(); await until(() => book.reading_notes_done);
+  check('Notes done: off the notes-to-write list', book.reading_notes_done && has(undefined, 'finished · notes to write · 0'));
+  // Clarify: 9 = Slipbox.
+  t.tasks.push({ ...t.tasks[0], id: 'slC', title: 'Luhmann: surprise is what matters', notes: 'From the book', project_id: null, parent_id: null, in_inbox: true, completed_at: null, dropped_at: null, sort: -50, created_at: '2019-01-01T00:00:00Z', updated_at: now });
+  const { loadAll } = await import('/js/data.js'); await loadAll(); app.clarify = null;
+  await go('#clarify');
+  while ($('.cl-item b') && $('.cl-item b').textContent !== 'Luhmann: surprise is what matters') { $('[data-clarify="skip"]').click(); await wait(80); }
+  key('9'); await wait(80);
+  check('Clarify 9 = Slipbox: one idea and a source', !!$('[data-clarify-form="slipbox"]'));
+  $('[data-clarify-form="slipbox"] [name=source]').value = 'Ahrens, ch. 3';
+  $('[data-clarify-form="slipbox"]').requestSubmit();
+  await until(() => t.slipbox_notes.some((n) => n.from_task_id === 'slC') && has('#toast', 'saved to your slipbox'));
+  const cn = t.slipbox_notes.find((n) => n.from_task_id === 'slC');
+  check('saved as a fleeting note (with its notes and source); the item leaves the Inbox', cn && cn.body === 'From the book' && cn.source === 'Ahrens, ch. 3' && t.tasks.find((x) => x.id === 'slC').dropped_at);
+  $('[data-clarify="undo"]').click(); await until(() => !t.tasks.find((x) => x.id === 'slC').dropped_at);
+  check('Undo: back in the Inbox, the note archived', !t.tasks.find((x) => x.id === 'slC').dropped_at && cn.archived_at);
+  // Weekly Review: Process reading notes.
+  await go('#weekly');
+  check('Weekly Review has “Process reading notes”', has(undefined, 'process reading notes') && !!$('a.wk-step[href="#weekly/notes"]'));
+  await go('#weekly/notes');
+  check('the step: fleeting notes waiting, notes to write, reading now', has(undefined, 'fleeting notes waiting', 'finished, notes to write', 'reading now'));
+}
 
 // Full Review: one card at a time, Claude alongside (simulated here by writing what the MCP writes).
 async function fullReview(check) {
@@ -143,6 +223,17 @@ async function fullReview(check) {
   check('skip and someday: the end, with the skipped one offered', has(undefined, 'all reviewed', 'skipped') && !!$('[data-fr="reopen-skipped"]'));
   $('[data-fr="reopen-skipped"]').click(); await until(() => !has(undefined, 'all reviewed'));
   check('go through the skipped ones', !has(undefined, 'all reviewed') && (has(undefined, 'fix the gate latch') || has(undefined, 'sort the garage shelves')));
+  // → Reading list (5) and → Slipbox (6), undone.
+  const cur2 = t.review_items.find((x) => x.id === t.review_sessions.find((z) => z.id === sid).current_item);
+  if (cur2 && cur2.kind === 'task') {
+    const { app: A } = await import('/js/state.js');
+    const idle = () => until(() => !(A.fr && A.fr.busy)); // the app takes one decision at a time
+    key('5'); await until(() => t.tasks.find((x) => x.id === cur2.task_id).reading_state === 'up_next'); await idle(); await wait(100);
+    check('5 = → Reading list', t.tasks.find((x) => x.id === cur2.task_id).reading_state === 'up_next' && cur2.decision === 'reading');
+    key('u'); await until(() => !t.tasks.find((x) => x.id === cur2.task_id).reading_state && cur2.status === 'pending'); await idle(); await wait(150);
+    key('6'); await until(() => t.slipbox_notes.some((n) => n.from_task_id === cur2.task_id));
+    check('6 = → Slipbox: a fleeting note, the action dropped', t.slipbox_notes.some((n) => n.from_task_id === cur2.task_id) && t.tasks.find((x) => x.id === cur2.task_id).dropped_at);
+  }
   key('Escape'); await wait(150);
   check('Esc closes back to where it started', location.hash === '#settle/imF' && !document.body.classList.contains('fr-mode'));
   await go('#project/pfM');
@@ -901,12 +992,12 @@ async function weeklyReview(check) {
   T().tasks.find((t) => t.id === 't5').updated_at = new Date(Date.now() - 90 * 86400000).toISOString(); // stale
   const { loadAll } = await import('/js/data.js'); await loadAll();
   await go('#weekly');
-  check('overview: three stages, eleven steps, time estimate, start button', has(undefined, 'weekly review', 'get clear', 'get current', 'get creative', 'about') && $$('.wk-step').length === 11 && !!$('[data-weekly="start"]'), text());
+  check('overview: three stages, twelve steps, time estimate, start button', has(undefined, 'weekly review', 'get clear', 'get current', 'get creative', 'about') && $$('.wk-step').length === 12 && !!$('[data-weekly="start"]'), text());
   check('steps with nothing to do are already ticked (waiting)', $('a.wk-step[href="#weekly/waiting"]').classList.contains('done'));
   $('[data-weekly="start"]').click(); await wait(250);
-  check('starting saves a review row', T().weekly_reviews.length === 1 && !T().weekly_reviews[0].completed_at && has(undefined, '2 of 10 steps') === false && has(undefined, 'of 11 steps'));
+  check('starting saves a review row', T().weekly_reviews.length === 1 && !T().weekly_reviews[0].completed_at && has(undefined, '2 of 10 steps') === false && has(undefined, 'of 12 steps'));
   await go('#weekly/papers');
-  check('a step page: title, step 1 of 10, hint, capture box', has(undefined, 'collect loose papers', '1 of 11', 'receipts') && !!$('[data-wk-capture]'));
+  check('a step page: title, step 1 of 10, hint, capture box', has(undefined, 'collect loose papers', '1 of 12', 'receipts') && !!$('[data-wk-capture]'));
   const cap = $('[data-wk-capture] input'); cap.value = 'Receipt from the supply house'; cap.closest('form').requestSubmit(); await wait(250);
   check('capture from a step lands in the Inbox', T().tasks.some((t) => t.title === 'Receipt from the supply house' && t.in_inbox));
   $('[data-weekly="step-done"]').click(); await wait(300);
@@ -1029,7 +1120,7 @@ async function clarify(check) {
   await cap('Old flyer');
   await cap('Gate code 4411');
   await go('#clarify');
-  check('shows the first item, 1 of N, and 8 choices', has(undefined, 'process inbox', '1 of 6', 'frog pond ein', 'what is it?') && $$('.cl-choice').length === 8, text());
+  check('shows the first item, 1 of N, and 9 choices (Slipbox is 9)', has(undefined, 'process inbox', '1 of 6', 'frog pond ein', 'what is it?', 'slipbox') && $$('.cl-choice').length === 9, text());
   $('[data-clarify="skip"]').click(); await wait(120);
   check('Skip moves to the next item', has(undefined, 'build a 2m telescope', '1 of 6'), text());
   key('5'); await wait(150);
@@ -1055,7 +1146,7 @@ async function clarify(check) {
   f2.requestSubmit(); await wait(200);
   check('a next action needs a project or a tag', !$('[data-cl-error]').hidden && byTitle('Order more fittings for plumbing').in_inbox);
   key('Escape'); await wait(100);
-  check('Esc goes back to the choices', $$('.cl-choice').length === 8);
+  check('Esc goes back to the choices', $$('.cl-choice').length === 9);
   key('2'); await wait(150);
   check('2 = Do it now shows a 2:00 timer', has('[data-clarify-timer]', '2:00') || has('[data-clarify-timer]', '1:5'));
   $('[data-clarify="longer"]').click(); await wait(150);

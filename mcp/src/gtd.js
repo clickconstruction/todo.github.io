@@ -2,7 +2,7 @@
 // message for the user to send; nothing is sent from here), the Tickler, and Reference. Same rules as
 // the app (js/gtd.js). People and reference items are archived, never deleted.
 const ENERGY = ['low', 'medium', 'high'];
-const DECISIONS = ['next_action', 'done', 'delegate', 'project', 'someday', 'tickler', 'trash', 'reference'];
+const DECISIONS = ['next_action', 'done', 'delegate', 'project', 'someday', 'tickler', 'trash', 'reference', 'slipbox', 'reading'];
 
 export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
   const today = (api) => localDate(new Date().toISOString(), api.tz);
@@ -31,12 +31,14 @@ export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
   return [
     {
       name: 'clarify_item',
-      description: 'Clarify (process) one Inbox item with a GTD decision: next_action (give project and/or tags, optional planned/energy/flagged), done (took under 2 minutes), delegate (person, follow_up), project (becomes a project; first_action optional), someday (parks it under an on-hold Someday tag), tickler (date: back in the Inbox that day), trash (dropped, not deleted), reference (filed in Reference under topic). Go one item at a time with the user (list_inbox), asking what it is.',
+      description: 'Clarify (process) one Inbox item with a GTD decision: next_action (give project and/or tags, optional planned/energy/flagged), done (took under 2 minutes), delegate (person, follow_up), project (becomes a project; first_action optional), someday (parks it under an on-hold Someday tag), tickler (date: back in the Inbox that day), trash (dropped, not deleted), reference (filed in Reference under topic), slipbox (an idea to think with, not an action: a fleeting note in the slipbox, with source), reading (something to read/watch/listen to: onto the reading list, up next). Go one item at a time with the user (list_inbox), asking what it is.',
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string' },
           decision: { type: 'string', enum: DECISIONS },
+          source: { type: 'string', description: 'slipbox: where the idea came from' },
+          type: { type: 'string', enum: ['book', 'article', 'video', 'podcast', 'other'], description: 'reading: what kind' },
           project: { type: 'string', description: 'next_action: project name or id' },
           tags: { type: 'array', items: { type: 'string' }, description: 'next_action: contexts like "Phone"' },
           planned: { type: 'string', description: 'next_action: YYYY-MM-DD' },
@@ -93,6 +95,14 @@ export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
             await api.q(`tasks?${api.u}&id=eq.${t.id}`, { method: 'PATCH', body: { dropped_at: now, completion_note: `Filed to Reference: ${a.topic || 'no topic'}`, reference_id: ref.id } });
             const { projects } = await api.lookups();
             return { decision: a.decision, reference: refOut(ref, projects, false) };
+          }
+          case 'slipbox': {
+            const id = await api.q('rpc/slipbox_from_task', { method: 'POST', body: { task: t.id, title: a.title || null, body: null, source: a.source || '', owner: api.userId } });
+            return { decision: a.decision, note_id: id, next: 'Saved as a fleeting slipbox note (slipbox tool); the item left the Inbox.' };
+          }
+          case 'reading': {
+            const r = await api.q('rpc/reading_set', { method: 'POST', body: { task: t.id, state: 'up_next', rtype: a.type || null, owner: api.userId } });
+            return { decision: a.decision, ...r };
           }
           default: throw new Error(`decision must be one of ${DECISIONS.join(', ')}`);
         }

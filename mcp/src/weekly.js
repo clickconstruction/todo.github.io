@@ -40,8 +40,12 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
     const big = bigReviewsDue({ settings: api.settings || {}, goals: goals.map((g) => ({ ...g, status: 'active' })), areas, projects });
     if (big.quarterly) dueHz.push({ big: 'quarterly check-in (list_horizons)' });
     big.yearly.forEach((k) => dueHz.push({ big: `yearly read of the ${k} (list_horizons include_text)` }));
-    const count = { horizons: dueHz.length, inbox: inbox.length, stale: stale.length, waiting: waiting.length, projects: due.length + stuck.length, someday: sd.items.length + sd.onHold.length };
-    const auto = { horizons: !dueHz.length, inbox: !inbox.length, stale: !stale.length, waiting: !waiting.some((t) => t.follow_up_at && t.follow_up_at < end), projects: !due.length && !stuck.length };
+    const [fleetingNotes, toWrite] = await Promise.all([
+      api.q(`slipbox_notes?${api.u}&kind=eq.fleeting&archived_at=is.null&limit=200&select=id,title`),
+      api.q(`tasks?${api.u}&reading_state=eq.finished&reading_notes_done=is.false&limit=200&select=id,title`),
+    ]);
+    const count = { horizons: dueHz.length, inbox: inbox.length, stale: stale.length, waiting: waiting.length, projects: due.length + stuck.length, someday: sd.items.length + sd.onHold.length, notes: fleetingNotes.length + toWrite.length };
+    const auto = { horizons: !dueHz.length, inbox: !inbox.length, stale: !stale.length, waiting: !waiting.some((t) => t.follow_up_at && t.follow_up_at < end), projects: !due.length && !stuck.length, notes: !fleetingNotes.length && !toWrite.length };
     const data = {
       inbox: { count: inbox.length, items: inbox.slice(0, 15).map((t) => ({ id: t.id, title: t.title })) },
       stale: { count: stale.length, items: stale.slice(0, 20).map((t) => ({ id: t.id, title: t.title, project: (projects.find((p) => p.id === t.project_id) || {}).name || null, days_untouched: days(t.updated_at || t.created_at) })), note: 'For each: keep (update_task with no change touches it), complete, move to someday (clarify_item decision someday) or drop.' },
@@ -49,6 +53,7 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
       projects: { due_for_review: due.map((p) => p.name), stuck: stuck.map((p) => p.name), note: 'Use list_review and mark_reviewed; give stuck projects a next action.' },
       someday: { count: count.someday, note: 'Use list_someday; activate_someday or drop.' },
       sweep: { note: 'Use mind_sweep_prompts and capture what the user says.' },
+      notes: { fleeting: fleetingNotes.slice(0, 20).map((n) => n.title), finished_notes_to_write: toWrite.slice(0, 20).map((t) => t.title), note: 'Help turn each into permanent notes (slipbox update kind permanent; reading take_notes / notes_done).' },
       horizons: { due: dueHz.map((x) => x.big || (x.name ? `area: ${x.name}` : `goal: ${x.title}`)), note: 'Use list_horizons; save_area / save_goal with reviewed: true.' },
     };
     const steps = STEPS.map((s) => {
