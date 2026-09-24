@@ -88,6 +88,7 @@ const ACTIONS = {
   'sign-out': () => sb.auth.signOut(),
   'new-perspective': openNewPerspective,
   'show-remaining': () => { setFilter({ show: 'remaining' }); render(); },
+  'reset-filter': () => { setFilter({ show: 'remaining', fits: 0, energy: '', sort: 'default' }); render(); },
   'save-perspective': saveCurrentViewAsPerspective,
 };
 
@@ -241,6 +242,7 @@ view.addEventListener('input', (e) => {
 });
 
 $('#fab').onclick = openQuickEntry;
+$('#nav-capture').onclick = openQuickEntry; // laptops: capture lives at the top of the sidebar
 const $$review = (i) => document.querySelectorAll('[data-review-go]')[i];
 
 // Phones: views that don't fit the tab bar live in a "More" sheet.
@@ -365,3 +367,11 @@ if ('serviceWorker' in navigator && !isLocal) {
     else location.reload();
   });
 }
+
+// ⋯ menus close after a choice, or when you click elsewhere.
+document.addEventListener('click', (e) => {
+  const inMenu = e.target.closest && e.target.closest('.head-menu');
+  document.querySelectorAll('details.head-menu[open]').forEach((d) => {
+    if (d !== inMenu || (e.target.closest('.menu') && e.target.closest('a, button'))) d.open = false;
+  });
+});

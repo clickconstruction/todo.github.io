@@ -95,7 +95,7 @@ export function viewForecast(selected = 'today') {
     cell('future', 'Future', '', future.length),
   ].join('');
 
-  let body = '';
+  let body = ''; let notes = '';
   const section = (title, list, extra = '') => {
     const shown = list.filter(passes);
     return shown.length ? `<h2 class="section-title">${title} · ${shown.length}${extra}</h2>${taskList(sortTasks(shown, taskSort))}` : '';
@@ -136,8 +136,10 @@ export function viewForecast(selected = 'today') {
       body += `<h2 class="section-title">${sched.length ? 'Day' : 'Calendar'} · ${allDay.length + timed.length}</h2><ul class="list cal-list">${allDay.map(eventRow).join('')}${rows.join('')}</ul>`;
     }
     calendarErrors().forEach((c) => { body += `<p class="persp-warning">📅 ${esc(c.name)}: ${esc(c.error)} <a href="#settings">Settings</a></p>`; });
-    if (isToday) body += dailyBanner() + weeklyBanner();
-    if (isToday && pastCount) body += `<a class="fc-banner" href="#forecast/past">${overdue.length ? `<b>${overdue.length} overdue</b>` : ''}${overdue.length && plannedPast.length ? ' · ' : ''}${plannedPast.length ? `${plannedPast.length} planned earlier` : ''} → triage</a>`;
+    // Nudges (start your day, weekly review, overdue) share one slim row of chips.
+    if (isToday) notes += dailyBanner() + weeklyBanner();
+    if (isToday && pastCount) notes += `<a class="fc-banner fc-overdue" href="#forecast/past">${overdue.length ? `<b>${overdue.length} overdue</b>` : ''}${overdue.length && plannedPast.length ? ' · ' : ''}${plannedPast.length ? `${plannedPast.length} planned earlier` : ''} → triage</a>`;
+    if (isToday) notes += '<a class="fc-banner fc-now" href="#now">▶ What now?</a>';
     const follow = isToday ? db.tasks.filter((t) => followUpDue(t) && isWaiting(t)) : []; // not your actions, so the view filter doesn't apply
     if (follow.length) body += `<h2 class="section-title">Follow up · ${follow.length} <a class="btn small" href="#waiting">Waiting For</a></h2>${taskList(follow)}`;
     body += section('Due', it.due);
@@ -152,14 +154,15 @@ export function viewForecast(selected = 'today') {
       const shownTagged = new Set(taggedList.map((t) => t.id));
       body += section('Flagged', db.tasks.filter((t) => isOpen(t) && !isDeferred(t) && isFlaggedTask(t) && !dated.has(t.id) && !shownTagged.has(t.id)));
     }
-    if (!body.replace(/<a class="fc-banner"[\s\S]*?<\/a>/, '').trim()) body += `<p class="empty">Nothing due or planned ${isToday ? 'today' : 'this day'}.</p>`;
+    if (!body.trim()) body += `<p class="empty">Nothing due or planned ${isToday ? 'today' : 'this day'}.</p>`;
   }
 
   const title = selected === 'today' ? `Today · ${today.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}`
     : selected === 'past' ? 'Past' : selected === 'future' ? 'Later' : new Date(selected + 'T00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-  return `<div class="view-head"><h1 class="today">Forecast</h1><a class="btn small" href="#now">▶️ What now?</a></div>
+  return `<div class="view-head"><h1 class="today">Forecast</h1></div>
     <nav class="fc-strip" aria-label="Days">${strip}</nav>
     ${filterBar()}
     <p class="view-sub">${esc(title)}</p>
+    ${notes ? `<div class="fc-notes">${notes}</div>` : ''}
     ${body}`;
 }

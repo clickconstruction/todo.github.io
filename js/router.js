@@ -45,7 +45,7 @@ const VIEWS = {
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
 const AFTER = { share: mountShare, plan: mountPlan, nearby: mountNearbyMap, clarify: mountClarify, sweep: mountSweep, weekly: (step) => step === 'sweep' && mountSweep(), reference: (id) => id && mountReferenceFiles(id) };
 // Detail views highlight their parent tab.
-const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting', review: 'weekly', sweep: 'inbox', area: 'horizons', goal: 'horizons', plan: 'projects', checklist: 'checklists', daily: 'forecast', settle: 'settings' };
+const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting', review: 'weekly', sweep: 'inbox', area: 'horizons', goal: 'horizons', plan: 'projects', checklist: 'checklists', settle: 'settings' };
 
 export function render() {
   if (location.hash === '#today') { history.replaceState(null, '', '#forecast'); } // old links
@@ -83,7 +83,7 @@ export function render() {
   const big = bigDue();
   $('#badge-horizons').textContent = big.yearly.length || big.quarterly ? '•' : '';
   // Views that live under "More" on phones light up the More tab.
-  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts', 'perspective', 'perspectives', 'import', 'waiting', 'person', 'tickler', 'reference', 'weekly', 'someday', 'horizons', 'area', 'goal', 'now', 'checklists', 'checklist', 'settle'].includes(view));
+  $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts', 'perspective', 'perspectives', 'import', 'waiting', 'person', 'tickler', 'reference', 'weekly', 'someday', 'horizons', 'area', 'goal', 'now', 'checklists', 'checklist', 'settle', 'daily'].includes(view));
   const nav = $('#nav-perspectives');
   if (nav) nav.innerHTML = ids ? withFocus(() => perspectiveNav(view === 'perspective' ? args[0] : null)) : perspectiveNav(view === 'perspective' ? args[0] : null);
   applySidebar();

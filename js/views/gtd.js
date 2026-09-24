@@ -49,7 +49,7 @@ export function viewTickler(selected) {
 function tickleRow(t) {
   const ref = t.reference_id && byId(db.references || [], t.reference_id);
   return taskRow(t, { extra: `<span class="row-actions">
-    ${ref ? `<a class="btn small" href="#reference/${ref.id}">🗄 Open</a>` : ''}
+    ${ref ? `<a class="btn small" href="#reference/${ref.id}">Open</a>` : ''}
     <button class="btn small" data-gtd="retickle" data-id="${t.id}">Change day</button>
     <button class="btn small" data-gtd="untickle" data-id="${t.id}">Bring back now</button></span>` });
 }
@@ -100,7 +100,7 @@ function viewReferenceItem(id) {
     <form class="ref-files" data-ref-files="${r.id}"></form>
     ${p ? `<h2 class="section-title">Support material for</h2><a class="group-row" href="#project/${p.id}"><span>🗂 ${esc(p.name)}</span></a>` : ''}
     ${reminders.length ? `<p class="view-sub">📆 Comes back ${reminders.map((t) => esc(fmtDate(t.defer_at))).join(', ')}</p>` : ''}
-    <p class="head-actions ref-actions"><button class="btn small" data-gtd="tickle-ref" data-id="${r.id}">📆 Remind me on…</button><button class="btn small" data-gtd="archive-ref" data-id="${r.id}">Archive</button></p>`;
+    <p class="head-actions ref-actions"><button class="btn small" data-gtd="tickle-ref" data-id="${r.id}">Remind me on…</button><button class="btn small" data-gtd="archive-ref" data-id="${r.id}">Archive</button></p>`;
 }
 
 // ---------- Waiting For ----------

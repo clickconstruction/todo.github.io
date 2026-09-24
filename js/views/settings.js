@@ -41,6 +41,8 @@ export function viewSettings() {
       <button class="btn small danger" data-revoke="${t.id}">Revoke</button></li>`).join('');
   return `<div class="view-head"><h1>Settings</h1></div>
     <p class="view-sub">Signed in as ${esc(app.user.email)}</p>
+    <nav class="set-index" aria-label="Settings sections">${[['Sidebar', 'Sidebar'], ['Agents', 'Agent access'], ['Notifications', 'Notifications'], ['Email', 'Email capture'], ['Dates', 'Dates'], ['Reviews', 'Weekly and daily'], ['Calendars', 'Calendars'], ['Keyboard', 'Keyboard'], ['Import', 'Import'], ['Account', 'Account']]
+      .map(([l, h]) => `<button type="button" class="chip" data-scroll-to="${h}">${l}</button>`).join('')}</nav>
     <h2 class="section-title">Sidebar</h2>
     <p class="view-sub" style="margin-bottom:8px">Hide views you don’t use, order each group, and pin perspectives to Do.</p>
     <button class="btn" data-act="customize-sidebar">Customize sidebar</button>
@@ -387,4 +389,12 @@ document.addEventListener('submit', async (e) => {
   Object.assign(calState, { adding: false, checked: null, url: '', name: '' });
   app.render();
   toast(`Added “${row.name}”. Its events show in Forecast.`);
+});
+
+// The index at the top: jump to a section (by its heading; the hash stays #settings).
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-scroll-to]');
+  if (!b) return;
+  const h = [...document.querySelectorAll('#view h2.section-title')].find((x) => x.textContent.trim().startsWith(b.dataset.scrollTo));
+  if (h) h.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });

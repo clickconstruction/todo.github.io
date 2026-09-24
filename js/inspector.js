@@ -44,20 +44,21 @@ export const inspectorKey = (type, row) => `${type}:${row.id}:${row.updated_at}`
 export function renderInspector(force = false) {
   const el = panel();
   if (!el) return;
-  el.hidden = !isWide();
-  document.body.classList.toggle('has-inspector', isWide());
-  if (!isWide()) return;
-  // Skip while typing in the panel, or while the panel's own save is re-rendering the app.
-  if (!force && (el.contains(document.activeElement) || el.dataset.saving)) { highlight(); return; }
   const s = app.selected;
   const task = s && s.type === 'task' && byId(db.tasks, s.id);
   const project = s && s.type === 'project' ? byId(db.projects, s.id) : !task && pageProject();
+  // The panel only takes room when it has something to show; otherwise the list gets the width.
+  const show = isWide() && !!(task || project);
+  el.hidden = !show;
+  document.body.classList.toggle('has-inspector', show);
+  if (!show) { el.dataset.key = 'none'; el.innerHTML = ''; highlight(); return; }
+  // Skip while typing in the panel, or while the panel's own save is re-rendering the app.
+  if (!force && (el.contains(document.activeElement) || el.dataset.saving)) { highlight(); return; }
   const key = task ? inspectorKey('t', task) : project ? inspectorKey('p', project) : 'none';
   if (!force && el.dataset.key === key) { highlight(); return; }
   el.dataset.key = key;
   if (task) renderTaskInspector(el, task);
-  else if (project) renderProjectInspector(el, project);
-  else el.innerHTML = `<div class="inspector-empty"><p>Select an action to inspect it here.</p><p class="hint">j / k or ↑ ↓ to move · x complete · f flag · Esc to clear · ? for all shortcuts</p></div>`;
+  else renderProjectInspector(el, project);
   highlight();
 }
 

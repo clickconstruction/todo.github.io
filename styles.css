@@ -1213,3 +1213,64 @@ a.btn { text-decoration: none; }
 .more-sheet .more-links a { overflow: hidden; line-height: 1.2; }
 .more-sheet .more-links a .hint, .more-sheet .more-links a .badge { margin-left: auto; flex: none; }
 .more-sheet .more-links a .ml { font-style: normal; min-width: 0; overflow-wrap: anywhere; display: flex; align-items: center; gap: 6px; flex: 1; }
+
+/* ---------- Visual pass: room for the list, one View control, ⋯ menus, calmer headers ---------- */
+/* View control (filters) */
+details.filter-bar { display: block; margin: 2px 0 10px; }
+details.filter-bar > summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--muted); }
+details.filter-bar > summary::-webkit-details-marker { display: none; }
+details.filter-bar .fv-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; font-weight: 600; color: var(--text); background: var(--surface-2); }
+details.filter-bar.on .fv-btn { border-color: var(--accent); color: var(--accent); }
+details.filter-bar.on .fv-sum { color: var(--accent); }
+details.filter-bar .fv-body { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+details.filter-bar .fv-body label { display: inline-flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 0 0 0 10px; }
+details.filter-bar .fv-body select { border: none; background: transparent; padding: 7px 10px 7px 2px; width: auto; }
+details.filter-bar .save-persp { margin-left: auto; }
+/* Forecast nudges: one row of chips */
+.fc-notes { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.fc-notes .fc-banner { display: inline-flex; align-items: center; margin: 0; padding: 5px 11px; border-radius: 999px; font-size: 13px; background: var(--surface-2); border: 1px solid var(--line); }
+.fc-notes .fc-overdue { background: color-mix(in srgb, var(--due) 12%, transparent); border-color: transparent; }
+/* ⋯ menu */
+.head-menu { position: relative; margin-left: auto; }
+.head-menu > summary { list-style: none; cursor: pointer; min-width: 36px; text-align: center; font-size: 16px; line-height: 1; }
+.head-menu > summary::-webkit-details-marker { display: none; }
+.head-menu .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 230px; display: grid; padding: 6px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.head-menu .menu > a, .head-menu .menu > button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 9px 10px; border-radius: 8px; background: none; border: none;
+  color: var(--text); font: inherit; font-size: 14px; text-align: left; text-decoration: none; cursor: pointer; width: 100%; }
+.head-menu .menu > a:hover, .head-menu .menu > button:hover { background: var(--surface-2); }
+.head-menu .menu .hint { font-size: 12px; }
+.head-menu .menu .flag-btn { color: var(--text); }
+.project-props { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+select.status-chip { width: auto; padding: 3px 26px 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.chip.flagged-chip { color: var(--flag); }
+/* Neutral titles: colour is for meaning (due, flagged, selected), not decoration */
+.view-head h1 { color: var(--text) !important; }
+/* Phones: smaller titles; header buttons sit under the title, clear of the search button */
+@media (max-width: 899px) {
+  .view-head h1 { font-size: 28px; }
+  .view-head { flex-wrap: wrap; row-gap: 6px; }
+  .view-head > h1 { flex: 1 0 100%; }
+  .view-head > .head-menu { position: absolute; top: calc(env(safe-area-inset-top) + 14px); right: 64px; margin: 0; }
+  .view-head > .head-menu > summary { height: 40px; min-width: 40px; border-radius: 50%; display: grid; place-items: center; padding: 0; }
+}
+/* Laptops: capture at the top of the sidebar instead of a floating button over the list */
+.nav-capture { display: none; }
+@media (min-width: 900px) {
+  .fab { display: none; }
+  .tabs .nav-capture { display: flex !important; align-items: center; gap: 8px; width: 100%; margin-bottom: 8px; padding: 8px 12px; border: none; border-radius: 10px;
+    background: var(--accent); color: #fff; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .nav-capture kbd { margin-left: auto; font: inherit; font-size: 11px; opacity: .75; border: 1px solid rgba(255,255,255,.4); border-radius: 4px; padding: 0 5px; }
+}
+/* Row meta icons: small, monochrome */
+.row-meta .mi { font-style: normal; font-size: .85em; filter: grayscale(1); opacity: .6; }
+/* Laptops: the flag button shows on hover or when set; phones keep it for one-tap flagging */
+@media (hover: hover) and (min-width: 900px) {
+  .row .flag-btn:not(.on) { opacity: 0; transition: opacity .12s; }
+  .row:hover .flag-btn, .row.selected .flag-btn, .row .flag-btn:focus-visible { opacity: 1; }
+}
+.set-index { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.set-index .chip { cursor: pointer; border: 1px solid var(--line); font: inherit; font-size: 13px; }
+h2.section-title { scroll-margin-top: 16px; }
+.fc-notes .fc-banner { gap: 4px; white-space: pre-wrap; }
+.fc-notes .fc-now { color: var(--accent); font-weight: 600; }

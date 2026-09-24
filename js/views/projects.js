@@ -29,6 +29,9 @@ export function viewProjects() {
   return html + templatesSectionHtml();
 }
 
+// The ⋯ menu for a page's less-used actions (closes on any choice; see main.js).
+export const headMenu = (items) => `<details class="head-menu"><summary class="btn small" aria-label="More actions" title="More actions">⋯</summary><div class="menu">${items.filter(Boolean).join('')}</div></details>`;
+
 // Support material filed in Reference for this project.
 function referenceBox(p) {
   const refs = referencesFor(p.id);
@@ -48,18 +51,25 @@ export function viewProject(id) {
   const ordered = entries.map((e) => e.t);
   const folder = p.folder_id && byId(db.folders, p.folder_id);
   return `<a class="back" href="#projects">‹ Projects${folder ? ` / 📁 ${esc(folder.name)}` : ''}</a>
-    <div class="view-head"><h1>${esc(p.name)}</h1><span class="head-actions"><button class="btn small" data-focus-here="${p.id}" title="Focus on this project" aria-label="Focus on this project">🎯</button><a class="btn small" href="#plan/${p.id}" title="Plan it: purpose, outcome, brainstorm, organize, next actions">🧭 Plan it</a><button class="btn small" data-save-template="${p.id}" title="Save as template" aria-label="Save as template">📋</button><button class="btn small" data-edit-project="${p.id}">Edit</button></span></div>
+    <div class="view-head"><h1>${esc(p.name)}</h1>${headMenu([
+      `<a href="#plan/${p.id}">Plan it <span class="hint">purpose, outcome, next actions</span></a>`,
+      `<button type="button" data-edit-project="${p.id}">Edit project</button>`,
+      `<button type="button" data-flag-project="${p.id}" class="flag-btn ${p.flagged ? 'on' : ''}" aria-pressed="${!!p.flagged}">${p.flagged ? 'Unflag' : 'Flag'}</button>`,
+      ordered.filter((t) => !t.completed_at).length > 1 ? `<button type="button" data-act="toggle-reorder">${app.reorder === p.id ? 'Done reordering' : 'Reorder actions'}</button>` : '',
+      `<button type="button" data-focus-here="${p.id}">Focus on this project</button>`,
+      `<button type="button" data-save-template="${p.id}">Save as template</button>`,
+    ])}</div>
     ${p.template_id && byId(db.templates || [], p.template_id) ? `<p class="view-sub from-template">From the template <a href="#template/${p.template_id}">${esc(byId(db.templates, p.template_id).name)}</a></p>` : ''}
     ${outcomeLine(p)}
     ${whyBox(p)}
     ${p.area_id || p.goal_id ? `<p class="view-sub hz-chips">${p.area_id && byId(db.areas || [], p.area_id) ? `<a class="chip" href="#area/${p.area_id}">⛰ ${esc(byId(db.areas, p.area_id).name)}</a>` : ''}${p.goal_id && byId(db.goals || [], p.goal_id) ? `<a class="chip" href="#goal/${p.goal_id}">🎯 ${esc(byId(db.goals, p.goal_id).title)}</a>` : ''}</p>` : ''}
     ${p.notes ? `<p class="view-sub" style="white-space:pre-wrap">${esc(p.notes)}</p>` : ''}
-    <p class="view-sub project-props"><select data-project-status="${p.id}" aria-label="Project status" style="width:auto;padding:6px 10px">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <p class="view-sub project-props"><select class="status-chip" data-project-status="${p.id}" aria-label="Project status">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <span class="chip" title="${esc(PROJECT_KINDS.find(([v]) => v === p.kind)[2])}">${PROJECT_KINDS.find(([v]) => v === p.kind)[1]}</span>
       ${p.complete_with_last ? '<span class="chip" title="Completes when its last action is done">Auto-complete</span>' : ''}
-      <button class="flag-btn ${p.flagged ? 'on' : ''}" data-flag-project="${p.id}" aria-pressed="${!!p.flagged}" title="${p.flagged ? 'Unflag project' : 'Flag project'}">⚑</button>
-      ${projectTagsFor(p.id).map((tg) => `<a class="chip" href="#tag/${tg.id}">🏷️ ${esc(tagLabel(tg))}</a>`).join('')}
-      ${ordered.filter((t) => !t.completed_at).length > 1 ? `<button class="btn small" data-act="toggle-reorder">${app.reorder === p.id ? 'Done reordering' : 'Reorder'}</button>` : ''}</p>
+      ${p.flagged ? '<span class="chip flagged-chip" title="Flagged">⚑ Flagged</span>' : ''}
+      ${projectTagsFor(p.id).map((tg) => `<a class="chip" href="#tag/${tg.id}">${esc(tagLabel(tg))}</a>`).join('')}
+      ${app.reorder === p.id ? '<button class="btn small primary" data-act="toggle-reorder">Done reordering</button>' : ''}</p>
     ${referenceBox(p)}
     ${filterBar()}${filterNote(local)}
     <form class="capture" data-capture data-project="${p.id}"><input type="text" name="title" placeholder="Add an action to ${esc(p.name)}…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>

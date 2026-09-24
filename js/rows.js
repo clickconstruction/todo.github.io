@@ -10,12 +10,15 @@ import { app } from './state.js';
 import { waitingPerson, agendaPerson, followUpDue, ENERGY_ICON, returnedFromTickler, isTickled } from './gtd.js';
 import { progress, nextStep, ancestors, rootOf, depthOf, heightOf, MAX_DEPTH } from './tree.js';
 
+// Meta icons are small and monochrome: the words carry the meaning, the icon only helps scanning.
+const ic = (e, sp = ' ') => `<i class="mi" aria-hidden="true">${e}</i>${sp}`;
+
 export function taskRow(t, { showProject = true, markNext = null, reorder = false, hierarchy = false, hasGroups = false, showPlace = true, depth = 0, extra = '' } = {}) {
   const done = !!t.completed_at;
   const project = t.project_id && byId(db.projects, t.project_id);
   const tags = tagsFor(t.id);
   const meta = [];
-  if (showProject && project) meta.push(`<span>🗂️ ${esc(project.name)}</span>`);
+  if (showProject && project) meta.push(`<span>${ic('🗂️')}${esc(project.name)}</span>`);
   // A step shown outside its tree (Flagged, Forecast, Nearby, search…) keeps its context.
   if (!hierarchy && t.parent_id) {
     const up = ancestors(t);
@@ -24,30 +27,30 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   tags.forEach((tag) => meta.push(tagStatus(tag) === 'on_hold' ? `<span class="chip hold" title="On hold: not available">⏸ ${esc(tagLabel(tag))}</span>` : `<span class="chip">${esc(tagLabel(tag))}</span>`));
   if (isOpen(t)) {
     const wp = (t.waiting_on || (db.people || []).some((p) => p.tag_id)) && waitingPerson(t);
-    if (wp && !t.agenda_for) meta.push(`<span class="meta-wait ${followUpDue(t) ? 'late' : ''}" title="Waiting on ${esc(wp.name)}">⏳ ${esc(wp.name)}${t.follow_up_at ? ` · follow up ${esc(fmtDate(t.follow_up_at))}` : ''}</span>`);
+    if (wp && !t.agenda_for) meta.push(`<span class="meta-wait ${followUpDue(t) ? 'late' : ''}" title="Waiting on ${esc(wp.name)}">${ic('⏳')}${esc(wp.name)}${t.follow_up_at ? ` · follow up ${esc(fmtDate(t.follow_up_at))}` : ''}</span>`);
     const ap = t.agenda_for && agendaPerson(t);
-    if (ap) meta.push(`<span class="meta-agenda" title="To discuss with ${esc(ap.name)}">🗣 ${esc(ap.name)}</span>`);
-    if (t.tickler && isTickled(t)) meta.push(`<span class="meta-tickler" title="In the tickler">📆 ${esc(fmtDate(t.defer_at))}</span>`);
-    else if (returnedFromTickler(t)) meta.push('<span class="meta-tickler">📆 from the tickler</span>');
+    if (ap) meta.push(`<span class="meta-agenda" title="To discuss with ${esc(ap.name)}">${ic('🗣')}${esc(ap.name)}</span>`);
+    if (t.tickler && isTickled(t)) meta.push(`<span class="meta-tickler" title="In the tickler">${ic('📆')}${esc(fmtDate(t.defer_at))}</span>`);
+    else if (returnedFromTickler(t)) meta.push(`<span class="meta-tickler">${ic('📆')}from the tickler</span>`);
   }
-  if (t.defer_at && isDeferred(t) && !t.tickler) meta.push(`<span>⏸ ${esc(fmtDate(t.defer_at))}</span>`);
-  if (t.planned_at && isOpen(t)) meta.push(`<span class="meta-planned ${isPlannedPast(t) ? 'past' : ''}" title="Planned">🗓 ${esc(fmtDate(t.planned_at))}</span>`);
-  if (t.due_at) meta.push(`<span class="meta-due ${isOverdue(t) ? 'overdue' : ''}">📅 ${esc(fmtDate(t.due_at))}</span>`);
+  if (t.defer_at && isDeferred(t) && !t.tickler) meta.push(`<span>${ic('⏸')}${esc(fmtDate(t.defer_at))}</span>`);
+  if (t.planned_at && isOpen(t)) meta.push(`<span class="meta-planned ${isPlannedPast(t) ? 'past' : ''}" title="Planned">${ic('🗓')}${esc(fmtDate(t.planned_at))}</span>`);
+  if (t.due_at) meta.push(`<span class="meta-due ${isOverdue(t) ? 'overdue' : ''}">${ic('📅')}${esc(fmtDate(t.due_at))}</span>`);
   const loc = showPlace && isOpen(t) && placeFor(t);
   if (loc) {
     const d = app.here ? fmtDistance(distanceM(app.here, loc.place)) : '';
-    meta.push(`<span class="meta-place ${isInside(loc) ? 'here' : ''}" title="${esc(loc.via ? `${loc.place.name} (via ${loc.via.kind} ${loc.via.label})` : loc.place.name)}">📍 ${esc(loc.place.name)}${d ? ` · ${d}` : ''}</span>`);
+    meta.push(`<span class="meta-place ${isInside(loc) ? 'here' : ''}" title="${esc(loc.via ? `${loc.place.name} (via ${loc.via.kind} ${loc.via.label})` : loc.place.name)}">${ic('📍')}${esc(loc.place.name)}${d ? ` · ${d}` : ''}</span>`);
   }
   const bells = isOpen(t) ? db.notifications.filter((n) => n.task_id === t.id && !n.sent_at).length : 0;
   const clips = db.attachments.filter((a) => a.task_id === t.id && !a.archived_at).length;
-  if (clips) meta.push(`<span class="meta-clip" title="${clips} attachment${clips === 1 ? '' : 's'}">📎${clips > 1 ? clips : ''}</span>`);
-  if (bells) meta.push(`<span class="meta-bell" title="${bells} notification${bells === 1 ? '' : 's'}">🔔</span>`);
-  if (t.repeat_rule && isOpen(t)) meta.push(`<span class="meta-repeat" title="${esc(describe(t.repeat_rule))}">🔁</span>`);
-  if (t.scheduled_at && isOpen(t)) { const d = new Date(t.scheduled_at); const today = new Date().toDateString() === d.toDateString(); meta.push(`<span class="meta-sched" title="Scheduled">⏰ ${esc(today ? '' : `${d.toLocaleDateString(undefined, { weekday: 'short' })} `)}${esc(d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))}</span>`); }
+  if (clips) meta.push(`<span class="meta-clip" title="${clips} attachment${clips === 1 ? '' : 's'}">${ic('📎', '')}${clips > 1 ? clips : ''}</span>`);
+  if (bells) meta.push(`<span class="meta-bell" title="${bells} notification${bells === 1 ? '' : 's'}">${ic('🔔', '')}</span>`);
+  if (t.repeat_rule && isOpen(t)) meta.push(`<span class="meta-repeat" title="${esc(describe(t.repeat_rule))}">${ic('🔁', '')}</span>`);
+  if (t.scheduled_at && isOpen(t)) { const d = new Date(t.scheduled_at); const today = new Date().toDateString() === d.toDateString(); meta.push(`<span class="meta-sched" title="Scheduled">${ic('⏰')}${esc(today ? '' : `${d.toLocaleDateString(undefined, { weekday: 'short' })} `)}${esc(d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))}</span>`); }
   const ck = t.checklist_id && isOpen(t) && (db.checklists || []).find((c) => c.id === t.checklist_id);
-  if (ck) { const r = (db.checklistRuns || []).find((x) => x.checklist_id === ck.id && x.task_id === t.id && !x.finished_at); meta.push(`<span class="meta-ck" title="Checklist: ${esc(ck.name)}">☑ ${r ? (r.ticked || []).length : 0}/${ck.items.length}</span>`); }
+  if (ck) { const r = (db.checklistRuns || []).find((x) => x.checklist_id === ck.id && x.task_id === t.id && !x.finished_at); meta.push(`<span class="meta-ck" title="Checklist: ${esc(ck.name)}">${ic('☑')}${r ? (r.ticked || []).length : 0}/${ck.items.length}</span>`); }
   if (t.energy && isOpen(t)) meta.push(`<span class="meta-energy" title="${esc(t.energy)} energy">${ENERGY_ICON[t.energy] || ''}</span>`);
-  if (t.estimate_minutes) meta.push(`<span class="meta-estimate" title="Estimate">⏱ ${fmtMinutes(t.estimate_minutes)}</span>`);
+  if (t.estimate_minutes) meta.push(`<span class="meta-estimate" title="Estimate">${ic('⏱')}${fmtMinutes(t.estimate_minutes)}</span>`);
   if (t.dropped_at && !t.completed_at) meta.push('<span class="chip">Dropped</span>');
   // "Next": the project's next action, or the step you're on inside a do-in-order task.
   const parentTask = t.parent_id && byId(db.tasks, t.parent_id);

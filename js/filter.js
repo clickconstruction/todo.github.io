@@ -1,7 +1,7 @@
 // View filter (the "eye"): which actions a list shows, remembered per viewer.
 //   show: available (can do now) | remaining (all open) | all (open, completed, dropped)
 //   fits: 0 (any) or a number of minutes; only actions estimated at or under it
-import { sb, app, run, isOpen, visible, onHoldTagFor } from './state.js';
+import { sb, app, run, isOpen, visible, onHoldTagFor, esc } from './state.js';
 import { isAvailable } from './availability.js';
 import { byDistance } from './places.js';
 
@@ -23,14 +23,28 @@ const ENERGIES = [['', 'Any energy'], ['low', '🔋 Low energy'], ['medium', '�
 const LEVEL = { low: 1, medium: 2, high: 3 };
 const FITS = [[0, 'Any time'], [5, '≤ 5 min'], [15, '≤ 15 min'], [30, '≤ 30 min'], [60, '≤ 1 hour']];
 
-export const filterBar = (extra = '') => `<div class="filter-bar" role="group" aria-label="View filter">
+// One "View" control: closed, it names only what differs from the default (Available · ≤ 15 min);
+// open, the selects and Save view. Open/closed is kept across re-renders.
+let viewOpen = false;
+document.addEventListener('toggle', (e) => { if (e.target.matches && e.target.matches('details.filter-bar')) viewOpen = e.target.open; }, true);
+const label = (list, v) => (list.find(([x]) => String(x) === String(v)) || [0, ''])[1];
+export function filterSummary() {
+  return [filter.show !== DEFAULT.show && label(SHOW, filter.show), Number(filter.fits) && label(FITS, filter.fits), filter.energy && label(ENERGIES, filter.energy).replace(/^\S+\s/, ''),
+    filter.sort === 'distance' && app.here && 'Nearest first'].filter(Boolean).join(' · ');
+}
+export const filterBar = (extra = '') => {
+  const sum = filterSummary();
+  return `<details class="filter-bar ${sum ? 'on' : ''}" ${viewOpen ? 'open' : ''}><summary><span class="fv-btn"><span aria-hidden="true">☰</span> View</span><span class="fv-sum">${sum ? esc(sum) : 'All open'}</span></summary>
+  <div class="fv-body" role="group" aria-label="View filter">
   <label><span aria-hidden="true">👁</span><select data-filter="show" aria-label="Show">${SHOW.map(([v, l]) => `<option value="${v}" ${filter.show === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   <label><span aria-hidden="true">⏱</span><select data-filter="fits" aria-label="Fits in">${FITS.map(([v, l]) => `<option value="${v}" ${Number(filter.fits) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   <label><span aria-hidden="true">⚡</span><select data-filter="energy" aria-label="Energy">${ENERGIES.map(([v, l]) => `<option value="${v}" ${(filter.energy || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   ${extra}
   ${app.here ? `<label><span aria-hidden="true">↕</span><select data-filter="sort" aria-label="Sort">${SORTS.map(([v, l]) => `<option value="${v}" ${filter.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
-  <button type="button" class="btn small save-persp" data-act="save-perspective" title="Save this view as a perspective">🔭 Save view</button>
-</div>`;
+  ${sum ? '<button type="button" class="link-btn" data-act="reset-filter">Reset</button>' : ''}
+  <button type="button" class="btn small save-persp" data-act="save-perspective" title="Save this view as a perspective">Save as perspective</button>
+  </div></details>`;
+};
 
 // "Nearest first" (needs a location fix); otherwise the list's own order.
 export const sortTasks = (tasks, fallback) => (filter.sort === 'distance' && app.here ? byDistance(tasks, fallback) : [...tasks].sort(fallback));

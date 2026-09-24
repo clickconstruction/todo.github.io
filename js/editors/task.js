@@ -87,7 +87,7 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
 }
 
 const secondaryButtons = (task) => `
-  ${task && isOpen(task) ? '<button type="button" class="btn danger" data-drop>Drop</button><button type="button" class="btn" data-tickle-task title="Out of sight until a day, then back in the Inbox">📆 Tickle…</button>' : ''}
+  ${task && isOpen(task) ? '<button type="button" class="btn danger" data-drop>Drop</button><button type="button" class="btn" data-tickle-task title="Out of sight until a day, then back in the Inbox">Tickle…</button>' : ''}
 `;
 
 // Wire behaviour shared by sheet and panel; returns collect() → { fields, tagIds } or null.

@@ -124,7 +124,7 @@ function appliedHtml(p, pl) {
   return `<a class="back" href="#project/${p.id}">‹ ${esc(p.name)}</a>
     <div class="cl-done"><div class="cl-big">🧭</div><h2>Planned</h2>
       <p>Created ${(a.task_ids || []).length} action${(a.task_ids || []).length === 1 ? '' : 's'}${(a.reference_ids || []).length ? ` and ${a.reference_ids.length} reference item${a.reference_ids.length === 1 ? '' : 's'}` : ''} on ${esc(fmtDate(a.at))}.</p>
-      <p><a class="btn primary" href="#project/${p.id}">Open the project</a> <button class="btn" data-save-template="${p.id}">📋 Save as template</button></p>
+      <p><a class="btn primary" href="#project/${p.id}">Open the project</a> <button class="btn" data-save-template="${p.id}">Save as template</button></p>
       <p><button class="btn small" data-plan="undo">↶ Undo the plan</button> <button class="btn small" data-plan="fresh">Plan more</button></p></div>`;
 }
 

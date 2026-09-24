@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -56,6 +56,53 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Visual pass: room for the list, one View control, ⋯ menus, chip nudges, sidebar capture, fixes.
+async function visualPass(check) {
+  const { app } = await import('/js/state.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  // The inspector only takes room when it has something to show.
+  window.__forceWide = true; window.__forceSheet = false;
+  await go('#forecast'); await go('#inbox');
+  check('nothing selected: no empty panel, the list gets the width', $('#inspector').hidden && !document.body.classList.contains('has-inspector'));
+  (await import('/js/inspector.js')).select('task', 't10'); await until(() => !$('#inspector').hidden);
+  check('select an action: the panel opens with it', !$('#inspector').hidden && document.body.classList.contains('has-inspector') && !!$('#inspector form'));
+  (await import('/js/inspector.js')).clearSelection(); await wait(50);
+  check('Esc/clear: the panel goes away again', $('#inspector').hidden);
+  window.__forceWide = false; window.__forceSheet = true;
+  // One View control.
+  await go('#project/p1');
+  check('View control: closed, “All open” when nothing is filtered', $('details.filter-bar') && !$('details.filter-bar').open && has('details.filter-bar .fv-sum', 'all open'));
+  const sel = $('[data-filter="fits"]'); sel.value = '15'; sel.dispatchEvent(new Event('change', { bubbles: true })); await wait(150);
+  check('a filter shows in the summary, highlighted, with Reset', has('details.filter-bar .fv-sum', '≤ 15 min') && $('details.filter-bar').classList.contains('on') && !!$('[data-act="reset-filter"]'));
+  $('[data-act="reset-filter"]').click(); await wait(150);
+  check('Reset puts everything back', has('details.filter-bar .fv-sum', 'all open') && !$('details.filter-bar').classList.contains('on'));
+  // Project header: status chip row and the ⋯ menu.
+  check('project: status, type and tags in one row; the rest in ⋯', !!$('select.status-chip') && has('.project-props', 'parallel') && !!$('.view-head details.head-menu'));
+  $('.head-menu > summary').click(); await wait(50);
+  check('⋯ holds Plan it, Edit, Flag, Reorder, Focus, Save as template', $('.head-menu').open && has('.head-menu .menu', 'plan it', 'edit project', 'flag', 'reorder actions', 'focus on this project', 'save as template'));
+  $('.head-menu .menu [data-flag-project="p1"]').click(); await until(() => T().projects.find((x) => x.id === 'p1').flagged);
+  check('a choice runs and the menu closes', T().projects.find((x) => x.id === 'p1').flagged && !$$('details.head-menu[open]').length);
+  await wait(150);
+  check('flagged shows as a chip', has('.project-props', 'flagged'));
+  // Forecast: one row of chips, What now? among them.
+  await go('#forecast');
+  check('Forecast nudges share one chip row (What now? last)', !!$('.fc-notes') && $$('.fc-notes .fc-banner').pop().getAttribute('href') === '#now' && !$('.view-head a[href="#now"]'));
+  // Sidebar capture on laptops; Daily review highlights itself.
+  check('laptops: Capture at the top of the sidebar', !!$('#nav-capture') && has('#nav-capture', 'capture'));
+  $('#nav-capture').click(); await wait(80);
+  check('it opens quick entry', $('#sheet').open && !!$('#quick')); $('#sheet').close();
+  await go('#daily');
+  check('Daily review lights up its own sidebar row', $('[data-nav="daily"]').classList.contains('active') && !$('[data-nav="forecast"]').classList.contains('active'));
+  // Titles are neutral; row icons are monochrome.
+  await go('#flagged');
+  check('titles are one colour', getComputedStyle($('.view-head h1')).color === getComputedStyle(document.body).color || getComputedStyle($('.view-head h1')).color === getComputedStyle($('.row-title') || document.body).color);
+  check('row meta icons are small monochrome glyphs', !!$('.row-meta .mi') && getComputedStyle($('.row-meta .mi')).filter.includes('grayscale'));
+  // Settings index.
+  await go('#settings');
+  check('Settings has a section index', $$('.set-index [data-scroll-to]').length >= 8 && has('.set-index', 'agents', 'calendars', 'account'));
+  app.render();
+}
 
 // Sidebar: GTD groups, collapsible with a summary, customize (hide, order, pin), grouped More sheet.
 async function sidebar(check) {
