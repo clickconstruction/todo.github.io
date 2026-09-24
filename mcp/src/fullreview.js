@@ -11,7 +11,10 @@ export function fullReviewTools({ OPEN, localDate, tool }) {
     if (!s) throw new Error(sid ? 'No such review session.' : 'No review in progress. Start one with action "start".');
     return s;
   };
-  const items = (api, sid) => api.q(`review_items?${api.u}&session_id=eq.${sid}&status=neq.void&order=sort.asc&select=*`);
+  // The queue without the heavy group lists (a group can hold thousands of ids); the current card in full.
+  // Cloudflare allows 50 outgoing requests per call, so every read here is one query.
+  const items = (api, sid) => api.q(`review_items?${api.u}&session_id=eq.${sid}&status=neq.void&order=sort.asc&select=id,sort,status,kind,task_id,priority,reviewed_at,label:grp->>label`);
+  const itemFull = async (api, id) => (id ? (await api.q(`review_items?${api.u}&id=eq.${id}&select=*`))[0] || null : null);
 
   async function cardOut(api, it) {
     if (!it) return null;
@@ -24,26 +27,32 @@ export function fullReviewTools({ OPEN, localDate, tool }) {
         decisions: 'accept (apply the proposal) | one_by_one (expand into single cards) | keep_all | skip' };
     }
     const [raw] = await api.q(`tasks?${api.u}&id=eq.${it.task_id}&select=*`);
-    const [t] = raw ? await api.shape([raw]) : [];
-    const p = raw && raw.project_id ? (await api.q(`projects?${api.u}&id=eq.${raw.project_id}&select=id,name,flagged,purpose`))[0] : null;
-    const ageDays = raw && raw.created_at ? Math.floor((Date.now() - Date.parse(raw.created_at)) / 86400000) : null; // since it was added
-    return { ...base, priority: it.priority || undefined, why_first: it.priority && raw ? priorityReason(raw, p) : undefined,
-      task: t ? { ...t, notes: t.notes ? String(t.notes).slice(0, 2000) : undefined, age_days: ageDays, project_gain: p && p.purpose ? p.purpose : undefined } : null,
+    if (!raw) return { ...base, task: null };
+    const [links, projects] = await Promise.all([
+      api.q(`task_tags?${api.u}&task_id=eq.${raw.id}&select=tag_id`),
+      raw.project_id ? api.q(`projects?${api.u}&id=eq.${raw.project_id}&select=id,name,flagged,purpose`) : [],
+    ]);
+    const tags = links.length ? await api.q(`tags?${api.u}&id=in.(${links.map((l) => `"${l.tag_id}"`).join(',')})&select=name`) : [];
+    const p = projects[0] || null;
+    const day = (iso) => (iso ? localDate(iso, api.tz) : undefined);
+    return { ...base, priority: it.priority || undefined, why_first: it.priority ? priorityReason(raw, p) || undefined : undefined,
+      task: { id: raw.id, title: raw.title, notes: raw.notes ? String(raw.notes).slice(0, 2000) : undefined, project: p ? p.name : undefined, project_gain: p && p.purpose ? p.purpose : undefined,
+        tags: tags.map((g) => g.name), gain: raw.gain || undefined, gain_suggested: raw.gain_by === 'agent' || undefined, flagged: raw.flagged || undefined,
+        due: day(raw.due_at), planned: day(raw.planned_at), defer: day(raw.defer_at), in_inbox: raw.in_inbox || undefined, repeating: raw.repeat_rule ? true : undefined,
+        added: day(raw.created_at), age_days: raw.created_at ? Math.floor((Date.now() - Date.parse(raw.created_at)) / 86400000) : undefined },
       decisions: 'keep | someday | done | drop | skip' };
   }
   async function stateOut(api, s, list) {
     const live = list.filter((x) => x.status !== 'void');
     const cur = live.find((x) => x.id === s.current_item);
     const after = cur ? live.filter((x) => x.status === 'pending' && x.sort > cur.sort).slice(0, 3) : [];
-    const upcoming = [];
-    for (const x of after) {
-      if (x.kind === 'group') upcoming.push(`group: ${(x.grp || {}).label} (${((x.grp || {}).task_ids || []).length})`);
-      else { const [r] = await api.q(`tasks?${api.u}&id=eq.${x.task_id}&select=title`); if (r) upcoming.push(r.title); }
-    }
+    const singles = after.filter((x) => x.kind === 'task');
+    const titles = singles.length ? await api.q(`tasks?${api.u}&id=in.(${singles.map((x) => `"${x.task_id}"`).join(',')})&select=id,title`) : [];
+    const upcoming = after.map((x) => (x.kind === 'group' ? `group: ${x.label || 'similar actions'}` : (titles.find((r) => r.id === x.task_id) || {}).title)).filter(Boolean);
     return {
       session_id: s.id, title: s.title, status: s.status, app_link: `https://todotooling.com/#full/${s.id}`,
       progress: { position: cur ? live.filter((x) => x.sort <= cur.sort).length : live.length, total: live.length, reviewed: live.filter((x) => x.status === 'reviewed').length, skipped: live.filter((x) => x.status === 'skipped').length },
-      current: await cardOut(api, cur), upcoming,
+      current: await cardOut(api, cur ? await itemFull(api, cur.id) : null), upcoming,
     };
   }
 
@@ -85,9 +94,13 @@ actions:
         const scope = a.import_id ? { import_id: a.import_id } : a.project ? { project_id: await api.resolveProject(a.project) } : a.all ? { all: true } : null;
         if (!scope) throw new Error('start needs import_id, project or all: true');
         if (a.min_age_days) scope.min_age_days = a.min_age_days;
-        const [tasks, projects, tags, taskTags] = await Promise.all([
-          api.q(`tasks?${api.u}&${OPEN}&select=*`), api.q(`projects?${api.u}&select=*`), api.q(`tags?${api.u}&select=*`), api.q(`task_tags?${api.u}&select=task_id,tag_id`),
+        const [tasks, projects, tags] = await Promise.all([
+          api.q(`tasks?${api.u}&${OPEN}&select=id,title,notes,project_id,parent_id,import_id,flagged,due_at,planned_at,gain,in_inbox,created_at,updated_at,completed_at,dropped_at`),
+          api.q(`projects?${api.u}&select=id,name,flagged,status`), api.q(`tags?${api.u}&select=id,name,parent_id`),
         ]);
+        // Only the Someday links matter here (already-parked actions aren't reviewed): one query, not thousands of rows.
+        const someday = tags.filter((g) => !g.parent_id && /^someday/i.test(g.name)).map((g) => g.id);
+        const taskTags = someday.length ? await api.q(`task_tags?${api.u}&tag_id=in.(${someday.map((x) => `"${x}"`).join(',')})&select=task_id,tag_id`) : [];
         const queue = buildQueue({ tasks, projects, tags, taskTags, scope });
         if (!queue.length) throw new Error('Nothing to review there: every open action is already sorted.');
         const [s] = await api.q('review_sessions', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, title: a.title || 'Full Review', scope, agent_seen_at: new Date().toISOString() } });
@@ -102,7 +115,7 @@ actions:
       }
       const s = await findSession(api, a.session_id);
       let list = await items(api, s.id);
-      const cur = list.find((x) => x.id === s.current_item);
+      const cur = await itemFull(api, (list.find((x) => x.id === s.current_item) || {}).id);
       if (action === 'status') { await touch(api, s.id); return stateOut(api, s, list); }
       if (action === 'annotate') {
         if (!cur) throw new Error('No current card.');
@@ -161,12 +174,14 @@ actions:
         if (!ids.length) throw new Error('task_ids is required');
         const base = cur ? cur.sort : 0;
         let k = 0;
+        let groups = null;
         for (const tid of ids) {
           k += 1;
           const sort = base + (k / (ids.length + 1)) * 0.5; // right after the current card
           const single = list.find((x) => x.kind === 'task' && x.task_id === tid && x.status === 'pending');
           if (single) { await api.q(`review_items?${api.u}&id=eq.${single.id}`, { method: 'PATCH', body: { sort, priority: true } }); continue; }
-          const grp = list.find((x) => x.kind === 'group' && x.status === 'pending' && ((x.grp || {}).task_ids || []).includes(tid));
+          if (!groups) groups = await api.q(`review_items?${api.u}&session_id=eq.${s.id}&kind=eq.group&status=eq.pending&select=id,sort,grp`);
+          const grp = groups.find((x) => ((x.grp || {}).task_ids || []).includes(tid));
           if (grp) {
             grp.grp = { ...grp.grp, task_ids: grp.grp.task_ids.filter((x) => x !== tid) };
             await api.q(`review_items?${api.u}&id=eq.${grp.id}`, { method: 'PATCH', body: { grp: grp.grp } });
