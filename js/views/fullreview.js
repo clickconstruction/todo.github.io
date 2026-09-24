@@ -16,7 +16,7 @@ export const GUIDE = [
   ['someday', 'Someday', 'You might want it one day, but you’re not committing now.'],
   ['done', 'Done', 'It already happened, or you did it and never ticked it off.'],
   ['drop', 'Drop', 'You no longer care about it, or it’s out of date. Nothing is deleted.'],
-  ['reading', 'Reading list', 'Something someone else made that you haven’t read, watched or listened to yet.'],
+  ['reading', 'Reading & watching', 'Something someone else made that you haven’t read, watched or listened to yet.'],
   ['slipbox', 'Slipbox', 'An idea that’s already in your head, which you could write in a sentence or two in your own words.'],
   ['skip', 'Skip', 'Not sure yet. It comes back at the end.'],
 ];
@@ -155,7 +155,7 @@ const mark = (it, field, html) => (fresh(it, field) ? `<span class="fr-new">${ht
 const added = (t) => { const ms = Date.parse(t.created_at || 0) || 0; if (!ms) return ''; const d = Math.floor((Date.now() - ms) / 86400000); return d >= 730 ? `added ${Math.round(d / 365)} years ago` : d >= 60 ? `added ${Math.round(d / 30)} months ago` : d >= 1 ? `added ${d} day${d === 1 ? '' : 's'} ago` : 'added today'; };
 
 // Claude's suggestion, waiting for your Submit: every change spelled out, the old value struck through.
-const DECISION_LABEL = { keep: 'Keep', someday: 'Someday', done: 'Done', drop: 'Drop', skip: 'Skip', reading: '→ Reading list', slipbox: '→ Slipbox', accept: 'Accept', one_by_one: 'One by one', keep_all: 'Keep all' };
+const DECISION_LABEL = { keep: 'Keep', someday: 'Someday', done: 'Done', drop: 'Drop', skip: 'Skip', reading: '→ Reading & watching', slipbox: '→ Slipbox', accept: 'Accept', one_by_one: 'One by one', keep_all: 'Keep all' };
 const pending = (it) => it.suggestion && !it.suggestion.applied_at && it.status === 'pending' ? it.suggestion : null;
 const when = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : 'no date');
 const ago = (iso) => { const m = Math.round((Date.now() - Date.parse(iso || 0)) / 60000); return !iso ? '' : m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
@@ -206,7 +206,7 @@ function taskCard(it) {
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
     ${suggestionBar(it, t)}
     <div class="fr-btns ${pending(it) ? 'fr-btns-quiet' : ''}">${[['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
-    <div class="fr-btns2 ${pending(it) ? 'fr-btns-quiet' : ''}"><button class="btn small" data-fr="decide" data-decision="reading" title="Something to read, watch or listen to: onto the reading list (up next)"><kbd>5</kbd> → Reading list</button><button class="btn small" data-fr="decide" data-decision="slipbox" title="An idea to think with, not an action: a fleeting note in your slipbox"><kbd>6</kbd> → Slipbox</button></div>
+    <div class="fr-btns2 ${pending(it) ? 'fr-btns-quiet' : ''}"><button class="btn small" data-fr="decide" data-decision="reading" title="Something to read, watch or listen to: onto Reading &amp; watching (up next)"><kbd>5</kbd> → Reading &amp; watching</button><button class="btn small" data-fr="decide" data-decision="slipbox" title="An idea to think with, not an action: a fleeting note in your slipbox"><kbd>6</kbd> → Slipbox</button></div>
     <p class="hint fr-edit"><button class="link-btn" data-task="${t.id}">Edit details</button></p>
     ${guide()}
   </div>`;

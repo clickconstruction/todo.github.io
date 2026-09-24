@@ -1229,6 +1229,11 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const b4 = rpcCalls.length;
   const cs = await tool('clarify_item', { id: inb2.id, decision: 'slipbox', source: 'Ahrens' });
   assert(cs.decision === 'slipbox' && rpcCalls.slice(b4).some((c) => c.fn === 'slipbox_from_task' && c.body.source === 'Ahrens'), 'clarify_item slipbox');
+  db.projects.push({ id: 'pMov', user_id: UID, name: 'Documentaries to see', status: 'active', kind: 'parallel' });
+  const b5 = rpcCalls.length;
+  await tool('reading', { action: 'from_project', project: 'documentaries to see', type: 'video' });
+  await tool('reading', { action: 'undo', op_id: 'op1' });
+  assert(rpcCalls.slice(b5).some((c) => c.fn === 'reading_from_project' && c.body.project === 'pMov' && c.body.rtype === 'video' && c.body.flag === false && c.body.owner === UID) && rpcCalls.slice(b5).some((c) => c.fn === 'bulk_undo' && c.body.op_id === 'op1'), 'reading from_project (by name) and undo');
 }
 // ---------- matrix ----------
 {

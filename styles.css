@@ -1424,3 +1424,4 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
   .mx-pill { display: none; }
 }
 .tabs a.nav-absent, .sidebar a.nav-absent, a.nav-absent[data-nav] { display: none !important; }
+.rd-flag { color: var(--flag); }

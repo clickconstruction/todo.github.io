@@ -217,6 +217,17 @@ async function slipboxReading(check) {
   check('Weekly Review has “Process reading notes”', has(undefined, 'process reading notes') && !!$('a.wk-step[href="#weekly/notes"]'));
   await go('#weekly/notes');
   check('the step: fleeting notes waiting, notes to write, reading now', has(undefined, 'fleeting notes waiting', 'finished, notes to write', 'reading now'));
+  // Reading & watching: the name; flagged (priority) first in Up next with ⚑; not counted in Flagged.
+  const some2 = t.tags.find((g) => !g.parent_id && /^someday/i.test(g.name));
+  const P = (id, title, flagged, age) => { t.tasks.push({ ...t.tasks[0], id, title, notes: '', project_id: null, parent_id: null, in_inbox: false, flagged, due_at: null, defer_at: null, completed_at: null, dropped_at: null, reading_state: 'up_next', reading_type: 'book', reading_url: null, created_at: new Date(Date.now() - age * 86400000).toISOString(), updated_at: now }); t.task_tags.push({ task_id: id, tag_id: some2.id, user_id: 'u1' }); };
+  P('rdP1', 'Priority book: High Output Management', true, 900); P('rdP2', 'Newer unflagged book', false, 1);
+  await (await import('/js/data.js')).loadAll();
+  await go('#reading');
+  const rows = $$('.rd-row b').map((b) => b.textContent);
+  check('named Reading & watching, in the sidebar too', has('#view h1', 'reading & watching') && has('a[data-nav="reading"]', 'reading & watching'));
+  check('Up next: priority (flagged) first, marked ⚑, counted', rows.findIndex((x) => x.includes('High Output')) < rows.findIndex((x) => x.includes('Newer unflagged')) && rows.find((x) => x.includes('High Output')).includes('⚑') && has(undefined, '1 priority'));
+  const { isFlaggedTask } = await import('/js/views/basic.js');
+  check('flagged but waiting on the list: not in Flagged', !isFlaggedTask(db.tasks.find((x) => x.id === 'rdP1')));
 }
 
 // Full Review: one card at a time, Claude alongside (simulated here by writing what the MCP writes).

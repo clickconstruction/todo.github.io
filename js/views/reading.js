@@ -1,4 +1,5 @@
-// Reading list (#reading): books, articles, videos and podcasts, apart from your actions.
+// Reading & watching (#reading): books, articles, videos and podcasts, apart from your actions.
+// Up next sorts flagged (priority) first; flagged items waiting here stay out of Flagged.
 //   Now: what you're reading (the only reading items that are live actions)
 //   Up next: everything waiting (parked in Someday, so it stays out of your lists)
 //   Finished, notes to write: done, with its ideas still to go into the slipbox
@@ -23,7 +24,7 @@ export const notesToWrite = () => (R().done || []);
 const kind = (t) => t.reading_type || guessReadingType(t.title);
 const link = (t) => (t.reading_url ? ` <a class="hint rd-url" href="${esc(t.reading_url)}" target="_blank" rel="noopener">open ↗</a>` : '');
 const item = (t, btns) => `<div class="rd-row"><span class="rd-ico" aria-hidden="true">${READING_ICON[kind(t)] || '📎'}</span>
-  <span class="rd-main"><b>${esc(t.title)}</b><span class="hint">${esc((READING_TYPES.find(([k]) => k === kind(t)) || [0, 'Other'])[1])}${t.reading_state === 'reading' && t.updated_at ? ` · started ${esc(fmtDate(t.updated_at))}` : ''}${t.completed_at && t.reading_state === 'finished' ? ` · finished ${esc(fmtDate(t.completed_at))}` : ''}</span>${link(t)}</span>
+  <span class="rd-main"><b>${t.flagged ? '<span class="rd-flag" title="Priority">⚑</span> ' : ''}${esc(t.title)}</b><span class="hint">${esc((READING_TYPES.find(([k]) => k === kind(t)) || [0, 'Other'])[1])}${t.reading_state === 'reading' && t.updated_at ? ` · started ${esc(fmtDate(t.updated_at))}` : ''}${t.completed_at && t.reading_state === 'finished' ? ` · finished ${esc(fmtDate(t.completed_at))}` : ''}</span>${link(t)}</span>
   <span class="st-btns">${btns}</span></div>`;
 
 export function viewReading() {
@@ -31,8 +32,8 @@ export function viewReading() {
   ensureFinished();
   const q = r.type;
   const by = (list) => (q ? list.filter((t) => kind(t) === q) : list);
-  const now = by(readingNow()); const next = by(readingNext()).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))); const notes = by(notesToWrite());
-  return `<div class="view-head"><h1>Reading</h1></div>
+  const now = by(readingNow()); const next = by(readingNext()).sort((a, b) => (Number(!!b.flagged) - Number(!!a.flagged)) || String(b.created_at).localeCompare(String(a.created_at))); const notes = by(notesToWrite());
+  return `<div class="view-head"><h1>Reading &amp; watching</h1></div>
     <p class="view-sub">Books, articles, videos and podcasts. Only what you’re reading now counts as an action; the rest waits here.</p>
     <form class="capture rd-add" data-rd-new><input type="text" name="title" placeholder="A book, article, video or podcast…" autocomplete="off" enterkeyhint="done">
       <select name="type" aria-label="Type"><option value="">Type: guess</option>${READING_TYPES.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><button class="btn primary">Add</button></form>
@@ -41,7 +42,7 @@ export function viewReading() {
     ${now.length ? now.map((t) => item(t, `<button class="btn small primary" data-rd="finish" data-id="${t.id}">Finished</button><button class="btn small" data-rd="pause" data-id="${t.id}">Back to up next</button>`)).join('') : '<p class="hint">Nothing in progress. Start something from Up next.</p>'}
     <h2 class="section-title">Finished · notes to write · ${notes.length}</h2>
     ${notes.length ? notes.map((t) => item(t, `<button class="btn small primary" data-rd="take-notes" data-id="${t.id}">Take notes</button><button class="btn small" data-rd="notes-done" data-id="${t.id}">Notes done</button>`)).join('') : '<p class="hint">All caught up.</p>'}
-    <h2 class="section-title">Up next · ${next.length}</h2>
+    <h2 class="section-title">Up next · ${next.length}${next.some((t) => t.flagged) ? ` · ⚑ ${next.filter((t) => t.flagged).length} priority` : ''}</h2>
     ${next.length ? next.slice(0, 300).map((t) => item(t, `<button class="btn small" data-rd="start" data-id="${t.id}">Start</button><button class="btn small" data-rd="off" data-id="${t.id}" title="Take it off the reading list (it stays in Someday)">Remove</button>`)).join('') + (next.length > 300 ? `<p class="hint">+ ${next.length - 300} more</p>` : '') : '<p class="hint">Empty. In a Full Review, “→ Reading list” sends things here.</p>'}`;
 }
 
@@ -57,7 +58,7 @@ export async function notesFor(t) {
   location.hash = `#slipbox/${note.id}`;
 }
 // From anywhere (editor, Full Review): onto the reading list, up next.
-export async function toReadingList(id) { await setState(id, 'up_next'); app.render(); toast('On your reading list', { label: 'Open', run: () => { location.hash = '#reading'; } }); }
+export async function toReadingList(id) { await setState(id, 'up_next'); app.render(); toast('On Reading & watching', { label: 'Open', run: () => { location.hash = '#reading'; } }); }
 
 export async function readingAction(el) {
   const a = el.dataset.rd; const id = el.dataset.id;
@@ -65,7 +66,7 @@ export async function readingAction(el) {
   if (a === 'type-filter') { r.type = el.dataset.type; app.render(); return; }
   if (a === 'start') { await setState(id, 'reading'); app.render(); toast('Reading now'); return; }
   if (a === 'pause') { await setState(id, 'up_next'); app.render(); return; }
-  if (a === 'off') { await run(sb.rpc('reading_set', { task: id, state: 'off' })); await refreshTasks([id]); app.render(); toast('Off the reading list (still in Someday)'); return; }
+  if (a === 'off') { await run(sb.rpc('reading_set', { task: id, state: 'off' })); await refreshTasks([id]); app.render(); toast('Off Reading & watching (still in Someday)'); return; }
   if (a === 'finish') {
     await setState(id, 'finished');
     const t = byId(db.tasks, id);

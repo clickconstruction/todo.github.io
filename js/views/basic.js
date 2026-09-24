@@ -67,7 +67,8 @@ export function viewTag(id) {
 }
 
 // Flagged: flagged actions plus every action in a flagged project, grouped by project.
-export const isFlaggedTask = (t) => t.flagged || !!(t.project_id && (byId(db.projects, t.project_id) || {}).flagged);
+// Flagged items waiting on Reading & watching (up next) are priorities there, not here.
+export const isFlaggedTask = (t) => t.reading_state !== 'up_next' && (t.flagged || !!(t.project_id && (byId(db.projects, t.project_id) || {}).flagged));
 export const flaggedBadgeCount = () => db.tasks.filter((t) => isFlaggedTask(t) && isAvailable(t)).length;
 
 export function viewFlagged() {

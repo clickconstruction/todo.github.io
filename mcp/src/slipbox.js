@@ -55,11 +55,14 @@ actions: add {title, body?, source?, source_url?} · list {kind?: fleeting|perma
     },
   }, {
     name: 'reading',
-    description: `The user's reading list: books, articles, videos and podcasts, kept apart from their actions. up_next = waiting (parked in Someday, out of lists); reading = in progress (a live action); finished = done, with notes still to write until notes_done.
+    description: `The user's reading list, shown in the app as "Reading & watching": books, articles, videos and podcasts, kept apart from their actions. A book they'll listen to as an audiobook is still a book. up_next = waiting (parked in Someday, out of lists); reading = in progress (a live action); finished = done, with notes still to write until notes_done.
 actions: list · add {title, type?: book|article|video|podcast|other, url?} (up next) · move {task_id, state: up_next|reading|finished|off, type?} (off = no longer on the list) · notes_done {task_id} · take_notes {task_id, body?} (a fleeting slipbox note linked to it)
+ · from_project {project, type?, flag?} (a whole project, e.g. "Movies", onto the list: every open action up next, groups closed, the project completed, its Full Review cards removed; flag keeps them as priorities, first in Up next) · undo {op_id} (undo a from_project)
+Flagged items in Up next are the user's priorities there (not shown in Flagged).
 When the user finishes something, offer to take notes (their ideas, in their words) into the slipbox.`,
     inputSchema: { type: 'object', properties: {
-      action: { type: 'string', enum: ['list', 'add', 'move', 'notes_done', 'take_notes'], default: 'list' },
+      action: { type: 'string', enum: ['list', 'add', 'move', 'notes_done', 'take_notes', 'from_project', 'undo'], default: 'list' },
+      project: { type: 'string', description: 'from_project: project id or exact name' }, flag: { type: 'boolean' }, op_id: { type: 'string' },
       title: { type: 'string' }, type: { type: 'string', enum: ['book', 'article', 'video', 'podcast', 'other'] }, url: { type: 'string' },
       task_id: { type: 'string' }, state: { type: 'string', enum: ['up_next', 'reading', 'finished', 'off'] }, body: { type: 'string' } } },
     async run(api, a) {
@@ -78,6 +81,19 @@ When the user finishes something, offer to take notes (their ideas, in their wor
         const made = await tool('capture').run(api, { title: String(a.title).trim(), notes: a.url || '' });
         const r = await api.q('rpc/reading_set', { method: 'POST', body: { task: made.id, state: 'up_next', rtype: a.type || null, owner: api.userId } });
         return { added: made.title, id: made.id, ...r };
+      }
+      if (action === 'from_project') {
+        const ref = String(a.project || '').trim();
+        if (!ref) throw new Error('project is required');
+        const ps = await api.q(`projects?${api.u}&select=id,name,status`);
+        const p = ps.find((x) => x.id === ref) || ps.find((x) => x.name.toLowerCase() === ref.toLowerCase() && ['active', 'on_hold'].includes(x.status)) || ps.find((x) => x.name.toLowerCase() === ref.toLowerCase());
+        if (!p) throw new Error(`No project "${ref}".`);
+        const r = await api.q('rpc/reading_from_project', { method: 'POST', body: { project: p.id, rtype: a.type || null, flag: !!a.flag, owner: api.userId } });
+        return { project: p.name, ...r, next: `Undo with reading action "undo" op_id "${r.op_id}".` };
+      }
+      if (action === 'undo') {
+        if (!a.op_id) throw new Error('op_id is required');
+        return api.q('rpc/bulk_undo', { method: 'POST', body: { op_id: a.op_id, owner: api.userId } });
       }
       if (!a.task_id) throw new Error('task_id is required');
       if (action === 'move') {
