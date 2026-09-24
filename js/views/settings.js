@@ -270,7 +270,7 @@ function reviewSection() {
 
 // ---------- Keyboard: the drawn keyboard and every shortcut ----------
 // Folders on your Mac: where your _Todo folder is, and the Shortcut that opens folders (browsers can't).
-export const FOLDER_SCRIPT = 'p="${1/#\\~/$HOME}"\nmkdir -p "$p" && open "$p"';
+export const FOLDER_SCRIPT = '[ -z "$1" ] && exit 0\np="${1/#\\~/$HOME}"\nmkdir -p "$p" && open "$p"';
 function foldersSection() {
   const st = { ...DEFAULT_SETTINGS, ...(app.settings || {}) };
   const test = st.todo_folder || '~/Desktop';
