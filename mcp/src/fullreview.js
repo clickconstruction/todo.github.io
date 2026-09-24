@@ -40,6 +40,13 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
     const hours = { planned: api.hours.planned, due: api.hours.due, defer: api.hours.defer };
     ['planned', 'due', 'defer'].forEach((k) => { if (a[k] !== undefined) s[k] = a[k] === null || a[k] === '' ? null : zonedToIso(a[k], hours[k], api.tz); });
     if (a.flagged !== undefined) s.flagged = !!a.flagged;
+    if (a.steps !== undefined) { // break it down: added under the action on Submit (keep / someday only)
+      const steps = (Array.isArray(a.steps) ? a.steps : []).map((x) => String(x || '').trim().slice(0, 500)).filter(Boolean);
+      if (steps.length > 40) throw new Error('At most 40 steps in one suggestion.');
+      if (steps.length && !['keep', 'someday'].includes(a.decision)) throw new Error('Steps go with keep or someday.');
+      if (steps.length) s.steps = steps;
+    }
+    if (a.steps_in_order !== undefined) s.steps_in_order = !!a.steps_in_order;
     const find = (name) => { const n = String(name).trim().toLowerCase(); return L.tags.find((g) => g.id === name) || L.tags.find((g) => L.label(g).toLowerCase() === n) || L.tags.find((g) => g.name.toLowerCase() === n); };
     if (Array.isArray(a.add_tags) && a.add_tags.length) {
       s.add_tag_ids = []; s.add_tag_names = []; s.add_tag_labels = [];
@@ -108,11 +115,12 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
     name: 'full_review',
     description: `Full Review: go through the user's actions one card at a time WITH them while they watch the same card in the app.
 Default way of working: SUGGEST, the user approves. When the user tells you what to do with a card, turn it into a suggestion ("suggest": decision plus any title/gain/project/dates/flag/tags and a one-line note). It appears on the card in the app as "Suggested by Claude" with Submit / Edit / Dismiss; nothing changes until they Submit. Only use "annotate" + "decide" (which apply immediately) when the user says to just do it.
+Big actions: when the user describes the parts ("cut the spot, run power, then…"), put them in the suggestion as steps (in order if they said so) rather than applying break_down; Submit adds them.
 Draft ahead: call "upcoming" and "suggest" with items [...] for the next few cards from the user's patterns; these show as "drafted ahead" so the user can Submit quickly and only talk to you when they disagree. Never suggest drop/done for something the user hasn't clearly let go of; the gain should be the user's words (set gain_suggested when it's yours).
 actions:
   start {import_id | project | all:true, min_age_days?, title?} → a new session (give the user app_link)
   status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
-  suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
+  suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down), steps_in_order?, proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
   upcoming {count? ≤10} → the next cards in full, for drafting ahead
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
   annotate {…same fields…} / decide {decision, note?} → apply now (only when asked to just do it)
@@ -123,7 +131,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
       properties: {
         action: { type: 'string', enum: ['start', 'status', 'suggest', 'upcoming', 'add', 'annotate', 'decide', 'prioritize', 'goto', 'undo', 'list'], default: 'status' },
         notes: { type: 'string', description: 'add: notes for the new idea' },
-        items: { type: 'array', description: 'suggest: several cards at once, each {item_id, decision, title?, gain?, project?, planned?, due?, defer?, flagged?, add_tags?, remove_tags?, proposal?, note?}', items: { type: 'object' } },
+        items: { type: 'array', description: 'suggest: several cards at once, each {item_id, decision, title?, gain?, project?, planned?, due?, defer?, flagged?, add_tags?, remove_tags?, steps?, steps_in_order?, proposal?, note?}', items: { type: 'object' } },
         ahead: { type: 'boolean', description: 'suggest: drafted before talking it through (shown as “drafted ahead”)' },
         count: { type: 'integer', description: 'upcoming: how many cards (max 10)' },
         session_id: { type: 'string' },
@@ -131,6 +139,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
         all: { type: 'boolean' }, min_age_days: { type: 'integer' }, title: { type: 'string' },
         gain: { type: 'string' }, gain_suggested: { type: 'boolean' },
         tags: { type: 'array', items: { type: 'string' } }, add_tags: { type: 'array', items: { type: 'string' } }, remove_tags: { type: 'array', items: { type: 'string' } },
+        steps: { type: 'array', items: { type: 'string' }, description: 'suggest: break the action down: step titles, first to last (added on Submit)' }, steps_in_order: { type: 'boolean', description: 'suggest: only the first open step is available' },
         planned: { type: ['string', 'null'] }, due: { type: ['string', 'null'] }, defer: { type: ['string', 'null'] },
         flagged: { type: 'boolean' }, note: { type: 'string', description: 'One line: why you changed or decided it, shown on the card' },
         proposal: { type: 'object', properties: { op: { type: 'string', enum: ['someday', 'drop', 'park', 'keep_newest'] }, keep: { type: 'integer' } } },

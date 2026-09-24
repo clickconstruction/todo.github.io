@@ -551,7 +551,7 @@
           if (it.status !== 'pending') return { data: null, error: { message: 'That card was already decided (undo it first).' } };
           const s = it.suggestion;
           if (!s || !s.decision) return { data: null, error: { message: 'No suggestion to submit on this card.' } };
-          let snap = null;
+          let snap = null; let stepsSnap = null;
           if (it.kind === 'group') { if (s.proposal) it.grp = { ...it.grp, proposal: s.proposal }; }
           else {
             const t = tables.tasks.find((x) => x.id === it.task_id);
@@ -564,10 +564,16 @@
             (s.add_tag_names || []).forEach((nm) => { let g = tables.tags.find((x) => x.name.toLowerCase() === nm.toLowerCase()); if (!g) { g = { ...DEFAULTS.tags(), id: id(), user_id: uid, name: nm, sort: 0, created_at: now() }; tables.tags.push(g); } if (!tables.task_tags.some((l) => l.task_id === t.id && l.tag_id === g.id)) tables.task_tags.push({ task_id: t.id, tag_id: g.id, user_id: uid }); });
             tables.task_tags = tables.task_tags.filter((l) => !(l.task_id === t.id && (s.remove_tag_ids || []).includes(l.tag_id)));
             t.updated_at = now();
+            if (Array.isArray(s.steps) && s.steps.length && ['keep', 'someday'].includes(s.decision)) { // mirrors migration 20261020000001
+              const base = Math.max(-1, ...tables.tasks.filter((c) => c.parent_id === t.id).map((c) => c.sort || 0)) + 1;
+              const ids = s.steps.map((x) => String(x).trim()).filter(Boolean).map((title, i) => { const row = { ...DEFAULTS.tasks(), id: id(), user_id: uid, title, parent_id: t.id, project_id: t.project_id, in_inbox: false, sort: base + i, created_at: now(), updated_at: now() }; tables.tasks.push(row); return row.id; });
+              stepsSnap = { t: 'steps', id: t.id, ids, steps_in_order: !!t.steps_in_order };
+              if ('steps_in_order' in s) t.steps_in_order = !!s.steps_in_order;
+            }
           }
           const res = await this.rpc('review_decide', { item: it.id, decision: s.decision, by: 'user', note: s.note });
           if (res.error) return res;
-          if (snap) it.before = [...(it.before || []), snap];
+          if (snap) it.before = [...(it.before || []), snap, ...(stepsSnap ? [stepsSnap] : [])];
           it.suggestion = { ...s, applied_at: now() };
           return res;
         }
@@ -587,6 +593,7 @@
               if (e.t === 'project') tables.projects.find((p) => p.id === e.id).status = e.status;
               if (e.t === 'reading') { Object.assign(tables.tasks.find((t) => t.id === e.id), { reading_state: e.reading_state, reading_type: e.reading_type }); if (e.someday_added) { const g = somedayOf(false); if (g) tables.task_tags = tables.task_tags.filter((l) => !(l.task_id === e.id && l.tag_id === g.id)); } }
               if (e.t === 'slipbox') { const n = tables.slipbox_notes.find((x) => x.id === e.note); if (n) n.archived_at = now(); tables.tasks.find((t) => t.id === e.id).dropped_at = e.dropped_at; }
+              if (e.t === 'steps') { tables.tasks.forEach((c) => { if (e.ids.includes(c.id) && !c.completed_at && !c.dropped_at) c.dropped_at = now(); }); const p0 = tables.tasks.find((t) => t.id === e.id); if (p0) p0.steps_in_order = !!e.steps_in_order; }
               if (e.t === 'fields') { Object.assign(tables.tasks.find((t) => t.id === e.id), { title: e.title, gain: e.gain, gain_by: e.gain_by, project_id: e.project_id, in_inbox: e.in_inbox, planned_at: e.planned_at, due_at: e.due_at, defer_at: e.defer_at, flagged: e.flagged });
                 tables.task_tags = tables.task_tags.filter((l) => l.task_id !== e.id).concat(e.tags.map((g) => ({ task_id: e.id, tag_id: g, user_id: uid }))); }
               if (e.t === 'expanded') tables.review_items.filter((x) => x.session_id === it.session_id && x.sort > it.sort && x.sort < it.sort + 1 && x.kind === 'task' && x.status === 'pending').forEach((x) => { x.status = 'void'; });

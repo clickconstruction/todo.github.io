@@ -1426,3 +1426,6 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 }
 .tabs a.nav-absent, .sidebar a.nav-absent, a.nav-absent[data-nav] { display: none !important; }
 .rd-flag { color: var(--flag); }
+.fr-steps, .sg-steps { margin: 4px 0 0; padding-left: 20px; font-size: .88rem; }
+.fr-steps li, .sg-steps li { margin: 1px 0; }
+.fr-edit kbd { opacity: .6; font-size: .72rem; }

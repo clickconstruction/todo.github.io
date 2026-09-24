@@ -318,6 +318,24 @@ async function fullReview(check) {
   check('Undo puts it all back, suggestion ready again', t.tasks.find((x) => x.id === 'fW').title === 'Update my will' && !t.tasks.find((x) => x.id === 'fW').project_id && !t.task_tags.some((l) => l.task_id === 'fW' && l.tag_id === paper.id) && !!$('.sg-bar'));
   $('[data-fr="dismiss"]').click(); await until(() => !$('.sg-bar'));
   check('Dismiss clears it; the card is yours to decide', !$('.sg-bar') && cur.suggestion === null);
+  // Steps in a suggestion: listed on the bar; Submit adds them (in order); Undo drops them; B breaks it down by hand.
+  Object.assign(cur, { suggestion: { decision: 'keep', title: 'Build container site A', steps: ['Cut out the spot', 'Run power', 'Insulate'], steps_in_order: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() });
+  await until(() => !!$('.sg-bar .sg-steps'));
+  check('steps in a suggestion: listed, numbered, in order', has('.sg-bar', 'break it down: 3 steps, in order') && $$('.sg-bar .sg-steps li').map((li) => li.textContent).join('|') === 'Cut out the spot|Run power|Insulate');
+  key('Enter'); await until(() => t.tasks.filter((x) => x.parent_id === 'fW').length === 3 && has(undefined, 'group · 14 actions'));
+  const fwSteps = t.tasks.filter((x) => x.parent_id === 'fW').sort((x, y) => x.sort - y.sort);
+  check('Submit adds the steps under the action, in order', fwSteps.map((x) => x.title).join('|') === 'Cut out the spot|Run power|Insulate' && t.tasks.find((x) => x.id === 'fW').steps_in_order && fwSteps.every((x) => x.project_id === t.tasks.find((y) => y.id === 'fW').project_id));
+  key('u'); await until(() => !!$('.sg-bar') && has(undefined, 'update my will'));
+  check('Undo drops the steps (not deleted) and the card shows none', fwSteps.every((x) => x.dropped_at) && t.tasks.filter((x) => x.parent_id === 'fW').length === 3 && !$('.fr-steps') && !t.tasks.find((x) => x.id === 'fW').steps_in_order);
+  $('[data-fr="dismiss"]').click(); await until(() => !$('.sg-bar'));
+  key('b'); await until(() => $('#sheet2').open && has('#sheet2', 'break it down'));
+  check('B opens Break it down on the card', $('#sheet2').open && has('#sheet2', 'break it down'));
+  $('#sheet2').close(); await wait(30);
+  // A card with steps shows them.
+  t.tasks.push({ ...t.tasks.find((x) => x.id === 'fW'), id: 'fWs1', title: 'Find the old will', parent_id: 'fW', sort: 10, completed_at: null, dropped_at: null, steps_in_order: false });
+  (await import('/js/state.js')).db.tasks.push({ ...t.tasks.find((x) => x.id === 'fWs1') }); app.render(); await wait(30);
+  check('the card lists its open steps', has('.fr-card', 'steps', '1 to go', 'find the old will'));
+  { const drop = new Date().toISOString(); t.tasks.find((x) => x.id === 'fWs1').dropped_at = drop; (await import('/js/state.js')).db.tasks.find((x) => x.id === 'fWs1').dropped_at = drop; app.render(); await wait(30); }
   // Keys: 1 keep → the group card.
   key('1'); await until(() => has(undefined, 'movies') && !!$('.fr-sample'));
   check('1 = Keep; next is the group card with a proposal', t.review_items.find((x) => x.task_id === 'fW').status === 'reviewed' && has(undefined, 'group · 14 actions', 'all 14 → someday'));

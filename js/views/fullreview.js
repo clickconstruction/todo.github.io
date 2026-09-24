@@ -133,6 +133,8 @@ async function onSession(row, { quiet = false } = {}) {
 async function refreshCard(it) {
   if (it.kind === 'task' && it.task_id) {
     await refreshTasks([it.task_id]);
+    const steps = await run(sb.from('tasks').select('*').eq('parent_id', it.task_id)); // a Submit can add steps; an Undo drops them
+    steps.forEach((row) => { if (byId(db.tasks, row.id)) syncRow('tasks', null, row); else db.tasks.push(row); });
     const links = await run(sb.from('task_tags').select('*').eq('task_id', it.task_id));
     db.taskTags = db.taskTags.filter((x) => x.task_id !== it.task_id).concat(links);
   }
@@ -200,6 +202,9 @@ function suggestionBar(it, t) {
     if ('flagged' in s && !!s.flagged !== !!t.flagged) row('⚑', s.flagged ? 'Flag it' : 'Unflag');
     if (s.add_tag_labels && s.add_tag_labels.length) row('🏷', `Add tags: ${s.add_tag_labels.map(esc).join(', ')}`);
     if (s.remove_tag_labels && s.remove_tag_labels.length) row('🏷', `Remove tags: ${s.remove_tag_labels.map(esc).join(', ')}`);
+    if (Array.isArray(s.steps) && s.steps.length && ['keep', 'someday'].includes(s.decision)) {
+      row('🪜', `Break it down: ${s.steps.length} step${s.steps.length === 1 ? '' : 's'}${s.steps_in_order ? ', in order' : ''}${stepsOf(t).length ? ` <span class="hint">(after the ${stepsOf(t).length} it has)</span>` : ''}<ol class="sg-steps">${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>`);
+    }
     row('✓', `<b>${esc(DECISION_LABEL[s.decision] || s.decision)}</b>${s.decision === 'keep' ? ` in ${esc(s.project_name || (p ? p.name : 'no project'))}` : ''}`);
   }
   return `<div class="sg-bar" role="group" aria-label="Suggested by Claude">
@@ -207,6 +212,15 @@ function suggestionBar(it, t) {
     ${rows.join('')}${s.note ? `<p class="sg-note">${esc(s.note)}</p>` : ''}
     <div class="sg-btns"><button class="btn primary" data-fr="submit">Submit <kbd>⏎</kbd></button><button class="btn" data-fr="edit-suggestion">Edit</button><button class="btn" data-fr="dismiss">Dismiss</button></div>
   </div>`;
+}
+
+// Steps (a task's own open steps, in order), shown on the card; done ones counted.
+const stepsOf = (t) => db.tasks.filter((c) => c.parent_id === t.id && isOpen(c)).sort((a, b) => (a.sort - b.sort) || String(a.created_at).localeCompare(String(b.created_at)));
+function stepsRow(t, row) {
+  const open = stepsOf(t);
+  const done = db.tasks.filter((c) => c.parent_id === t.id && c.completed_at).length;
+  if (!open.length && !done) return '';
+  return row('Steps', 'steps', `<span class="hint">${done ? `${n(done)} done · ` : ''}${n(open.length)} to go${t.steps_in_order ? ' · in order' : ''}</span><ol class="fr-steps">${open.slice(0, 12).map((c) => `<li>${esc(c.title)}</li>`).join('')}${open.length > 12 ? `<li class="hint">+ ${n(open.length - 12)} more</li>` : ''}</ol>`);
 }
 
 function taskCard(it) {
@@ -224,12 +238,13 @@ function taskCard(it) {
     ${row('When', 'dates', [t.planned_at && `planned ${esc(fmtDate(t.planned_at))}`, t.due_at && `due ${esc(fmtDate(t.due_at))}`, t.defer_at && `from ${esc(fmtDate(t.defer_at))}`].filter(Boolean).join(' · ') || '<span class="hint">no dates</span>')}
     ${row('Tags', 'tags', tags.length ? tags.map((g) => `<span class="chip">${esc(tagLabel(g))}</span>`).join(' ') : '<span class="hint">none</span>')}
     ${t.flagged ? row('Flag', 'flagged', '<span class="chip flagged-chip">⚑ Flagged</span>') : ''}
+    ${stepsRow(t, row)}
     ${t.notes ? `<details class="fr-notes"><summary>Notes</summary><p>${esc(t.notes.slice(0, 1200))}${t.notes.length > 1200 ? '…' : ''}</p></details>` : ''}
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
     ${suggestionBar(it, t)}
     <div class="fr-btns ${pending(it) ? 'fr-btns-quiet' : ''}">${[['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
     <div class="fr-btns2 ${pending(it) ? 'fr-btns-quiet' : ''}"><button class="btn small" data-fr="decide" data-decision="reading" title="Something to read, watch or listen to: onto Reading &amp; watching (up next)"><kbd>5</kbd> → Reading &amp; watching</button><button class="btn small" data-fr="decide" data-decision="slipbox" title="An idea to think with, not an action: a fleeting note in your slipbox"><kbd>6</kbd> → Slipbox</button></div>
-    <p class="hint fr-edit"><button class="link-btn" data-task="${t.id}">Edit details</button></p>
+    <p class="hint fr-edit"><button class="link-btn" data-fr="breakdown">🪜 Break it down <kbd>B</kbd></button> · <button class="link-btn" data-task="${t.id}">Edit details</button></p>
     ${guide()}
   </div>`;
 }
@@ -279,7 +294,7 @@ export function viewFullReview(id) {
   return `<div class="fr">${head}
     <button class="fab fr-fab" data-fr="capture" aria-label="Capture an idea (added to this review)" title="Capture an idea: it's added to this review as a later card (N)">+</button>
     ${cur.kind === 'group' ? groupCard(cur) : taskCard(cur)}
-    <div class="cl-bar"><button class="btn small" data-fr="undo" ${f.undo.length ? '' : 'disabled'}>↶ Undo</button><span class="hint cl-keys">1–6 decide · s skip · u undo · n capture · Esc close</span><button class="btn small" data-fr="decide" data-decision="skip">Skip →</button></div></div>`;
+    <div class="cl-bar"><button class="btn small" data-fr="undo" ${f.undo.length ? '' : 'disabled'}>↶ Undo</button><span class="hint cl-keys">1–6 decide · s skip · u undo · b break down · n capture · Esc close</span><button class="btn small" data-fr="decide" data-decision="skip">Skip →</button></div></div>`;
 }
 
 // ---------- capture during the review ----------
@@ -324,6 +339,14 @@ export async function fullReviewAction(el) {
     return;
   }
   if (a === 'capture') { captureIntoReview(); return; }
+  if (a === 'breakdown') {
+    const cur = s && f.byId.get(s.current_item);
+    const t = cur && cur.kind === 'task' && byId(db.tasks, cur.task_id);
+    if (!t) return;
+    const { openBreakdown } = await import('../editors/breakdown.js');
+    openBreakdown(t, { onDone: async () => { await refreshCard(cur); app.render(); } });
+    return;
+  }
   if (a === 'reopen-skipped') {
     await run(sb.from('review_items').update({ status: 'pending' }).eq('session_id', s.id).eq('status', 'skipped'));
     const first = f.items.filter((x) => x.status === 'skipped').sort((x, y) => x.sort - y.sort)[0];
@@ -400,11 +423,12 @@ async function act(a, el) {
   }
 }
 
-// Keys on the review screen: 1–4 decide, s skip, u undo, Esc close.
+// Keys on the review screen: 1–6 decide, s skip, u undo, b break down, n capture, Esc close.
 export function fullReviewKey(e) {
   if (!location.hash.startsWith('#full/') || e.metaKey || e.ctrlKey || e.altKey) return false;
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return false;
   if (e.key === 'n') { e.preventDefault(); captureIntoReview(); return true; }
+  if (e.key === 'b') { const b = document.querySelector('[data-fr="breakdown"]'); if (b) { e.preventDefault(); b.click(); return true; } }
   if (e.key === 'Enter') { const b = document.querySelector('[data-fr="submit"]'); if (b) { e.preventDefault(); b.click(); return true; } }
   const btns = [...document.querySelectorAll('.fr-btns [data-fr="decide"], .fr-btns2 [data-fr="decide"]')];
   if (/^[1-6]$/.test(e.key) && btns[Number(e.key) - 1]) { e.preventDefault(); btns[Number(e.key) - 1].click(); return true; }

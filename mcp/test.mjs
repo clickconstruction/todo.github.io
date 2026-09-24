@@ -1180,6 +1180,11 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(/No active project/.test(bad2), 'a suggestion that doesn’t resolve is refused (nothing saved)');
   let bad3 = ''; try { await tool('full_review', { action: 'suggest', decision: 'accept' }); } catch (e) { bad3 = e.message; }
   assert(/decision must be one of/.test(bad3), 'group decisions aren’t allowed on an action card');
+  await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Build container site A', steps: ['Cut out the spot', ' ', 'Run power', 'Insulate'], steps_in_order: true });
+  assert(s1.suggestion.steps.join('|') === 'Cut out the spot|Run power|Insulate' && s1.suggestion.steps_in_order === true && !db.tasks.some((t) => t.parent_id === S1 && t.title === 'Run power'), 'suggest steps: blanks skipped, in order, nothing added until Submit');
+  let bad4 = ''; try { await tool('full_review', { action: 'suggest', decision: 'drop', steps: ['x'] }); } catch (e) { bad4 = e.message; }
+  assert(/Steps go with keep or someday/.test(bad4), 'steps only with keep / someday');
+  await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Fix the gate latch before winter', gain: 'Goats stay in', project: 'Estate and legacy', planned: '2026-10-05', flagged: false, add_tags: ['Brand new tag'], note: 'You said before the cold snap' });
   const st2 = await tool('full_review', { action: 'status' });
   assert(st2.current.suggestion && st2.current.suggestion.note === 'You said before the cold snap', 'status shows the pending suggestion');
   const up = await tool('full_review', { action: 'upcoming', count: 3 });
