@@ -35,7 +35,7 @@ async function loadSettings() {
 
 export function viewSettings() {
   if (apiTokens === null) loadSettings();
-  const rows = (apiTokens || []).filter((t) => t.scope !== 'capture').map((t) => `<li class="row" style="cursor:default">
+  const rows = (apiTokens || []).filter((t) => !['capture', 'feed'].includes(t.scope)).map((t) => `<li class="row" style="cursor:default">
       <div class="row-main"><div class="row-title">${esc(t.name)} <span class="chip">…${esc(t.token_hint)}</span>${t.scope === 'geo' ? ' <span class="chip">📍 Location alerts only</span>' : ''}</div>
       <div class="row-meta"><span>Created ${esc(fmtDate(t.created_at))}</span><span>${t.last_used_at ? `Last used ${esc(fmtDate(t.last_used_at))}` : 'Never used'}</span></div></div>
       <button class="btn small danger" data-revoke="${t.id}">Revoke</button></li>`).join('');
@@ -58,6 +58,7 @@ export function viewSettings() {
     ${datesSection()}
     ${reviewSection()}
     ${calendarsSection()}
+    ${feedSection()}
     ${keyboardSection()}
     <h2 class="section-title">Import</h2>
     <p class="view-sub" style="margin-bottom:8px">Moving from OmniFocus? Bring folders, projects, tags, repeats and review schedules over; you'll see a preview first.</p>
@@ -277,6 +278,38 @@ document.addEventListener('change', async (e) => {
   const notify = e.target.closest && e.target.closest('[data-setting-review-notify]');
   if (notify) await saveSettings({ review_notify: notify.checked });
 });
+
+// ---------- Your scheduled actions as a calendar (a private feed Apple/Google subscribe to) ----------
+const FEED_BASE = 'mcp.todotooling.com/feed/';
+function feedSection() {
+  const feeds = (apiTokens || []).filter((t) => t.scope === 'feed');
+  return `<div class="settings-card feed-card"><p><b>Your scheduled actions in your calendar</b></p>
+    <p class="hint">Subscribe once in Apple or Google Calendar and actions you schedule (Schedule it) appear there, and stay in sync. Apple checks every few minutes; Google can take a few hours, so use “Add to Google” for today.</p>
+    ${feeds.length ? `<p class="hint">Feed link made ${esc(fmtDate(feeds[0].created_at))}${feeds[0].last_used_at ? ` · last read ${esc(fmtDate(feeds[0].last_used_at))}` : ' · not subscribed yet'}</p>` : ''}
+    <button class="btn" data-act="feed-link">${feeds.length ? 'Reset the link' : 'Get the feed link'}</button></div>`;
+}
+export async function newFeedLink() {
+  const old = (apiTokens || []).filter((t) => t.scope === 'feed');
+  if (old.length && !confirm('Make a new link? The old one stops working; re-subscribe with the new one.')) return;
+  for (const t of old) await run(sb.from('api_tokens').delete().eq('id', t.id));
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const token = 'tt_' + btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  const token_hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  await run(sb.from('api_tokens').insert({ name: 'Calendar feed', token_hash, token_hint: token.slice(-4), scope: 'feed' }));
+  await loadSettings();
+  const webcal = `webcal://${FEED_BASE}${token}.ics`;
+  const https = `https://${FEED_BASE}${token}.ics`;
+  const sheet = openSheet(`<form method="dialog" class="cap-guide"><h2>Subscribe to your schedule</h2>
+    <p class="persp-warning">Copy it now. It won’t be shown again (you can always reset it). Anyone with the link can see your scheduled actions.</p>
+    <p><b>iPhone or Mac:</b> <a class="btn small" href="${esc(webcal)}">Subscribe in Calendar</a> or Settings → Calendar → Accounts → Add Account → Other → Add Subscribed Calendar, and paste:</p>
+    <div class="cap-copy"><code>${esc(webcal)}</code><button type="button" class="btn small" data-copy-value="${esc(webcal)}">Copy</button></div>
+    <p><b>Google Calendar</b> (on a computer): Other calendars → + → From URL, and paste:</p>
+    <div class="cap-copy"><code>${esc(https)}</code><button type="button" class="btn small" data-copy-value="${esc(https)}">Copy</button></div>
+    <div class="actions"><div class="right"><button class="btn primary">Done</button></div></div></form>`);
+  sheet.querySelectorAll('[data-copy-value]').forEach((b) => { b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copyValue); toast('Copied'); } catch { toast('Couldn’t copy'); } }; });
+  sheet.showModal();
+}
 
 // ---------- Calendars: private iCal links shown in Forecast ----------
 const calState = { adding: false, checking: false, checked: null, error: '', name: '', url: '', color: COLORS[0] };

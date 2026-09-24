@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -126,7 +126,7 @@ globalThis.fetch = async (url, init = {}) => {
   const follow = (r) => db.tasks.filter((x) => x.parent_id === r.id && x.project_id !== r.project_id).forEach((x) => { x.project_id = r.project_id; follow(x); });
   if (m === 'POST' && table === 'tasks') for (const b of (Array.isArray(body) ? body : [body])) { const e = guard({}, b); if (e) return res({ message: e }, 400); }
   if (m === 'PATCH' && table === 'tasks') for (const r of rows.filter(match)) { const b = { ...body }; const e = guard(r, b); if (e) return res({ message: e }, 400); Object.assign(r, b); follow(r); }
-  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
+  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...(table === 'checklists' ? { complete_action: true, archived_at: null } : {}), ...(table === 'checklist_runs' ? { started_at: new Date().toISOString(), finished_at: null } : {}), ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
   if (m === 'PATCH') { const hit = rows.filter((r) => match(r) && orMatch(r)); hit.forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); if (table === 'tasks') hit.forEach((r) => { if (!r.waiting_on) r.follow_up_at = null; }); return init.headers.Prefer ? res(hit) : res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
 };
@@ -146,7 +146,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 63 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 63 tools, no internals leaked');
+assert(list.body.result.tools.length === 66 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 66 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -959,5 +959,47 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   await send(mp);
   const wa = db.tasks[db.tasks.length - 1];
   assert(wa.waiting_on && db.attachments.some((a) => a.task_id === wa.id && a.name === 'co.pdf' && a.mime === 'application/pdf'), 'email attachments are saved to the item');
+}
+// ---------- Schedule it, the calendar feed, checklists ----------
+{
+  const day = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const est = await tool('capture', { title: 'Write the Smith estimate', project: 'Smith bathroom remodel', estimate_minutes: 90 });
+  const sch = await tool('update_task', { id: est.id, schedule: `${day}T10:30` });
+  const row = db.tasks.find((t) => t.id === est.id);
+  assert(sch.scheduled.at === `${day}T10:30` && sch.scheduled.minutes === 90 && row.planned_at === row.scheduled_at, 'update_task schedule: local time, length from the estimate, also planned');
+  let bad = ''; try { await tool('update_task', { id: est.id, schedule: 'tomorrow 3pm' }); } catch (e) { bad = e.message; }
+  assert(/YYYY-MM-DDTHH:MM/.test(bad), 'schedule format checked');
+  const fc = await tool('forecast', { days: 3 });
+  assert(fc.days[day].scheduled.some((t) => t.id === est.id) && !fc.days[day].planned.some((t) => t.id === est.id), 'forecast lists it under scheduled for that day');
+  // The feed.
+  const FEED = 'tt_' + 'f'.repeat(32);
+  db.api_tokens.push({ id: 'feed1', user_id: UID, token_hash: createHash('sha256').update(FEED).digest('hex'), scope: 'feed' });
+  const fr = await worker.fetch(new Request(`https://mcp.todotooling.com/feed/${FEED}.ics`), env, ctx);
+  const ics = await fr.text();
+  assert(fr.status === 200 && fr.headers.get('content-type').startsWith('text/calendar') && ics.includes('BEGIN:VCALENDAR') && ics.includes(`UID:${est.id}@todotooling.com`) && ics.includes('SUMMARY:Write the Smith estimate') && ics.includes('X-WR-CALNAME:Todo Tooling'), 'feed: scheduled actions as events');
+  const dt = ics.match(/DTSTART:(\d{8}T\d{6}Z)/)[1]; const de = ics.match(/DTEND:(\d{8}T\d{6}Z)/)[1];
+  const toMs = (x) => Date.UTC(+x.slice(0, 4), +x.slice(4, 6) - 1, +x.slice(6, 8), +x.slice(9, 11), +x.slice(11, 13));
+  assert((toMs(de) - toMs(dt)) === 90 * 60000, 'feed: event length is the time block');
+  assert((await worker.fetch(new Request(`https://mcp.todotooling.com/feed/tt_${'x'.repeat(32)}.ics`), env, ctx)).status === 404, 'feed: unknown or reset link → 404');
+  const CAPK = 'tt_' + 'c'.repeat(32);
+  assert((await worker.fetch(new Request(`https://mcp.todotooling.com/feed/${CAPK}.ics`), env, ctx)).status === 404, 'feed: a capture key can’t read the feed');
+  await tool('update_task', { id: est.id, schedule: null });
+  assert(!db.tasks.find((t) => t.id === est.id).scheduled_at, 'unschedule');
+  // Checklists.
+  const ck = await tool('save_checklist', { name: 'Month-end close', items: ['# Money in', 'Invoice every finished job', 'Chase anything 30+ days', '# Money out', 'Reconcile the card'] });
+  assert(ck.items === 3 && ck.sections.join() === 'Money in,Money out' && ck.complete_action, 'save_checklist with sections');
+  const me = await tool('capture', { title: 'Month-end close', repeat: { every: 1, unit: 'month' } });
+  await tool('save_checklist', { id: 'Month-end close', attach_to: me.id });
+  assert(db.tasks.find((t) => t.id === me.id).checklist_id === ck.id, 'attach to an action');
+  const r1 = await tool('run_checklist', { checklist: 'Month-end close', task: me.id, tick: ['Invoice every finished job', 2] });
+  assert(r1.ticked === 2 && r1.of === 3 && r1.items[0].done && !r1.items[2].done && !r1.finished, 'run_checklist ticks by text or number');
+  const r2 = await tool('run_checklist', { checklist: 'Month-end close', task: me.id, tick: ['reconcile'] });
+  assert(r2.finished && r2.action_completed && db.tasks.find((t) => t.id === me.id).completed_at, 'last tick finishes the run and completes the action');
+  const lc = await tool('list_checklists', {});
+  assert(lc.checklists[0].last_run && lc.checklists[0].last_run.ticked === 3, 'list_checklists shows the last run');
+  const solo = await tool('run_checklist', { checklist: ck.id });
+  assert(solo.ticked === 0 && solo.items.length === 3, 'a new run starts fresh');
+  await tool('save_checklist', { id: ck.id, archived: true });
+  assert(db.checklists.find((c) => c.id === ck.id).archived_at && (await tool('list_checklists', {})).checklists.length === 0, 'checklists archive, not delete');
 }
 console.log('ALL PASSED');

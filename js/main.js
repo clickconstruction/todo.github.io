@@ -24,6 +24,8 @@ import { livePerspectives, movePerspective, archivePerspective, badgeCount } fro
 import { getFocus, focusLabel } from './prefs.js';
 import { newCaptureKey, captureGuide } from './views/settings.js';
 import { noticeEmailPeople } from './views/capture.js';
+import { checklistAction, checklistChange } from './views/checklists.js';
+import { newFeedLink } from './views/settings.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
 import { enableAlerts } from './alerts.js';
@@ -76,6 +78,7 @@ const ACTIONS = {
   'new-token': createToken,
   'new-capture-key': newCaptureKey,
   'capture-guide': captureGuide,
+  'feed-link': newFeedLink,
   'push-test-now': pushTestNow,
   'push-test-later': pushTestLater,
   'sign-out': () => sb.auth.signOut(),
@@ -153,6 +156,8 @@ const CLICKS = [
   ['[data-someday]', (el, e) => { e.stopPropagation(); somedayAction(el); }],
   ['[data-hz]', (el, e) => { e.stopPropagation(); horizonsAction(el); }],
   ['[data-plan]', (el, e) => { e.stopPropagation(); planAction(el); }],
+  ['[data-ck]', (el, e) => { e.stopPropagation(); checklistAction(el); }],
+  ['[data-cl-tick]', () => {}], // a checklist tick is handled on change
   ['[data-now], [data-now-set]', (el, e) => { e.stopPropagation(); nowAction(el); }],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
   ['[data-copy-geo]', (el) => copyGeoUrl(el)],
@@ -202,6 +207,7 @@ view.addEventListener('submit', async (e) => {
 view.addEventListener('change', (e) => {
   if (e.target.closest('[data-hz-link-area], [data-hz-link-goal]')) { horizonsChange(e); return; }
   if (planChange(e)) return;
+  if (e.target.closest('[data-cl-tick]') && location.hash.startsWith('#checklist/')) { checklistChange(e); return; }
   const doneCtl = e.target.closest('[data-done]');
   if (doneCtl) { onDoneFilterChange(doneCtl); return; }
   const withinCtl = e.target.closest('[data-within]');
@@ -235,7 +241,7 @@ $('#more-tab').onclick = () => {
   const due = reviewDueCount();
   const here = hereNowCount();
   const waiting = waitingBadgeCount();
-  const links = [['#now', '▶️', 'What now?'], ['#horizons', '🏔️', 'Horizons'], ['#waiting', '⏳', `Waiting For${waiting ? ` <b class="badge due inline">${waiting}</b>` : ''}`], ['#tickler', '📆', 'Tickler'], ['#reference', '🗄️', 'Reference'], ['#someday', '💭', `Someday/Maybe${somedayCount() ? ` <span class="hint">${somedayCount()}</span>` : ''}`], ['#weekly', '🧭', `Weekly Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#sweep', '🧹', 'Mind sweep'], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
+  const links = [['#now', '▶️', 'What now?'], ['#checklists', '☑️', 'Checklists'], ['#horizons', '🏔️', 'Horizons'], ['#waiting', '⏳', `Waiting For${waiting ? ` <b class="badge due inline">${waiting}</b>` : ''}`], ['#tickler', '📆', 'Tickler'], ['#reference', '🗄️', 'Reference'], ['#someday', '💭', `Someday/Maybe${somedayCount() ? ` <span class="hint">${somedayCount()}</span>` : ''}`], ['#weekly', '🧭', `Weekly Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#sweep', '🧹', 'Mind sweep'], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
   const persp = livePerspectives().map((p) => { const n = badgeCount(p); return [`#perspective/${p.id}`, esc(p.icon), `${esc(p.name)}${n ? ` <b class="badge persp inline">${n}</b>` : ''}`]; });
   const sheet = openSheet(`<form method="dialog" class="more-sheet"><button type="button" class="btn focus-more" data-act="focus">🎯 ${getFocus() ? `Focused on ${esc(focusLabel())} · change` : 'Focus'}</button><h2>Perspectives</h2>
     <nav class="more-links">${persp.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}<a href="#perspectives" data-more-link><span>🔭</span>${persp.length ? 'All perspectives' : 'Perspectives: saved views'}</a></nav>

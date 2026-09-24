@@ -58,6 +58,17 @@ export const forecastBadgeCount = () => {
     + db.projects.filter((p) => ['active', 'on_hold'].includes(p.status) && p.due_at && new Date(p.due_at) < end).length;
 };
 
+const fmtHM = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(/\s/g, '').toLowerCase();
+const eventRow = (e) => `<li class="cal-event ${e.busy ? '' : 'free'}" style="--cal:${esc(e.color)}">
+  <span class="cal-time">${esc(fmtEventTime(e))}</span><span class="cal-main"><span class="cal-title">${esc(e.title)}</span>
+  ${e.location || e.calendar ? `<span class="cal-meta">${[e.location, e.calendar].filter(Boolean).map((x) => esc(x.split('\n')[0])).join(' · ')}</span>` : ''}${agendaHtml(e)}</span></li>`;
+// A scheduled action in the day: tick it off right there, tap to open it.
+const schedRow = (t) => { const p = t.project_id && byId(db.projects, t.project_id); const end = Date.parse(t.scheduled_at) + (t.scheduled_minutes || 30) * 60000; return `<li class="cal-event sched ${t.completed_at ? 'done' : ''}" data-task="${t.id}">
+  <span class="cal-time">${esc(fmtHM(Date.parse(t.scheduled_at)))}–${esc(fmtHM(end))}</span><span class="cal-main"><span class="cal-title">${esc(t.title)}</span>
+  <span class="cal-meta">scheduled · ${t.scheduled_minutes || 30} min${p ? ` · ${esc(p.name)}` : ''}</span></span>
+  <button class="check ${t.completed_at ? 'done' : ''}" data-check="${t.id}" aria-label="${t.completed_at ? 'Mark incomplete' : 'Complete'}">✓</button></li>`; };
+const freeRow = (a, b) => `<li class="cal-free"><span class="cal-time">${esc(fmtHM(a))}</span><span class="hint">Free until ${esc(fmtHM(b))} · ${Math.round((b - a) / 60000)} min</span></li>`;
+
 // Agenda items for the people named in an event's title ("1:1 with Jodi"), so they're there when you meet.
 function agendaHtml(e) {
   const hits = livePeople().filter((p) => mentions(p, e.title) && agendaFor(p).length);
@@ -104,10 +115,24 @@ export function viewForecast(selected = 'today') {
     const dayKey = key(day);
     const inStrip = days.some((d) => key(d) === dayKey);
     const dayEvents = inStrip ? eventsOn(dayKey) : (liveCalendars().some((c) => c.enabled) ? calendarEvents(dayKey, dayKey) : []);
-    if (dayEvents.length) {
-      body += `<h2 class="section-title">Calendar · ${dayEvents.length}</h2><ul class="list cal-list">${dayEvents.map((e) => `<li class="cal-event ${e.busy ? '' : 'free'}" style="--cal:${esc(e.color)}">
-        <span class="cal-time">${esc(fmtEventTime(e))}</span><span class="cal-main"><span class="cal-title">${esc(e.title)}</span>
-        ${e.location || e.calendar ? `<span class="cal-meta">${[e.location, e.calendar].filter(Boolean).map((x) => esc(x.split('\n')[0])).join(' · ')}</span>` : ''}${agendaHtml(e)}</span></li>`).join('')}</ul>`;
+    // The day: calendar events and scheduled actions in time order, with free gaps (today, 7am-7pm).
+    const sched = tasks.filter((t) => t.scheduled_at && key(new Date(t.scheduled_at)) === dayKey && !t.dropped_at);
+    const timed = [
+      ...dayEvents.filter((e) => !e.allDay).map((e) => ({ at: e.start, end: e.end || e.start, html: eventRow(e) })),
+      ...sched.map((t) => ({ at: t.scheduled_at, end: new Date(Date.parse(t.scheduled_at) + (t.scheduled_minutes || 30) * 60000).toISOString(), html: schedRow(t) })),
+    ].sort((a, b) => a.at.localeCompare(b.at));
+    const allDay = dayEvents.filter((e) => e.allDay);
+    if (allDay.length || timed.length) {
+      let cur = isToday ? Math.max(Date.now(), new Date(day).setHours(7, 0, 0, 0)) : null;
+      const until = new Date(day).setHours(19, 0, 0, 0);
+      const rows = [];
+      for (const x of timed) {
+        if (cur && Date.parse(x.at) - cur >= 30 * 60000 && cur < until) rows.push(freeRow(cur, Math.min(Date.parse(x.at), until)));
+        rows.push(x.html);
+        if (cur) cur = Math.max(cur, Date.parse(x.end));
+      }
+      if (cur && until - cur >= 30 * 60000 && timed.length) rows.push(freeRow(cur, until));
+      body += `<h2 class="section-title">${sched.length ? 'Day' : 'Calendar'} · ${allDay.length + timed.length}</h2><ul class="list cal-list">${allDay.map(eventRow).join('')}${rows.join('')}</ul>`;
     }
     calendarErrors().forEach((c) => { body += `<p class="persp-warning">📅 ${esc(c.name)}: ${esc(c.error)} <a href="#settings">Settings</a></p>`; });
     if (isToday) body += weeklyBanner();
@@ -115,7 +140,7 @@ export function viewForecast(selected = 'today') {
     const follow = isToday ? db.tasks.filter((t) => followUpDue(t) && isWaiting(t)) : []; // not your actions, so the view filter doesn't apply
     if (follow.length) body += `<h2 class="section-title">Follow up · ${follow.length} <a class="btn small" href="#waiting">Waiting For</a></h2>${taskList(follow)}`;
     body += section('Due', it.due);
-    body += section('Planned', it.planned);
+    body += section('Planned', it.planned.filter((t) => !(t.scheduled_at && key(new Date(t.scheduled_at)) === dayKey)));
     body += projectSection('Projects', projectsOn(day, liveProjects));
     body += section(isToday ? 'Available today' : 'Becomes available', it.available);
     if (isToday) {

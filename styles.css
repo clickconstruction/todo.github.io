@@ -1078,3 +1078,30 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .quick-media .btn { cursor: pointer; }
 .cl-pics { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 2px; }
 .cl-thumb { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; background: var(--surface-2); }
+
+/* ---------- Schedule it, the day view, checklists ---------- */
+.sched-slots { display: grid; gap: 6px; }
+.sched-slot { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; min-height: 44px; }
+.sched-slot.on { border-color: var(--accent); background: var(--accent-soft); }
+.sched-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0 4px; }
+.sched-val { flex: 1 1 160px; }
+.sched-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.meta-sched { color: var(--accent); font-weight: 600; }
+.cal-event.sched { --cal: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); cursor: pointer; align-items: center; }
+.cal-event.sched .cal-main { flex: 1; }
+.cal-event.sched.done .cal-title { text-decoration: line-through; color: var(--muted); }
+.cal-free { display: flex; gap: 12px; padding: 7px 4px 7px 12px; border-bottom: 1px dashed var(--line); }
+.cal-free .cal-time { flex: 0 0 88px; color: var(--muted); font-size: 13px; }
+.view-head h1.checklists { color: #16a34a; }
+.ck-row .row-main { text-decoration: none; color: inherit; }
+.chk-list { display: grid; gap: 2px; margin: 6px 0; }
+.chk-item { display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 10px; cursor: pointer; min-height: 44px; overflow-wrap: anywhere; }
+.chk-item:hover { background: var(--surface-2); }
+.chk-item input { width: 22px; height: 22px; flex: none; accent-color: var(--accent); }
+.chk-item.on span { color: var(--muted); text-decoration: line-through; }
+.cl-sec { font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 12px 0 2px; }
+.ck-field { border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px 10px; margin: 8px 0; }
+.ck-field legend { font-weight: 600; padding: 0 4px; }
+.ck-field select { width: 100%; margin-bottom: 6px; }
+.feed-card { margin-top: 12px; }
+.feed-card p { margin: 0 0 8px; }

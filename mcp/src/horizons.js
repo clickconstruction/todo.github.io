@@ -126,7 +126,7 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
         }
         const goals = await api.q(`goals?${api.u}&status=eq.active&select=id,title,status`);
         const end = new Date(zonedToIso(localDate(new Date().toISOString(), api.tz), 24, api.tz));
-        const r = rankNow(tasks, { endOfToday: end, minutes: minutes || 0, energy: a.energy || '', inContext, projects, goals, limit: Math.min(20, a.limit || 5) });
+        const r = rankNow(tasks, { tz: api.tz, endOfToday: end, minutes: minutes || 0, energy: a.energy || '', inContext, projects, goals, limit: Math.min(20, a.limit || 5) });
         const shaped = new Map((await api.shape(r.items.map((x) => x.t))).map((x) => [x.id, x]));
         return { where: a.where || 'anywhere', minutes: minutes || null, time_from_calendar: gap || undefined, energy: a.energy || null, fits: r.total,
           items: r.items.map(({ t, reasons }) => ({ ...shaped.get(t.id), why: reasons.map((x) => x.text) })) };

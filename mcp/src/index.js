@@ -19,6 +19,8 @@ import { weeklyTools } from './weekly.js';
 import { horizonsTools } from './horizons.js';
 import { planTools } from './plan.js';
 import { handleCapture, followTag, nameFor } from './capture.js';
+import { checklistTools } from './checklists.js';
+import { eventOf, icsCalendar } from '../../js/schedule.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -32,6 +34,7 @@ Notifications: pass notifications (e.g. [{"kind":"before_due","minutes":60}]) to
 Attachments: add_attachment attaches text, base64 or a URL's file to an action or project; get_task returns download links; remove_attachment archives.
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 Weekly Review: call weekly_review (action start) and walk the user through each step in order (Get clear: papers, mind sweep with mind_sweep_prompts, inbox with clarify_item; Get current: calendars, stale actions, waiting, projects via list_review/mark_reviewed; Get creative: list_someday, anything new), marking each done_step, then finish. Someday/Maybe: clarify_item someday (with a category), list_someday, activate_someday.
+Time blocks: update_task schedule ("YYYY-MM-DDTHH:MM") puts an action on their calendar (Forecast and their calendar feed); check forecast for free time first. Checklists (routines run again and again): list_checklists, save_checklist (attach_to an action), run_checklist to tick through one with them.
 Horizons of Focus: list_horizons shows purpose, vision, goals and areas (with balance warnings); save_area, save_goal, save_horizon edit them; projects take outcome ("done looks like"), area and goal. To plan a project with the user (Natural Planning Model), use plan_project: why, done looks like, brainstorm, organize, next actions; show the preview, then create. For "what should I do now?", call what_now (where, minutes, energy) and explain its reasons.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
 Templates: for repeated projects (a new job, a trip), list_templates then create_from_template with the blanks' values; save_as_template turns a project into one.
@@ -62,6 +65,10 @@ export default {
     if (url.pathname === '/calendar/fetch') {
       if (!(env.SUPABASE_SECRET_KEY || '').trim()) return json({ error: 'Server not configured' }, 503);
       return handleCalendarFetch(request, env, ctx, { rest: (path, opts) => rest(env, path, opts), json, sha256Hex, cors: CORS });
+    }
+    if (url.pathname.startsWith('/feed/') && request.method === 'GET') {
+      if (!(env.SUPABASE_SECRET_KEY || '').trim()) return text('Server not configured', 503);
+      return handleFeed(url, env, ctx);
     }
     if (url.pathname === '/capture') {
       if (!(env.SUPABASE_SECRET_KEY || '').trim()) return json({ error: 'Server not configured' }, 503);
@@ -141,6 +148,23 @@ export async function handlePushTest(request, env) {
   }
   const out = await deliver(env, r, userId, { title: '🔔 Test notification', body: 'Notifications from Todo Tooling work on this device.', tag: `test:${Date.now()}`, url: '#settings' }, { kind: 'test' });
   return json(out);
+}
+
+// ---------- the calendar feed: scheduled actions as events (Apple/Google subscribe to it) ----------
+async function handleFeed(url, env, ctx) {
+  const token = decodeURIComponent(url.pathname.slice('/feed/'.length)).replace(/\.ics$/i, '');
+  if (!/^tt_[A-Za-z0-9_-]{20,}$/.test(token)) return text('Not found', 404);
+  const [key] = await rest(env, `api_tokens?token_hash=eq.${await sha256Hex(token)}&scope=eq.feed&select=id,user_id`);
+  if (!key) return text('This calendar link was reset. Get the new one in Todo Tooling → Settings.', 404);
+  ctx.waitUntil(rest(env, `api_tokens?id=eq.${key.id}`, { method: 'PATCH', body: { last_used_at: new Date().toISOString() } }).catch(() => {}));
+  const from = new Date(Date.now() - 30 * 86400000).toISOString();
+  const to = new Date(Date.now() + 366 * 86400000).toISOString();
+  const [tasks, projects] = await Promise.all([
+    rest(env, `tasks?user_id=eq.${key.user_id}&scheduled_at=gte.${from}&scheduled_at=lte.${to}&dropped_at=is.null&order=scheduled_at.asc&limit=1000&select=id,title,notes,scheduled_at,scheduled_minutes,estimate_minutes,completed_at,project_id,created_at,updated_at`),
+    rest(env, `projects?user_id=eq.${key.user_id}&select=id,name`),
+  ]);
+  const body = icsCalendar(tasks.map((t) => eventOf(t, { project: (projects.find((p) => p.id === t.project_id) || {}).name || null })));
+  return new Response(body, { status: 200, headers: { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'max-age=300', ...CORS } });
 }
 
 // ---------- email capture ----------
@@ -346,6 +370,11 @@ function zonedToIso(value, hour, tz) {
   const asIfUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute);
   return new Date(guess - (asIfUtc - guess)).toISOString();
 }
+// "2026-09-24T10:30" in the user's zone.
+function localTime(iso, tz) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+}
 function localDate(iso, tz) {
   if (!iso) return null;
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -465,6 +494,8 @@ class Api {
       agenda_for: t.agenda_for ? ((people.find((p) => p.id === t.agenda_for) || {}).name || 'someone') : undefined,
       tickler: t.tickler && !t.completed_at && !t.dropped_at ? (t.defer_at && t.defer_at > new Date().toISOString() ? `back in the Inbox on ${localDate(t.defer_at, this.tz)}` : 'back from the tickler') : undefined,
       reference_id: t.reference_id || undefined,
+      scheduled: t.scheduled_at ? { at: localTime(t.scheduled_at, this.tz), minutes: t.scheduled_minutes || 30 } : undefined,
+      checklist_id: t.checklist_id || undefined,
       place: placeSummary(placeOf(t)),
       repeat: t.repeat_rule ? { ...t.repeat_rule, summary: describeRepeat(t.repeat_rule) } : undefined,
       notifications: reminders[t.id],
@@ -810,6 +841,9 @@ const TOOLS = [
         waiting_on: { type: 'string', description: 'Person it is delegated to (name or id; new names become people)' },
         follow_up: { type: 'string', description: 'YYYY-MM-DD to follow up (with waiting_on; default a week)' },
         agenda_for: { type: 'string', description: 'Person to discuss it with (their Agenda)' },
+        schedule: { type: 'string', description: 'Time block "YYYY-MM-DDTHH:MM" (user\'s time zone)' },
+        schedule_minutes: { type: 'integer' },
+        checklist: { type: 'string', description: 'Checklist name or id to attach' },
       },
       required: ['title'],
     },
@@ -823,7 +857,7 @@ const TOOLS = [
         body.sort = sib.length ? (sib[0].sort || 0) + 1 : 0;
       }
       const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body });
-      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'steps_in_order', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m', 'repeat', 'notifications', 'energy', 'waiting_on', 'follow_up', 'agenda_for'].includes(k) && v !== undefined));
+      const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'steps_in_order', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m', 'repeat', 'notifications', 'energy', 'waiting_on', 'follow_up', 'agenda_for', 'schedule', 'schedule_minutes', 'checklist'].includes(k) && v !== undefined));
       if (!Object.keys(fields).length) return (await api.shape([row]))[0];
       return TOOLS.find((t) => t.name === 'update_task').run(api, { id: row.id, ...fields });
     },
@@ -968,7 +1002,7 @@ const TOOLS = [
       }
       for (let i = 0; i < days; i++) {
         const d = localDate(new Date(Date.parse(start) + i * 86400000 + 12 * 3600000).toISOString(), api.tz);
-        out.days[d] = { due: [], planned: [], becomes_available: [], projects: [] };
+        out.days[d] = { scheduled: [], due: [], planned: [], becomes_available: [], projects: [] };
       }
       projects.forEach((p) => {
         const due = localDate(p.due_at, api.tz); const planned = localDate(p.planned_at, api.tz);
@@ -987,7 +1021,8 @@ const TOOLS = [
         if (t.due && t.due < today) out.past.overdue.push(t);
         else if (t.planned && t.planned < today && !(t.due && t.due < today)) out.past.planned_earlier.push(t);
         if (out.days[t.due]) out.days[t.due].due.push(t);
-        if (out.days[t.planned] && t.planned !== t.due) out.days[t.planned].planned.push(t);
+        if (t.scheduled && out.days[t.scheduled.at.slice(0, 10)]) out.days[t.scheduled.at.slice(0, 10)].scheduled.push(t);
+        else if (out.days[t.planned] && t.planned !== t.due) out.days[t.planned].planned.push(t);
         if (out.days[t.defer] && t.defer !== t.due && t.defer !== t.planned) out.days[t.defer].becomes_available.push(t);
       });
       return out;
@@ -1124,6 +1159,9 @@ const TOOLS = [
         follow_up: { type: ['string', 'null'], description: 'YYYY-MM-DD to follow up on a waiting item' },
         agenda_for: { type: ['string', 'null'], description: 'Something to discuss with this person (their Agenda); null to remove' },
         tickle: { type: ['string', 'null'], description: 'YYYY-MM-DD: out of sight until that day, then back in the Inbox (tickler); null takes it out of the tickler' },
+        schedule: { type: ['string', 'null'], description: 'Time block: "YYYY-MM-DDTHH:MM" in the user\'s time zone (shows in Forecast and their calendar feed; also sets planned); null unschedules' },
+        schedule_minutes: { type: 'integer', description: 'Length of the time block (default: the estimate, else 30)' },
+        checklist: { type: ['string', 'null'], description: 'Attach a checklist (name or id); null removes it' },
       },
       required: ['id'],
     },
@@ -1142,6 +1180,19 @@ const TOOLS = [
       if (a.estimate_minutes !== undefined) patch.estimate_minutes = a.estimate_minutes === null ? null : Math.max(0, Math.round(Number(a.estimate_minutes)));
       Object.assign(patch, await api.locationPatch(a));
       if (a.repeat !== undefined) patch.repeat_rule = repeatRule(a.repeat, api.tz, task.repeat_rule);
+      if (a.schedule !== undefined) {
+        if (a.schedule === null || a.schedule === '') Object.assign(patch, { scheduled_at: null, scheduled_minutes: null });
+        else {
+          const m = String(a.schedule).match(/^(\d{4}-\d{2}-\d{2})[T ](\d{1,2}):(\d{2})$/);
+          if (!m) throw new Error('schedule must be "YYYY-MM-DDTHH:MM"');
+          const at = zonedToIso(m[1], Number(m[2]) + Number(m[3]) / 60, api.tz);
+          Object.assign(patch, { scheduled_at: at, planned_at: at, scheduled_minutes: Math.min(720, Math.max(5, Math.round(Number(a.schedule_minutes || task.scheduled_minutes || task.estimate_minutes || 30)))) });
+        }
+      } else if (a.schedule_minutes !== undefined && task.scheduled_at) patch.scheduled_minutes = Math.min(720, Math.max(5, Math.round(Number(a.schedule_minutes))));
+      if (a.checklist !== undefined) {
+        if (a.checklist === null || a.checklist === '') patch.checklist_id = null;
+        else { const all = await api.q(`checklists?${api.u}&archived_at=is.null&select=id,name`); const hit = all.find((c) => c.id === a.checklist) || all.find((c) => c.name.toLowerCase() === String(a.checklist).toLowerCase()); if (!hit) throw new Error(`No checklist called “${a.checklist}”`); patch.checklist_id = hit.id; }
+      }
       if (a.energy !== undefined) { if (a.energy !== null && !['low', 'medium', 'high'].includes(a.energy)) throw new Error('energy must be low, medium or high'); patch.energy = a.energy; }
       if (a.waiting_on !== undefined) {
         patch.waiting_on = a.waiting_on === null || a.waiting_on === '' ? null : (await api.resolvePerson(a.waiting_on, { create: true })).id;
@@ -2030,6 +2081,7 @@ async function availableTasks(api) {
   return { tasks: open.filter((t) => !t.in_inbox && available(t)), tags, links, projectLinks, projects };
 }
 TOOLS.push(...planTools({ projectOut }));
+TOOLS.push(...checklistTools({ localDate }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 

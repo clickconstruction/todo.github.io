@@ -16,6 +16,8 @@ import { stepsFieldHtml, partOfFieldHtml, wireStepsFields } from './steps.js';
 import { openBreakdown } from './breakdown.js';
 import { section, prop, propInline, wireProps } from './props.js';
 import { ENERGY, ENERGY_ICON, livePeople } from '../gtd.js';
+import { checklistFieldHtml, wireChecklistField } from '../views/checklists.js';
+import { openSchedule, addToGoogle, addToApple, scheduledLabel } from './schedule.js';
 import { openDelegate, openTickle } from './gtd.js';
 
 // Waiting on someone (with a follow-up day), or something to discuss with them (Agenda).
@@ -48,6 +50,7 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
     ${task && isOpen(task) && onHoldTagFor(task) ? `<p class="hold-note">⏸ Not available: tag <a href="#tag/${onHoldTagFor(task).id}">“${esc(tagLabel(onHoldTagFor(task)))}”</a> is on hold.</p>` : ''}
     <label class="notes-field"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes" rows="2">${esc(t.notes)}</textarea></label>
     ${stepsFieldHtml(task)}
+    ${checklistFieldHtml(task)}
     ${section('organize', 'Organize', `
       ${partOfFieldHtml(t)}
       ${propInline('Project', `<select name="project_id"><option value="">${task && task.in_inbox ? 'None (Inbox)' : 'None'}</option>
@@ -59,7 +62,9 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
       ${prop('defer_at', 'Defer until', dateField('defer_at', 'Defer until', t.defer_at))}
       ${prop('planned_at', 'Planned', dateField('planned_at', 'Planned', t.planned_at))}
       ${prop('due_at', 'Due', dateField('due_at', 'Due', t.due_at))}
-      ${prop('estimate', 'Duration', estimateField(t.estimate_minutes))}`)}
+      ${prop('estimate', 'Duration', estimateField(t.estimate_minutes))}
+      ${task && isOpen(task) ? `<div class="sched-row"><span class="prop-label">Scheduled</span><span class="sched-val">${task.scheduled_at ? `⏰ ${esc(scheduledLabel(task))} · ${task.scheduled_minutes || 30} min` : '<span class="hint">Not on your calendar</span>'}</span>
+        <span class="sched-btns"><button type="button" class="btn small" data-sched-open>${task.scheduled_at ? 'Change' : 'Schedule it'}</button>${task.scheduled_at ? '<button type="button" class="btn small" data-sched-google>Add to Google</button><button type="button" class="btn small" data-sched-apple>Apple</button>' : ''}</span></div>` : ''}`)}
     ${section('alerts', 'Repeat and alerts', `
       ${prop('repeat', 'Repeat', repeatFieldHtml(t, { skippable: !!task && isOpen(task) }))}
       ${prop('notify', 'Notifications', notifyFieldHtml())}
@@ -94,6 +99,11 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
   const collectReminders = wireNotifyField(form, remindersFor('task_id', task && task.id), onTagsChange);
   const collectFiles = wireAttachField(form, 'task_id', task && task.id);
   wireHistoryField(form, 'task_id', task && task.id);
+  wireChecklistField(form, task);
+  const cur = () => (task && byId(db.tasks, task.id)) || task;
+  const so = $('[data-sched-open]', form); if (so && task) so.onclick = () => openSchedule(cur());
+  const sg = $('[data-sched-google]', form); if (sg && task) sg.onclick = () => addToGoogle(cur());
+  const sa = $('[data-sched-apple]', form); if (sa && task) sa.onclick = () => addToApple(cur());
   const waitSel = form.elements.waiting_on;
   if (waitSel) waitSel.addEventListener('change', () => {
     $('[data-follow-box]', form).hidden = !waitSel.value;

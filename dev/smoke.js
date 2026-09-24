@@ -40,7 +40,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -55,6 +55,108 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Schedule it: free slots around calendar events, the day view, add to calendar, What now, the feed.
+async function scheduleIt(check) {
+  const { db, app } = await import('/js/state.js');
+  const { dayKey } = await import('/js/gtd.js');
+  const tmr = new Date(); tmr.setDate(tmr.getDate() + 1); tmr.setHours(0, 0, 0, 0);
+  const at = (h, m = 0) => { const d = new Date(tmr); d.setHours(h, m, 0, 0); return d; };
+  const icsT = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  window.__calendarFetch = async () => `BEGIN:VCALENDAR\r\nX-WR-CALNAME:Work\r\nBEGIN:VEVENT\r\nUID:sw1\r\nSUMMARY:Site walk\r\nDTSTART:${icsT(at(9))}\r\nDTEND:${icsT(at(12))}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
+  T().calendars.push({ id: 'cal9', user_id: 'u1', name: 'Work', url: 'https://x/y.ics', color: '#1D9E75', enabled: true, sort: 0, archived_at: null, created_at: new Date().toISOString() });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const { calendarEvents } = await import('/js/calendars.js'); calendarEvents(dayKey(tmr), dayKey(tmr)); await wait(300);
+  const { openSchedule } = await import('/js/editors/schedule.js');
+  openSchedule(db.tasks.find((t) => t.id === 't11')); await wait(100);
+  $$('#sheet [data-day]').find((b) => b.dataset.day === dayKey(tmr)).click(); await wait(100);
+  const slots = $$('#sheet [data-slot]').map((b) => b.dataset.slot);
+  check('free slots go around the calendar (7–9, then 12–7)', slots[0] === '07:00' && slots[1] === '12:00' && slots.length === 2, slots.join(','));
+  $$('#sheet [data-slot]')[1].click(); await wait(50);
+  check('picking a slot sets the time', $('#sheet [name=time]').value === '12:00' && has('#sheet', 'schedule 12'));
+  window.__opened = null;
+  $('#sheet form').requestSubmit(); await wait(300);
+  const t11 = T().tasks.find((t) => t.id === 't11');
+  check('scheduled: time block, 30 min (its estimate), also planned that day', new Date(t11.scheduled_at).getTime() === at(12).getTime() && t11.scheduled_minutes === 30 && t11.planned_at === t11.scheduled_at);
+  const g = [...$('#toast').querySelectorAll('button')].find((b) => b.textContent === 'Add to Google'); g.click(); await wait(50);
+  check('Add to Google opens its new-event page, pre-filled', String(window.__opened).startsWith('https://calendar.google.com/calendar/render?action=TEMPLATE&text=Buy%20fuel%20filter&dates=') && window.__opened.includes(`${icsT(at(12))}/${icsT(at(12, 30))}`), window.__opened);
+  await go(`#forecast/${dayKey(tmr)}`); await wait(200);
+  const dayText = text('.cal-list');
+  check('Forecast day view: the event and the time block in order', dayText.indexOf('site walk') >= 0 && dayText.indexOf('buy fuel filter') > dayText.indexOf('site walk') && !!$('.cal-event.sched [data-check="t11"]'), dayText);
+  check('not repeated under Planned', !$$('.section-title').some((h) => /planned/i.test(h.textContent) && h.nextElementSibling && h.nextElementSibling.textContent.includes('Buy fuel filter')));
+  await go('#project/p4');
+  check('row shows ⏰ and the time', has('[data-task="t11"]', '⏰'));
+  const { openEditor } = await import('/js/editors/task.js');
+  openEditor(db.tasks.find((t) => t.id === 't11')); await wait(80);
+  check('editor: Scheduled row with change and add-to-calendar', has('#editor .sched-row', 'scheduled', '30 min') && !!$('#editor [data-sched-apple]'));
+  $('#editor [data-sched-apple]').click(); await wait(50);
+  check('Add to Apple makes an .ics event', String(window.__opened).startsWith('ics:BEGIN:VCALENDAR') && window.__opened.includes('SUMMARY:Buy fuel filter'));
+  $('#sheet').close();
+  // What now: soon ranks first; later waits.
+  const soon = new Date(Date.now() + 20 * 60000);
+  const t9 = T().tasks.find((t) => t.id === 't9'); t9.scheduled_at = soon.toISOString(); t9.scheduled_minutes = 30;
+  await loadAll(); app.now = { where: 'anywhere', minutes: 0, energy: '' };
+  await go('#now');
+  check('What now: scheduled in 20 min is first, with its time', $('.now-item').dataset.task === 't9' && has('.now-item', 'scheduled'));
+  check('What now: scheduled tomorrow waits for its time', !$('.now-item[data-task="t11"]'));
+  window.__calendarFetch = undefined;
+  // The feed link.
+  const S = await import('/js/views/settings.js'); S.resetSettings();
+  await go('#settings'); for (let i = 0; i < 20 && !has(undefined, 'your scheduled actions in your calendar'); i++) await wait(100);
+  window.confirm = () => true;
+  $('[data-act="feed-link"]').click(); for (let i = 0; i < 20 && !$('#sheet').open; i++) await wait(100);
+  const feed = T().api_tokens.find((t) => t.scope === 'feed');
+  check('feed link: a feed-only key, webcal and https links to copy', feed && has('#sheet', 'subscribe to your schedule', 'webcal://mcp.todotooling.com/feed/tt_', 'from url'));
+  $('#sheet').close();
+}
+
+// Checklists: make, run, attach to an action (completes it), repeat starts fresh, from steps.
+async function checklists(check) {
+  const { db } = await import('/js/state.js');
+  await go('#checklists');
+  check('empty Checklists explains itself', has(undefined, 'checklists', 'routines you run'));
+  $('[data-ck="new"]').click(); await wait(80);
+  const f = $('#sheet form');
+  f.elements.name.value = 'Van restock';
+  f.elements.items.value = '# Fittings\n1/2" PEX elbows\nShark-bite couplings\n# Tools\nCharge the drill batteries';
+  f.requestSubmit(); await wait(300);
+  const c = T().checklists.find((x) => x.name === 'Van restock');
+  check('saved with sections; opens the checklist', c && c.items.length === 3 && c.items[0].section === 'Fittings' && c.items[2].section === 'Tools' && location.hash === `#checklist/${c.id}` && has(undefined, 'fittings', 'tools', '0 of 3'));
+  const tickIt = async (i) => { const cb = $$('[data-cl-tick]')[i]; cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); await wait(250); };
+  await tickIt(0);
+  check('first tick starts a run', T().checklist_runs.length === 1 && T().checklist_runs[0].ticked.length === 1 && has(undefined, '1 of 3'));
+  await tickIt(1); await tickIt(2);
+  check('all ticked: the run finishes', T().checklist_runs[0].finished_at && T().checklist_runs[0].ticked.length === 3);
+  check('next time starts fresh; history shows the run', has(undefined, '0 of 3', 'runs', 'last run today · 3 of 3'));
+  // On an action (sheet editor): the last tick completes it.
+  const { openEditor } = await import('/js/editors/task.js');
+  openEditor(db.tasks.find((t) => t.id === 't9')); await wait(80);
+  const sel = $('#editor [data-ck-attach]'); sel.value = c.id; sel.dispatchEvent(new Event('change', { bubbles: true })); await wait(300);
+  check('attach a checklist to an action from its editor', T().tasks.find((t) => t.id === 't9').checklist_id === c.id && has('#editor .ck-field', 'van restock', '0 of 3'));
+  for (let i = 0; i < 3; i++) { const cb = $$('#editor [data-cl-tick]')[i]; cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); await wait(300); }
+  await wait(300);
+  check('ticking the last item completes the action (through the editor)', !!T().tasks.find((t) => t.id === 't9').completed_at && T().checklist_runs.some((r) => r.task_id === 't9' && r.finished_at));
+  // A repeating action keeps its checklist and starts fresh.
+  const t2 = T().tasks.find((t) => t.id === 't2'); t2.repeat_rule = { every: 1, unit: 'week', from: 'assigned' }; t2.checklist_id = c.id;
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  openEditor(db.tasks.find((t) => t.id === 't2')); await wait(80);
+  for (let i = 0; i < 3; i++) { const cb = $$('#editor [data-cl-tick]')[i]; cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); await wait(300); }
+  await wait(500);
+  const next = T().tasks.find((t) => t.title === 'Order fittings for Jodi' && !t.completed_at && t.id !== 't2');
+  check('repeating: the next occurrence keeps the checklist, with a fresh run', T().tasks.find((t) => t.id === 't2').completed_at && next && next.checklist_id === c.id && !T().checklist_runs.some((r) => r.task_id === next.id));
+  await go('#project/p1');
+  check('row shows ☑ progress', has(`[data-task="${next.id}"]`, '☑ 0/3'));
+  // Make one from an action's steps.
+  openEditor(db.tasks.find((t) => t.id === 't6')); await wait(80);
+  $('#editor [data-ck-from-steps]').click(); await wait(400);
+  const made = T().checklists.find((x) => x.name === 'Inside deadmans switch');
+  check('Make a checklist from its steps (attached)', made && made.items.map((i) => i.text).join('|') === 'Asset holdings list|Last will and testament' && T().tasks.find((t) => t.id === 't6').checklist_id === made.id);
+  $('#sheet').close();
+  await go('#checklists');
+  check('list: items, last run, the action it rides on', has(undefined, 'van restock', '3 items', 'on “order fittings for jodi”'));
+  let blocked = false; try { const r = await window.sb.from('checklists').delete().eq('id', c.id); blocked = !!r.error; } catch { blocked = true; }
+  check('checklists can’t be deleted', blocked);
+}
 
 // Capture from anywhere: capture keys and the Shortcut guide, photos, Share, BCC settings, email people.
 async function captureAnywhere(check) {

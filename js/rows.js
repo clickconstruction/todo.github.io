@@ -43,6 +43,9 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   if (clips) meta.push(`<span class="meta-clip" title="${clips} attachment${clips === 1 ? '' : 's'}">📎${clips > 1 ? clips : ''}</span>`);
   if (bells) meta.push(`<span class="meta-bell" title="${bells} notification${bells === 1 ? '' : 's'}">🔔</span>`);
   if (t.repeat_rule && isOpen(t)) meta.push(`<span class="meta-repeat" title="${esc(describe(t.repeat_rule))}">🔁</span>`);
+  if (t.scheduled_at && isOpen(t)) { const d = new Date(t.scheduled_at); const today = new Date().toDateString() === d.toDateString(); meta.push(`<span class="meta-sched" title="Scheduled">⏰ ${esc(today ? '' : `${d.toLocaleDateString(undefined, { weekday: 'short' })} `)}${esc(d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))}</span>`); }
+  const ck = t.checklist_id && isOpen(t) && (db.checklists || []).find((c) => c.id === t.checklist_id);
+  if (ck) { const r = (db.checklistRuns || []).find((x) => x.checklist_id === ck.id && x.task_id === t.id && !x.finished_at); meta.push(`<span class="meta-ck" title="Checklist: ${esc(ck.name)}">☑ ${r ? (r.ticked || []).length : 0}/${ck.items.length}</span>`); }
   if (t.energy && isOpen(t)) meta.push(`<span class="meta-energy" title="${esc(t.energy)} energy">${ENERGY_ICON[t.energy] || ''}</span>`);
   if (t.estimate_minutes) meta.push(`<span class="meta-estimate" title="Estimate">⏱ ${fmtMinutes(t.estimate_minutes)}</span>`);
   if (t.dropped_at && !t.completed_at) meta.push('<span class="chip">Dropped</span>');
