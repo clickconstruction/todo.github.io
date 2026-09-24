@@ -159,6 +159,14 @@ async function fullReview(check) {
   const sid = location.hash.split('/')[1];
   check('starts: full screen, important first with why, progress', document.body.classList.contains('fr-mode') && has(undefined, 'update my will', 'mentions “my will”', '1 of 4') && t.review_items.filter((x) => x.session_id === sid).length === 4);
   check('queue: 1 important, 14 movies as one group, 2 singles', t.review_items.filter((x) => x.session_id === sid && x.kind === 'group').length === 1 && t.review_items.find((x) => x.kind === 'group' && x.session_id === sid).grp.task_ids.length === 14);
+  // "Which one?" guide under the buttons: seven lines, hide is remembered, "? Which one" brings it back.
+  try { localStorage.removeItem('tt.frGuide'); } catch { /* */ } app.frGuideOff = undefined; app.render(); await wait(30);
+  check('guide: a line per choice, with the reading/slipbox rules', $$('.fr-guide .fr-g').length === 7 && has('.fr-guide', 'something someone else made', 'already in your head', 'nothing is deleted'));
+  $('[data-fr="guide-hide"]').click(); await wait(30);
+  let saved = null; try { saved = localStorage.getItem('tt.frGuide'); } catch { /* */ }
+  check('guide: Hide guide hides it and remembers', !$('.fr-guide') && !!$('[data-fr="guide-show"]') && saved === 'off');
+  $('[data-fr="guide-show"]').click(); await wait(30);
+  check('guide: “? Which one” brings it back', $$('.fr-guide .fr-g').length === 7);
   check('before Claude joins: says so, with the prompt button', has('.fr-head', 'claude isn’t connected') && !!$('[data-fr="invite"]'));
   let clip = ''; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (x) => { clip = x; } } });
   $('[data-fr="invite"]').click(); await wait(50);

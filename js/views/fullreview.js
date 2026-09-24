@@ -8,6 +8,23 @@ import { fmtDate } from '../dates.js';
 import { buildQueue, priorityReason, proposalText } from '../review.js';
 
 const F = () => (app.fr ||= { id: null, session: null, items: [], byId: new Map(), undo: [], loading: false });
+
+// "Which one?": a line per choice under the buttons; the one you hover or tab to lights up.
+// Shown until you hide it (remembered on this device); "? Which one" brings it back.
+export const GUIDE = [
+  ['keep', 'Keep', 'You still mean to do it, and there’s a next step you could take.'],
+  ['someday', 'Someday', 'You might want it one day, but you’re not committing now.'],
+  ['done', 'Done', 'It already happened, or you did it and never ticked it off.'],
+  ['drop', 'Drop', 'You no longer care about it, or it’s out of date. Nothing is deleted.'],
+  ['reading', 'Reading list', 'Something someone else made that you haven’t read, watched or listened to yet.'],
+  ['slipbox', 'Slipbox', 'An idea that’s already in your head, which you could write in a sentence or two in your own words.'],
+  ['skip', 'Skip', 'Not sure yet. It comes back at the end.'],
+];
+const guideHidden = () => { if (app.frGuideOff !== undefined) return app.frGuideOff; try { return localStorage.getItem('tt.frGuide') === 'off'; } catch { return false; } };
+const guide = () => (guideHidden()
+  ? '<p class="fr-guide-off"><button class="link-btn" data-fr="guide-show">? Which one</button></p>'
+  : `<div class="fr-guide"><div class="fr-guide-h"><span>Which one?</span><button class="link-btn" data-fr="guide-hide">Hide guide</button></div>
+    ${GUIDE.map(([d, l, t]) => `<div class="fr-g" data-g="${d}"><b>${l}</b><span>${t}</span></div>`).join('')}</div>`);
 const n = (x) => Number(x || 0).toLocaleString();
 const RECENT = 2 * 60000; // a field Claude changed in the last two minutes is highlighted
 const PAGE = 1000;
@@ -175,6 +192,7 @@ function taskCard(it) {
     <div class="fr-btns ${pending(it) ? 'fr-btns-quiet' : ''}">${[['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
     <div class="fr-btns2 ${pending(it) ? 'fr-btns-quiet' : ''}"><button class="btn small" data-fr="decide" data-decision="reading" title="Something to read, watch or listen to: onto the reading list (up next)"><kbd>5</kbd> → Reading list</button><button class="btn small" data-fr="decide" data-decision="slipbox" title="An idea to think with, not an action: a fleeting note in your slipbox"><kbd>6</kbd> → Slipbox</button></div>
     <p class="hint fr-edit"><button class="link-btn" data-task="${t.id}">Edit details</button></p>
+    ${guide()}
   </div>`;
 }
 function groupCard(it) {
@@ -252,6 +270,7 @@ export async function fullReviewAction(el) {
   const f = F();
   const a = el.dataset.fr;
   const s = f.session;
+  if (a === 'guide-hide' || a === 'guide-show') { app.frGuideOff = a === 'guide-hide'; try { localStorage.setItem('tt.frGuide', a === 'guide-hide' ? 'off' : 'on'); } catch { /* private mode: this screen only */ } app.render(); return; }
   if (a === 'invite') {
     const text = resumePrompt(s);
     try { await navigator.clipboard.writeText(text); toast('Copied: paste it into Claude to start or resume'); return; } catch { /* no clipboard: show it to copy by hand */ }
