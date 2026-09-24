@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -56,6 +56,39 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Staying signed in: renew on wake, never sign out for a dropped connection, a kind signed-out screen.
+async function staySignedIn(check) {
+  const S = await import('/js/session.js');
+  const me = (await import('/js/state.js')).app.user;
+  const now = Date.now();
+  const fakeSb = (left, { refreshError = null } = {}) => { const calls = []; return { calls, auth: {
+    getSession: async () => ({ data: { session: { expires_at: Math.floor(now / 1000) + left, user: { email: 'r@x.com' } } } }),
+    refreshSession: async () => { calls.push('refresh'); return refreshError ? { data: {}, error: refreshError } : { data: { session: { expires_at: Math.floor(now / 1000) + 3600, fresh: true } }, error: null }; } } }; };
+  const far = fakeSb(3000); await S.keepSession(far, { now });
+  check('a fresh session is left alone', !far.calls.length);
+  const soon = fakeSb(60); const got = await S.keepSession(soon, { now }); await wait(10);
+  check('about to expire (after sleeping): renewed right away', soon.calls.length === 1 && got.fresh);
+  const flaky = fakeSb(-100, { refreshError: { message: 'Failed to fetch' } }); const kept = await S.keepSession(flaky, { now }); await wait(10);
+  check('renewal fails on a bad connection: still signed in', kept && kept.user.email === 'r@x.com');
+  const off = fakeSb(-100); Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+  const offKept = await S.keepSession(off, { now }); await wait(10);
+  delete navigator.onLine;
+  check('offline: keeps the session, renews later', offKept && !off.calls.length);
+  // Signing in remembers the email; being signed out (not by choice) says so, with it filled in.
+  S.signedIn({ email: 'robert@douglasmining.com' });
+  check('the email is remembered on this device', S.lastEmail() === 'robert@douglasmining.com');
+  localStorage.setItem('todo.outbox', JSON.stringify([{ title: 'a' }, { title: 'b' }]));
+  check('signed out (not by choice): says so, with offline captures', /signed out on this device/.test(S.signInNotice()) && /2 captures made offline will sync/.test(S.signInNotice()));
+  $('#auth-email').value = ''; await window.__showApp(null); await wait(50);
+  check('the sign-in screen: email filled in, the notice, password focused', !$('#auth').hidden && $('#auth-email').value === 'robert@douglasmining.com' && /signed out on this device/i.test($('#auth-msg').textContent) && document.activeElement === $('#auth-password'));
+  S.markSignedOutOnPurpose();
+  check('after Sign out: no “you were signed out” notice', S.signInNotice() === '');
+  localStorage.removeItem('todo.outbox');
+  await window.__showApp({ user: me }); await wait(100);
+  check('signing in again clears the “on purpose” mark', !$('#app').hidden && S.signInNotice() !== '' );
+  $('#auth-msg').textContent = '';
+}
 
 // New versions: switch at a safe moment, keep your place, never lose unsaved work.
 async function updates(check) {

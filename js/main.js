@@ -29,6 +29,7 @@ import { dailyAction, dailySubmit } from './views/daily.js';
 import { settleAction, settleKey } from './views/settle.js';
 import { moreSheetHtml, openCustomize } from './sidebar.js';
 import { initUpdates, resumeAfterUpdate, tryApply } from './updates.js';
+import { keepSession, signedIn, markSignedOutOnPurpose, lastEmail, signInNotice } from './session.js';
 import { importBusy } from './views/import.js';
 import { newFeedLink } from './views/settings.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
@@ -87,7 +88,7 @@ const ACTIONS = {
   'feed-link': newFeedLink,
   'push-test-now': pushTestNow,
   'push-test-later': pushTestLater,
-  'sign-out': () => sb.auth.signOut(),
+  'sign-out': () => { markSignedOutOnPurpose(); sb.auth.signOut(); },
   'new-perspective': openNewPerspective,
   'show-remaining': () => { setFilter({ show: 'remaining' }); render(); },
   'reset-filter': () => { setFilter({ show: 'remaining', fits: 0, energy: '', sort: 'default' }); render(); },
@@ -289,9 +290,9 @@ Object.assign(H, {
 });
 // Pick up changes made on another device when the app comes back to the foreground.
 document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible' && app.user && !window.__noRefresh) { await flushOutbox(); await loadAll(); render(); } // tests pause this
+  if (document.visibilityState === 'visible' && app.user && !window.__noRefresh) { await keepSession(sb); await flushOutbox(); await loadAll(); render(); } // tests pause this
 });
-window.addEventListener('online', async () => { if (app.user) { await flushOutbox(); render(); } });
+window.addEventListener('online', async () => { if (app.user) { await keepSession(sb); await flushOutbox(); render(); } });
 
 // ---------- auth ----------
 const authMsg = (m) => { $('#auth-msg').textContent = m; };
@@ -302,6 +303,7 @@ $('#auth-form').onsubmit = async (e) => {
   authMsg(error ? error.message : '');
 };
 $('#auth-signup').onclick = async () => {
+  $('#auth-password').autocomplete = 'new-password'; // so the phone offers to save a new password
   if (!$('#auth-form').reportValidity()) return;
   authMsg('Creating account…');
   const { data, error } = await sb.auth.signUp({
@@ -313,13 +315,22 @@ $('#auth-signup').onclick = async () => {
   authMsg(data.session ? '' : 'Check your email to confirm, then sign in here.');
 };
 
+if (window.__mock) window.__showApp = (s) => showApp(s); // tests: the signed-out screen
 async function showApp(session) {
   app.user = session ? session.user : null;
   resetSettings();
   resetAlerts();
   $('#auth').hidden = !!app.user;
   $('#app').hidden = !app.user;
-  if (!app.user) return;
+  if (!app.user) {
+    // Signed out: your email filled in, and (unless you chose to sign out) a word about why.
+    const email = $('#auth-email');
+    if (!email.value) email.value = lastEmail();
+    authMsg(signInNotice());
+    if (email.value) setTimeout(() => $('#auth-password').focus(), 0);
+    return;
+  }
+  signedIn(app.user);
   await loadAll();
   await flushOutbox();
   render();
