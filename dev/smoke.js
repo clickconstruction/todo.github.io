@@ -269,6 +269,13 @@ async function fullReview(check) {
   await until(() => location.hash === `#full/${sid}`);
   check('#full goes straight back to the card you were on', location.hash === `#full/${sid}` && document.body.classList.contains('fr-mode'));
   check('before Claude joins: says so, with the prompt button', has('.fr-head', 'claude isn’t connected') && !!$('[data-fr="invite"]'));
+  // Presence between messages: checked in 10 min ago = following along; 2 hours = hasn't checked in, prompt stands out.
+  { const ses0 = t.review_sessions.find((x) => x.id === sid); const { app: A } = await import('/js/state.js');
+    A.fr.session.agent_seen_at = ses0.agent_seen_at = new Date(Date.now() - 10 * 60000).toISOString(); A.render(); await wait(30);
+    check('checked in 10 min ago: “following along”, not “isn’t connected”', has('.fr-head', 'following along', 'checked in 10 min ago') && !has('.fr-head', 'isn’t connected'));
+    A.fr.session.agent_seen_at = ses0.agent_seen_at = new Date(Date.now() - 2 * 3600000).toISOString(); A.render(); await wait(30);
+    check('2 hours: “hasn’t checked in lately”, Prompt for Claude stands out', has('.fr-head', 'hasn’t checked in lately') && $('[data-fr="invite"]').classList.contains('primary'));
+    A.fr.session.agent_seen_at = ses0.agent_seen_at = null; A.render(); await wait(30); }
   let clip = ''; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (x) => { clip = x; } } });
   $('[data-fr="invite"]').click(); await wait(50);
   check('“Prompt for Claude” copies the resume prompt: session, link, how we work', clip.includes(sid) && clip.includes(`#full/${sid}`) && clip.includes('full_review') && clip.includes('"suggest"') && clip.includes('just do it'));

@@ -107,6 +107,7 @@ async function poll() {
   if (!f.id || !location.hash.startsWith(`#full/${f.id}`)) { stopListening(); return; }
   const [s] = await run(sb.from('review_sessions').select('*').eq('id', f.id));
   if (s) await onSession(s, { quiet: true });
+  refreshPresence();
   const cur = s && s.current_item;
   if (cur) { const [it] = await run(sb.from('review_items').select('*').eq('id', cur)); if (it) await onItem(it); }
 }
@@ -148,7 +149,28 @@ Use the full_review tool (Todo Tooling MCP). Start with action "status" and tell
 How we work: I tell you what to do with each card in a few words. You turn it into a suggestion (action "suggest") on the current card, and I press Submit in the app. Only apply changes directly if I say "just do it". Name the card in every reply, because I may have moved on in the app. Draft ahead with "upcoming" and "suggest" when I ask. Nothing gets deleted; drop means drop.`;
 
 // ---------- view ----------
-const claudeHere = (s) => s && s.agent_seen_at && Date.now() - Date.parse(s.agent_seen_at) < 90000;
+// Claude only acts when you message it, so "connected" is about the conversation, not a live socket:
+//   here: acted in the last 90 s (working on your card now) · along: checked in within 45 min (the chat
+//   is going; it knows your card) · away: longer, or never (paste the prompt to bring it back).
+const claudeSeen = (s) => {
+  const ms = s && s.agent_seen_at ? Date.now() - Date.parse(s.agent_seen_at) : Infinity;
+  return ms < 90000 ? 'here' : ms < 45 * 60000 ? 'along' : 'away';
+};
+function presenceHtml(s) {
+  const st = claudeSeen(s);
+  if (st === 'here') return `<i></i>Claude is here${s.agent_status ? ` · ${esc(s.agent_status)}` : ''}`;
+  if (st === 'along') { const m = Math.max(1, Math.round((Date.now() - Date.parse(s.agent_seen_at)) / 60000)); return `<i class="along"></i>Claude is following along · checked in ${m} min ago`; }
+  return s && s.agent_seen_at ? 'Claude hasn’t checked in lately' : 'Claude isn’t connected';
+}
+// Keep the line current between redraws (the minutes tick, "here" fades to "following along").
+function refreshPresence() {
+  const el = document.querySelector('.fr-pres'); const s = F().session;
+  if (!el || !s) return;
+  const st = claudeSeen(s);
+  el.className = `fr-pres ${st === 'away' ? '' : 'on'} ${st}`;
+  const html = presenceHtml(s); if (el.innerHTML !== html) el.innerHTML = html;
+  const copy = document.querySelector('.fr-copy'); if (copy) copy.classList.toggle('primary', st === 'away');
+}
 const fresh = (it, field) => it.changed && it.changed[field] && Date.now() - Date.parse(it.changed[field]) < RECENT;
 const mark = (it, field, html) => (fresh(it, field) ? `<span class="fr-new">${html}</span>` : html);
 // When it was added (edits during the review don't make it look new).
@@ -243,10 +265,10 @@ export function viewFullReview(id) {
   const skipped = live.filter((x) => x.status === 'skipped').length;
   const cur = s.current_item && f.byId.get(s.current_item);
   const pos = cur ? live.filter((x) => x.sort <= cur.sort).length : live.length;
-  const here = claudeHere(s);
+  const seen = claudeSeen(s);
   const head = `<div class="fr-head"><div><b>${esc(s.title)}</b> <span class="hint">· ${n(pos)} of ${n(live.length)} · ${n(done)} reviewed${skipped ? ` · ${n(skipped)} skipped` : ''}</span></div>
-      <span class="fr-pres ${here ? 'on' : ''}">${here ? `<i></i>Claude is here${s.agent_status ? ` · ${esc(s.agent_status)}` : ''}` : 'Claude isn’t connected'}</span>
-      <button class="btn small fr-copy" data-fr="invite" title="Copy the prompt that starts or resumes this review with Claude">⧉ Prompt for Claude</button>
+      <span class="fr-pres ${seen === 'away' ? '' : 'on'} ${seen}">${presenceHtml(s)}</span>
+      <button class="btn small fr-copy${seen === 'away' ? ' primary' : ''}" data-fr="invite" title="Copy the prompt that starts or resumes this review with Claude">⧉ Prompt for Claude</button>
       <a class="icon-btn fr-close" href="#${esc((s.scope && s.scope.import_id) ? `settle/${s.scope.import_id}` : s.scope && s.scope.project_id ? `project/${s.scope.project_id}` : 'inbox')}" aria-label="Close" title="Close (Esc)">✕</a></div>
     <div class="cl-progress"><i style="width:${live.length ? Math.round((done / live.length) * 100) : 0}%"></i></div>`;
   if (!cur) {

@@ -169,6 +169,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
           next: 'Give the user app_link to open in the app, then work through the current card together.' };
       }
       const s = await findSession(api, a.session_id);
+      if (action !== 'status') await touch(api, s.id); // any call is a check-in: the app shows Claude following along
       let list = await items(api, s.id);
       const cur = await itemFull(api, (list.find((x) => x.id === s.current_item) || {}).id);
       if (action === 'status') { await touch(api, s.id); return stateOut(api, s, list); }

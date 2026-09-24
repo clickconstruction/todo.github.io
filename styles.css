@@ -1296,6 +1296,7 @@ body.fr-mode .view { margin-left: auto !important; margin-right: auto !important
 .fr-pres { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
 .fr-pres i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
 .fr-pres.on { color: var(--text); }
+.fr-pres i.along { background: transparent; border: 2px solid var(--ok); width: 6px; height: 6px; }
 .fr-close { text-decoration: none; font-size: 18px; }
 .fr-card { border: 1px solid var(--line); border-radius: 16px; padding: 18px; margin: 14px 0; background: var(--surface); }
 .fr-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
