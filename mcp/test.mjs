@@ -247,7 +247,7 @@ assert(isAuthenticated('dkim=fail; spf=pass smtp.mailfrom=bounce@mail.douglasmin
 assert(!isAuthenticated('dkim=pass header.d=evil.com; spf=pass smtp.mailfrom=x@evil.com; dmarc=fail', 'douglasmining.com'), 'auth: unaligned pass rejected');
 assert(!isAuthenticated('', 'douglasmining.com'), 'auth: missing results rejected');
 const t1 = emailToTask({ subject: 'Fwd: RE: Plans for Jodi', text: 'Please release all three.\r\n\r\n\r\n\r\nThanks', date: '2026-09-22T12:00:00Z', attachments: [{ filename: 'plans.pdf' }] }, 'robert@douglasmining.com');
-assert(t1.title === 'Plans for Jodi' && t1.notes.includes('Attachments (not saved): plans.pdf') && !t1.notes.includes('\n\n\n'), 'emailToTask cleans subject, notes, attachments');
+assert(t1.title === 'Plans for Jodi' && t1.notes.includes('Attachments: plans.pdf') && !t1.notes.includes('\n\n\n'), 'emailToTask cleans subject, notes, attachments');
 assert(emailToTask({ subject: '', html: '<p>Call GVEC</p><p>re: utilities</p>' }, 'a@b.c').title === 'Call GVEC', 'emailToTask falls back to first body line (html)');
 
 const raw = (from, subject, body) => [`From: Robert <${from}>`, 'To: inbox@todotooling.com', `Subject: ${subject}`, 'Date: Tue, 22 Sep 2026 17:00:00 -0500', 'Content-Type: text/plain; charset=utf-8', '', body].join('\r\n');
@@ -895,5 +895,69 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(twice.body.result.isError && /already created/.test(twice.body.result.content[0].text), 'can’t create twice');
   const un = await tool('plan_project', { project: pj.id, action: 'undo' });
   assert(un.undone.tasks_dropped === 6 && db.tasks.filter((t) => t.project_id === pj.id && !t.dropped_at).length === 0, 'plan_project undo drops what it made');
+}
+// ---------- capture from anywhere, BCC → Waiting For ----------
+{
+  const CAP = 'tt_' + 'c'.repeat(32);
+  db.api_tokens.push({ id: 'cap1', user_id: UID, token_hash: createHash('sha256').update(CAP).digest('hex'), scope: 'capture' });
+  const cap = async (body, { token = CAP, type = 'application/json' } = {}) => {
+    const r = await worker.fetch(new Request('https://mcp.todotooling.com/capture', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': type }, body: type === 'application/json' ? JSON.stringify(body) : body }), env, ctx);
+    return { status: r.status, body: await r.json() };
+  };
+  const c1 = await cap({ text: 'Order two more cases of PEX elbows' });
+  const t = db.tasks.find((x) => x.id === c1.body.id);
+  assert(c1.status === 200 && /Captured ✓/.test(c1.body.message) && t.in_inbox && t.title === 'Order two more cases of PEX elbows' && t.source === 'capture', '/capture: text → Inbox item');
+  const c2 = await cap({ text: 'https://www.rheem.com/tankless-spec' });
+  assert(db.tasks.find((x) => x.id === c2.body.id).title === 'rheem.com/tankless-spec' && db.tasks.find((x) => x.id === c2.body.id).notes.includes('https://www.rheem.com/tankless-spec'), '/capture: a shared link becomes a readable title, link in notes');
+  const c3 = await cap({ text: 'Receipt: Home Depot $214', files: [{ name: 'receipt.jpg', mime: 'image/jpeg', base64: btoa('jpegbytes') }] });
+  assert(c3.body.attachments === 1 && db.attachments.some((a) => a.task_id === c3.body.id && a.name === 'receipt.jpg' && a.mime === 'image/jpeg'), '/capture: photo attached');
+  const fd = new FormData(); fd.append('text', 'Tankless spec sheet'); fd.append('file', new Blob(['%PDF'], { type: 'application/pdf' }), 'spec.pdf');
+  const c4r = await worker.fetch(new Request('https://mcp.todotooling.com/capture', { method: 'POST', headers: { Authorization: `Bearer ${CAP}` }, body: fd }), env, ctx);
+  const c4 = await c4r.json();
+  assert(c4.ok && db.attachments.some((a) => a.task_id === c4.id && a.name === 'spec.pdf'), '/capture: multipart form with a file (Share sheet)');
+  const plain = await worker.fetch(new Request('https://mcp.todotooling.com/capture', { method: 'POST', headers: { Authorization: `Bearer ${CAP}`, 'Content-Type': 'text/plain' }, body: 'Call the inspector\nabout Tuesday' }), env, ctx);
+  const pj = await plain.json();
+  assert(db.tasks.find((x) => x.id === pj.id).title === 'Call the inspector' && db.tasks.find((x) => x.id === pj.id).notes === 'about Tuesday', '/capture: plain text, first line is the title');
+  const imgR = await worker.fetch(new Request('https://mcp.todotooling.com/capture', { method: 'POST', headers: { Authorization: `Bearer ${CAP}`, 'Content-Type': 'image/jpeg' }, body: new Uint8Array([255, 216, 255, 224]) }), env, ctx);
+  const img = await imgR.json();
+  assert(/^Photo · \d{1,2}:\d{2} [AP]M$/.test(img.title) && db.attachments.some((a) => a.task_id === img.id && a.mime === 'image/jpeg' && a.name === 'Photo.jpg'), '/capture: a photo from the Share sheet (raw body) → "Photo · 3:42 PM" with the photo');
+  const nT = db.tasks.length;
+  const test = await cap({ text: 'Test from Settings', test: true });
+  assert(test.body.test && db.tasks.length === nT, '/capture test: checks the key, adds nothing');
+  assert((await cap({ text: 'x' }, { token: 'tt_' + 'z'.repeat(32) })).status === 401, '/capture: unknown key refused');
+  const geo = 'tt_' + 'g'.repeat(32); db.api_tokens.push({ id: 'geo9', user_id: UID, token_hash: createHash('sha256').update(geo).digest('hex'), scope: 'geo' });
+  assert((await cap({ text: 'x' }, { token: geo })).status === 401, '/capture: a location key can’t capture');
+  const mcpWithCap = await call('tools/list', {}, CAP);
+  assert(mcpWithCap.status === 401, 'a capture key can’t use MCP (read or change anything)');
+
+  // Email: BCC'd (the Inbox isn't in To) → Waiting For on the To person.
+  const { followTag, nameFor } = await import('./src/capture.js');
+  const fri = followTag('Signed change order [fri]', new Date('2026-09-23T15:00:00Z'), 'America/Chicago');
+  assert(fri.subject === 'Signed change order' && fri.days === 2 && followTag('Quote [3d]').days === 3 && followTag('Quote [2w]').days === 14 && followTag('No tag').days === null, 'follow-up tags: [fri], [3d], [2w]');
+  assert(nameFor({ address: 'jodi.park@parkhomes.com' }) === 'Jodi Park' && nameFor({ name: 'Hiro Tanaka', address: 'h@x.com' }) === 'Hiro Tanaka', 'names from addresses');
+  const rawTo = (to, subject, body, extra = []) => ['From: Robert <robert@douglasmining.com>', `To: ${to}`, ...extra, `Subject: ${subject}`, 'Date: Wed, 23 Sep 2026 10:00:00 -0500', 'Content-Type: text/plain; charset=utf-8', '', body].join('\r\n');
+  const send = async (raw) => { const m = { from: 'robert@douglasmining.com', to: 'inbox@todotooling.com', raw, headers: new Headers({ 'arc-authentication-results': 'dkim=pass header.d=douglasmining.com; dmarc=pass' }), rejected: null, setReject(r) { this.rejected = r; } }; await worker.email(m, env); return m; };
+  const n0 = db.tasks.length;
+  const bcc = await send(rawTo('Jodi Park <jodi@parkhomes.com>, Hiro <hiro@example.com>', 'Re: Signed change order [3d]', 'Hi Jodi, can you sign and send back the change order?'));
+  const w = db.tasks[db.tasks.length - 1];
+  const jodiP = db.people.find((p) => p.email === 'jodi@parkhomes.com');
+  assert(!bcc.rejected && db.tasks.length === n0 + 1 && w.title === 'Signed change order' && w.waiting_on === jodiP.id && !w.in_inbox && w.follow_up_at && w.delegated_at, 'BCC to the Inbox → Waiting For on the To person, tag stripped');
+  assert(jodiP.added_via === 'email' && jodiP.name === 'Jodi Park' && w.notes.includes('Emailed Jodi Park <jodi@parkhomes.com>') && w.notes.includes('Also to: Hiro'), 'the person is created from the email, others noted');
+  const days = Math.round((Date.parse(w.follow_up_at) - Date.now()) / 86400000);
+  assert(days >= 2 && days <= 3, 'follow-up from the [3d] tag');
+  await send(rawTo('Jodi Park <jodi@parkhomes.com>', 'Permit copy', 'Can you send the permit copy?'));
+  const w2 = db.tasks[db.tasks.length - 1];
+  assert(w2.waiting_on === jodiP.id && db.people.filter((p) => p.email === 'jodi@parkhomes.com').length === 1, 'the same person is reused by email');
+  const d2 = Math.round((Date.parse(w2.follow_up_at) - Date.now()) / 86400000);
+  assert(d2 >= 6 && d2 <= 7, 'no tag: the default follow-up (a week)');
+  await send(rawTo('Hiro <hiro@example.com>', 'Quote', 'x', ['Cc: inbox@todotooling.com']));
+  assert(db.tasks[db.tasks.length - 1].waiting_on === db.people.find((p) => p.email === 'hiro@example.com').id, 'CC works too');
+  await send(rawTo('inbox@todotooling.com', 'Buy a trailer lock', 'x'));
+  assert(db.tasks[db.tasks.length - 1].in_inbox && !db.tasks[db.tasks.length - 1].waiting_on, 'sent To the Inbox: an Inbox item as before');
+  const mp = ['From: Robert <robert@douglasmining.com>', 'To: Jodi Park <jodi@parkhomes.com>', 'Subject: Change order to sign', 'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary="b1"', '',
+    '--b1', 'Content-Type: text/plain; charset=utf-8', '', 'Attached.', '--b1', 'Content-Type: application/pdf; name="co.pdf"', 'Content-Disposition: attachment; filename="co.pdf"', 'Content-Transfer-Encoding: base64', '', btoa('%PDF-1.4 change order'), '--b1--', ''].join('\r\n');
+  await send(mp);
+  const wa = db.tasks[db.tasks.length - 1];
+  assert(wa.waiting_on && db.attachments.some((a) => a.task_id === wa.id && a.name === 'co.pdf' && a.mime === 'application/pdf'), 'email attachments are saved to the item');
 }
 console.log('ALL PASSED');

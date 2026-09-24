@@ -18,6 +18,7 @@ import { gtdTools } from './gtd.js';
 import { weeklyTools } from './weekly.js';
 import { horizonsTools } from './horizons.js';
 import { planTools } from './plan.js';
+import { handleCapture, followTag, nameFor } from './capture.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -61,6 +62,10 @@ export default {
     if (url.pathname === '/calendar/fetch') {
       if (!(env.SUPABASE_SECRET_KEY || '').trim()) return json({ error: 'Server not configured' }, 503);
       return handleCalendarFetch(request, env, ctx, { rest: (path, opts) => rest(env, path, opts), json, sha256Hex, cors: CORS });
+    }
+    if (url.pathname === '/capture') {
+      if (!(env.SUPABASE_SECRET_KEY || '').trim()) return json({ error: 'Server not configured' }, 503);
+      return handleCapture(request, env, ctx, { rest: (path, opts) => rest(env, path, opts), sha256Hex, json: (b, s) => json(b, s), cors: CORS, makeApi: (uid) => new Api(env, uid) });
     }
     if (url.pathname === '/geo') {
       if (!(env.SUPABASE_SECRET_KEY || '').trim()) return json({ error: 'Server not configured' }, 503);
@@ -160,9 +165,64 @@ export async function handleEmail(message, env) {
     message.setReject('This address only accepts mail from approved senders.');
     return;
   }
-  const task = emailToTask(parsed, from);
-  await rest(env, 'tasks', { method: 'POST', body: { user_id: senders[0].user_id, source: 'email', ...task } });
-  console.log('email captured', { from, title: task.title });
+  const userId = senders[0].user_id;
+  const api = new Api(env, userId);
+  await api.loadSettings();
+  // BCC or CC to the Inbox (it isn't in the To line) = you've asked someone: Waiting For on them.
+  const flat = (list) => (list || []).flatMap((a) => (a && a.group ? a.group : [a])).filter((a) => a && a.address);
+  const ours = (a) => /@todotooling\.com$/i.test(a || '');
+  const to = flat(parsed.to);
+  const recipients = to.filter((a) => !ours(a.address) && a.address.toLowerCase() !== from);
+  const waiting = !to.some((a) => ours(a.address)) && recipients.length;
+  let row;
+  if (waiting) {
+    row = await emailToWaiting(api, parsed, from, recipients);
+    console.log('email → waiting for', { from, to: recipients[0].address, title: row.title });
+  } else {
+    const task = emailToTask(parsed, from);
+    [row] = await rest(env, 'tasks', { method: 'POST', prefer: 'return=representation', body: { user_id: userId, source: 'email', ...task } });
+    console.log('email captured', { from, title: task.title });
+  }
+  await saveEmailAttachments(api, row.id, parsed);
+}
+
+// Attachments on emailed items are saved to the item (up to 25 MB in all; inline images skipped).
+async function saveEmailAttachments(api, taskId, parsed) {
+  let total = 0;
+  for (const a of (parsed.attachments || []).filter((x) => x.disposition !== 'inline' && x.content)) {
+    const bytes = typeof a.content === 'string' ? new TextEncoder().encode(a.content) : new Uint8Array(a.content);
+    if (total + bytes.byteLength > 25 * 1024 * 1024) break;
+    total += bytes.byteLength;
+    try { await api.upload('task_id', taskId, a.filename || 'attachment', bytes, a.mimeType || 'application/octet-stream'); } catch (e) { console.log('attachment not saved', e.message); }
+  }
+}
+
+// "Waiting on Jodi Park: Signed change order", follow up in [3d] / a week, Jodi saved as a person.
+export async function emailToWaiting(api, parsed, from, recipients) {
+  const first = recipients[0];
+  const addr = first.address.toLowerCase();
+  const people = await api.q(`people?${api.u}&select=*`);
+  let person = people.find((p) => (p.email || '').toLowerCase() === addr && !p.archived_at) || people.find((p) => (p.email || '').toLowerCase() === addr);
+  if (!person) {
+    const name = nameFor(first);
+    const same = people.find((p) => !p.archived_at && !p.email && p.name.toLowerCase() === name.toLowerCase());
+    if (same) [person] = await api.q(`people?${api.u}&id=eq.${same.id}`, { method: 'PATCH', prefer: 'return=representation', body: { email: addr } });
+    else [person] = await api.q('people', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name, email: addr, added_via: 'email' } });
+  }
+  const base = emailToTask(parsed, from);
+  const tagged = followTag(base.title, new Date(), api.tz);
+  const days = tagged.days || api.settings.waiting_followup_days || 7;
+  const day = localDate(new Date(Date.now() + days * 86400000).toISOString(), api.tz);
+  const others = recipients.slice(1).map((a) => nameFor(a));
+  const body = (parsed.text || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const when = parsed.date ? new Date(parsed.date).toUTCString() : new Date().toUTCString();
+  let notes = `Emailed ${person.name} <${addr}> · ${when}${others.length ? `\nAlso to: ${others.join(', ')}` : ''}`;
+  if (body) notes += `\n\n${body}`;
+  if (notes.length > MAX_NOTES) notes = `${notes.slice(0, MAX_NOTES)}\n…(truncated)`;
+  const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body: {
+    user_id: api.userId, title: (tagged.subject || base.title).slice(0, 300), notes, source: 'email', in_inbox: false,
+    waiting_on: person.id, delegated_at: new Date().toISOString(), follow_up_at: zonedToIso(day, 9, api.tz) } });
+  return row;
 }
 
 export function isAuthenticated(results, domain) {
@@ -182,7 +242,7 @@ export function emailToTask(parsed, from) {
   const when = parsed.date ? new Date(parsed.date).toUTCString() : new Date().toUTCString();
   const attachments = (parsed.attachments || []).filter((a) => a.disposition !== 'inline').map((a) => a.filename).filter(Boolean);
   let notes = `Emailed by ${from} · ${when}`;
-  if (attachments.length) notes += `\nAttachments (not saved): ${attachments.join(', ')}`;
+  if (attachments.length) notes += `\nAttachments: ${attachments.join(', ')}`;
   if (body) notes += `\n\n${body}`;
   if (notes.length > MAX_NOTES) notes = `${notes.slice(0, MAX_NOTES)}\n…(truncated)`;
   return { title, notes };

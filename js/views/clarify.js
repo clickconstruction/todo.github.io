@@ -5,7 +5,7 @@ import { db, app, sb, run, syncRow, esc, byId, isOpen, taskSort, tagsFor, toast,
 import { startOfToday, addDays, fmtDate, atDefaultTime } from '../dates.js';
 import { saveTask, setLinks, convertToProject, capture } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from '../editors/tagPicker.js';
-import { attachmentsFor } from '../editors/attachField.js';
+import { attachmentsFor, signedUrl } from '../editors/attachField.js';
 import { ENERGY, isTickled, returnedFromTickler, suggestFor, makeSomeday, fileToReference, topics, saveReference, dayKey, somedayCategories } from '../gtd.js';
 import { openDelegate, openTickle } from '../editors/gtd.js';
 import { openReview } from './weekly.js';
@@ -81,7 +81,9 @@ const WHEN = () => [['', 'No date'], [dayKey(startOfToday()), 'Today'], [dayKey(
 function itemCard(t) {
   const files = attachmentsFor('task_id', t.id).length;
   const meta = [`Captured ${esc(fmtDate(t.created_at))}`, returnedFromTickler(t) && '📆 from the tickler', files && `📎 ${files}`].filter(Boolean).join(' · ');
+  const pics = attachmentsFor('task_id', t.id).filter((a) => a.mime.startsWith('image/')).slice(0, 4);
   return `<div class="cl-item"><b>${esc(t.title)}</b><span class="cl-meta">${meta}</span>
+    ${pics.length ? `<div class="cl-pics">${pics.map((a) => `<img class="cl-thumb" data-cl-thumb="${esc(a.path)}" alt="${esc(a.name)}">`).join('')}</div>` : ''}
     ${t.notes ? `<p class="cl-notes">${esc(t.notes.slice(0, 400))}${t.notes.length > 400 ? '…' : ''}</p>` : ''}
     <button class="link-btn" data-task="${t.id}">Edit details</button></div>`;
 }
@@ -178,6 +180,7 @@ export function viewClarify() {
 // After render: wire the next-action form's tag chips (prefilled from the suggestion).
 export function mountClarify() {
   const s = state();
+  document.querySelectorAll('[data-cl-thumb]').forEach(async (img) => { try { img.src = await signedUrl(img.dataset.clThumb); } catch { img.remove(); } });
   const form = document.querySelector('[data-clarify-form="next"]');
   if (form) {
     const t = current();

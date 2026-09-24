@@ -22,6 +22,8 @@ import { openSheet, esc } from './state.js';
 import { openNewPerspective, openPerspectiveEditor, openPerspectiveMenu, saveCurrentViewAsPerspective } from './editors/perspective.js';
 import { livePerspectives, movePerspective, archivePerspective, badgeCount } from './perspectives.js';
 import { getFocus, focusLabel } from './prefs.js';
+import { newCaptureKey, captureGuide } from './views/settings.js';
+import { noticeEmailPeople } from './views/capture.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
 import { enableAlerts } from './alerts.js';
@@ -72,6 +74,8 @@ const ACTIONS = {
   'test-alert': testAlert,
   'toggle-archived-places': () => { app.showArchivedPlaces = !app.showArchivedPlaces; render(); },
   'new-token': createToken,
+  'new-capture-key': newCaptureKey,
+  'capture-guide': captureGuide,
   'push-test-now': pushTestNow,
   'push-test-later': pushTestLater,
   'sign-out': () => sb.auth.signOut(),
@@ -303,6 +307,7 @@ async function showApp(session) {
   await loadAll();
   await flushOutbox();
   render();
+  noticeEmailPeople();
   startWatching(); // only if location was already allowed; never prompts on launch
   primeAlerts();
   // First launch from the iPhone Home Screen: take people straight to finishing alert setup.

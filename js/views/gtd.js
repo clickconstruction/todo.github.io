@@ -109,7 +109,7 @@ export const waitingBadgeCount = () => db.tasks.filter((t) => followUpDue(t) && 
 export function waitingRow(t) {
   const late = followUpDue(t);
   const p = waitingPerson(t);
-  const bits = [t.follow_up_at ? `<span class="${late ? 'late' : ''}">follow up ${late && new Date(t.follow_up_at) < startOfToday() ? 'was ' : ''}${esc(fmtDate(t.follow_up_at))}</span>` : '', t.delegated_at ? `asked ${esc(daysAgo(t.delegated_at))}` : ''].filter(Boolean).join(' · ');
+  const bits = [t.follow_up_at ? `<span class="${late ? 'late' : ''}">follow up ${late && new Date(t.follow_up_at) < startOfToday() ? 'was ' : ''}${esc(fmtDate(t.follow_up_at))}</span>` : '', t.delegated_at ? `asked ${esc(daysAgo(t.delegated_at))}${t.source === 'email' ? ' by email 📧' : ''}` : ''].filter(Boolean).join(' · ');
   const reachable = p && (p.email || p.phone);
   return `<li class="row wait-row ${late ? 'late' : ''}" data-task="${t.id}"><button class="check" data-check="${t.id}" aria-label="Got it">✓</button>
     <div class="row-main"><div class="row-title">${esc(t.title)}</div>${bits ? `<div class="row-meta">${bits}</div>` : ''}</div>

@@ -6,6 +6,7 @@ import { liveCalendars, maskUrl, COLORS, checkLink, addCalendar, updateCalendar,
 import { sb, app, esc, run, toast, openSheet, $, sortedTags, tagLabel } from '../state.js';
 import { fmtDate } from '../dates.js';
 import { resultLines, stripIcon, when, timeOnly } from '../pushResult.js';
+import { captureSection, createCaptureKey, openCaptureGuide } from './capture.js';
 
 const MCP_URL = 'https://mcp.todotooling.com/mcp';
 const CAPTURE_EMAIL = 'inbox@todotooling.com';
@@ -34,7 +35,7 @@ async function loadSettings() {
 
 export function viewSettings() {
   if (apiTokens === null) loadSettings();
-  const rows = (apiTokens || []).map((t) => `<li class="row" style="cursor:default">
+  const rows = (apiTokens || []).filter((t) => t.scope !== 'capture').map((t) => `<li class="row" style="cursor:default">
       <div class="row-main"><div class="row-title">${esc(t.name)} <span class="chip">…${esc(t.token_hint)}</span>${t.scope === 'geo' ? ' <span class="chip">📍 Location alerts only</span>' : ''}</div>
       <div class="row-meta"><span>Created ${esc(fmtDate(t.created_at))}</span><span>${t.last_used_at ? `Last used ${esc(fmtDate(t.last_used_at))}` : 'Never used'}</span></div></div>
       <button class="btn small danger" data-revoke="${t.id}">Revoke</button></li>`).join('');
@@ -50,6 +51,10 @@ export function viewSettings() {
     <ul class="list">${emailSenders.map((e) => `<li class="row" style="cursor:default"><div class="row-main"><div class="row-title">${esc(e.email)}</div></div>
       <button class="btn small danger" data-remove-sender="${e.id}">Remove</button></li>`).join('')}</ul>
     <form class="capture" data-add-sender style="margin-top:12px"><input type="email" name="email" placeholder="Add another address you send from" autocomplete="off"><button class="btn">Add</button></form>
+    <div class="settings-card bcc-card"><p><b>Waiting For by email:</b> when you email someone and put <b>${CAPTURE_EMAIL}</b> in <b>BCC</b> (or CC), it becomes “Waiting on <i>them</i>: <i>subject</i>”, with your email in the notes and its attachments. They’re added as a person with their email, so Nudge works.</p>
+      <p class="hint">Follow up in a subject tag: <code>[3d]</code> <code>[1w]</code> <code>[fri]</code> (removed from the title). Sent <i>to</i> the address, it’s an Inbox item as before.</p>
+      <label class="set-row"><span class="set-text"><b>Otherwise follow up in</b></span><select data-setting-waiting-days>${[2, 3, 5, 7, 10, 14, 21, 30].map((d) => `<option value="${d}" ${Number((app.settings || {}).waiting_followup_days || 7) === d ? 'selected' : ''}>${d === 7 ? '1 week' : d === 14 ? '2 weeks' : d === 21 ? '3 weeks' : `${d} days`}</option>`).join('')}</select></label></div>
+    ${captureSection((apiTokens || []).filter((t) => t.scope === 'capture'))}
     ${datesSection()}
     ${reviewSection()}
     ${calendarsSection()}
@@ -81,6 +86,9 @@ export async function createToken() {
   $('[data-copy]', sheet).onclick = async () => { await navigator.clipboard.writeText(cmd); toast('Copied'); };
   sheet.showModal();
 }
+
+export const newCaptureKey = () => createCaptureKey(loadSettings);
+export const captureGuide = () => openCaptureGuide(null);
 
 export async function revokeToken(id) {
   if (!confirm('Revoke this token? Agents using it will lose access immediately.')) return;
@@ -264,6 +272,8 @@ document.addEventListener('change', async (e) => {
   if (tag) { await saveSettings({ forecast_tag_id: tag.value || null }); return; }
   const day = e.target.closest && e.target.closest('[data-setting-review-day]');
   if (day) { await saveSettings({ review_day: Number(day.value) }); return; }
+  const wdays = e.target.closest && e.target.closest('[data-setting-waiting-days]');
+  if (wdays) { await saveSettings({ waiting_followup_days: Number(wdays.value) }); return; }
   const notify = e.target.closest && e.target.closest('[data-setting-review-notify]');
   if (notify) await saveSettings({ review_notify: notify.checked });
 });

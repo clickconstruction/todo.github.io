@@ -40,7 +40,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -55,6 +55,60 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Capture from anywhere: capture keys and the Shortcut guide, photos, Share, BCC settings, email people.
+async function captureAnywhere(check) {
+  const S = await import('/js/views/settings.js');
+  S.resetSettings();
+  await go('#settings');
+  for (let i = 0; i < 20 && !has(undefined, 'capture from anywhere'); i++) await wait(100);
+  check('Settings: Capture from anywhere and Waiting For by email', has(undefined, 'capture from anywhere', 'create a capture key', 'waiting for by email', 'bcc', '[3d]'));
+  window.prompt = () => 'iPhone';
+  $('[data-act="new-capture-key"]').click();
+  for (let i = 0; i < 20 && !$('#sheet').open; i++) await wait(100);
+  const key = T().api_tokens.find((t) => t.scope === 'capture');
+  check('capture key saved (Inbox-only scope, hashed)', key && key.name === 'iPhone (capture)' && key.token_hash && key.token_hash.length === 64);
+  check('the guide opens with the URL and key to copy', $('#sheet').open && has('#sheet', 'add to todo', 'get contents of url', 'show in share sheet', 'hey siri') && $$('#sheet [data-copy-value]').length === 2 && $$('#sheet [data-copy-value]')[0].dataset.copyValue === 'https://mcp.todotooling.com/capture' && $$('#sheet [data-copy-value]')[1].dataset.copyValue.startsWith('Bearer tt_'));
+  let asked = null;
+  window.__captureFetch = async (tok) => { asked = tok; return { ok: true, test: true }; };
+  $('#sheet [data-cap-test]').click(); await wait(150);
+  check('Send a test checks the key without adding anything', asked && asked.startsWith('tt_') && has('#sheet', 'the key works'));
+  window.__captureFetch = undefined;
+  $('#sheet').close(); await wait(300);
+  check('capture keys listed apart from agent tokens', has(undefined, 'iphone (capture)', 'inbox only'));
+  const sel = $('[data-setting-waiting-days]'); sel.value = '3'; sel.dispatchEvent(new Event('change', { bubbles: true })); await wait(250);
+  check('default follow-up for emailed Waiting For saves', T().user_settings[0].waiting_followup_days === 3);
+  window.prompt = () => 'Smoke tag';
+  // Photo from quick capture.
+  const { openQuickEntry } = await import('/js/editors/task.js');
+  openQuickEntry(); await wait(80);
+  const input = $('#sheet [data-quick-file][accept="image/*"]');
+  const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'IMG_0042.png', { type: 'image/png' }));
+  input.files = dt.files; input.dispatchEvent(new Event('change')); await wait(600);
+  const photo = T().tasks.find((t) => /^Photo · /.test(t.title));
+  check('📷 Photo: an Inbox item titled "Photo · time" with the photo attached', photo && photo.in_inbox && T().attachments.some((a) => a.task_id === photo.id && a.mime === 'image/png'));
+  const { app } = await import('/js/state.js'); app.clarify = null;
+  await go('#clarify');
+  while ($('.cl-item b') && $('.cl-item b').textContent !== photo.title) { $('[data-clarify="skip"]').click(); await wait(80); }
+  check('Clarify shows the photo', !!$('.cl-item img.cl-thumb'));
+  // Shared from another app (the service worker stashes it; the app picks it up).
+  const cache = await caches.open('todo-share');
+  await cache.put('/__share/file/0', new Response(new Blob(['%PDF-1.4'], { type: 'application/pdf' }), { headers: { 'Content-Type': 'application/pdf' } }));
+  await cache.put('/__share/meta', new Response(JSON.stringify({ title: '', text: 'Tankless spec sheet https://www.rheem.com/spec', url: '', files: [{ i: 0, name: 'spec.pdf', type: 'application/pdf' }] })));
+  await go('#share'); await wait(700);
+  const shared = T().tasks.find((t) => t.title === 'Tankless spec sheet');
+  check('Shared to the app: Inbox item, link in notes, file attached, stash cleared', shared && shared.notes.includes('https://www.rheem.com/spec') && T().attachments.some((a) => a.task_id === shared.id && a.name === 'spec.pdf') && location.hash === '#inbox' && !(await cache.match('/__share/meta')));
+  // People added by a BCC'd email are mentioned once.
+  T().people.push({ id: 'pe1', user_id: 'u1', name: 'Jodi Park', email: 'jodi@parkhomes.com', added_via: 'email', notes: '', tag_id: null, sort: 0, archived_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+  try { localStorage.removeItem('todo.people.seen'); } catch { /* ignore */ }
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const { noticeEmailPeople } = await import('/js/views/capture.js');
+  noticeEmailPeople(); await wait(50);
+  const first = $('#toast').hidden ? '' : $('#toast').textContent;
+  $('#toast').hidden = true;
+  noticeEmailPeople(); await wait(50);
+  check('“Jodi Park added from email” shows once', /Jodi Park added from email/.test(first) && $('#toast').hidden, first);
+}
 
 // Plan it: the Natural Planning Model, saved as you go, created in one step with one Undo.
 async function planIt(check) {

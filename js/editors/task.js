@@ -9,7 +9,7 @@ import { locationFieldHtml, wireLocationField } from './place.js';
 import { placeFor } from '../places.js';
 import { repeatFieldHtml, wireRepeatField } from './repeatField.js';
 import { notifyFieldHtml, wireNotifyField, remindersFor } from './notifyField.js';
-import { attachFieldHtml, wireAttachField } from './attachField.js';
+import { attachFieldHtml, wireAttachField, uploadFiles } from './attachField.js';
 import { historyFieldHtml, wireHistoryField } from './historyField.js';
 import { skipOccurrence } from '../data.js';
 import { stepsFieldHtml, partOfFieldHtml, wireStepsFields } from './steps.js';
@@ -234,17 +234,36 @@ export function renderTaskInspector(container, task) {
 export function openQuickEntry() {
   const sheet = openSheet(`<form method="dialog" id="quick">
     <h2>Capture to Inbox</h2>
-    <input type="text" name="title" placeholder="What's on your mind?" required autocomplete="off" enterkeyhint="done">
-    <div class="actions"><div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div></div>
+    <input type="text" name="title" placeholder="What's on your mind?" autocomplete="off" enterkeyhint="done">
+    <div class="actions quick-media"><label class="btn" title="Take or choose a photo">📷 Photo<input type="file" accept="image/*" capture="environment" data-quick-file hidden></label>
+      <label class="btn" title="Attach a file">📎 File<input type="file" multiple data-quick-file hidden></label>
+      <div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div></div>
   </form>`);
+  const form = $('#quick', sheet);
   $('[data-cancel]', sheet).onclick = () => sheet.close();
-  $('#quick', sheet).onsubmit = async (e) => {
+  form.onsubmit = async (e) => {
     e.preventDefault();
     const title = new FormData(e.target).get('title');
+    if (!String(title || '').trim()) { form.elements.title.focus(); return; }
     sheet.close();
     await capture(title);
     if (location.hash !== '#inbox') toast('Captured to Inbox');
   };
+  // A photo or file: an Inbox item with it attached (titled "Photo · 3:42 PM" unless you typed one).
+  form.querySelectorAll('[data-quick-file]').forEach((input) => input.addEventListener('change', async () => {
+    const files = [...input.files];
+    if (!files.length) return;
+    if (!navigator.onLine) { toast('Photos and files need a connection'); return; }
+    const typed = String(form.elements.title.value || '').trim();
+    const title = typed || (files[0].type.startsWith('image/') ? `Photo · ${new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : files[0].name);
+    sheet.close();
+    const [row] = await run(sb.from('tasks').insert({ title: title.slice(0, 300), in_inbox: true }).select());
+    db.tasks.push(row);
+    app.render();
+    const up = await uploadFiles('task_id', row.id, files);
+    app.render();
+    toast(`Captured with ${up.length} ${files[0].type.startsWith('image/') && up.length === 1 ? 'photo' : `file${up.length === 1 ? '' : 's'}`}`);
+  }));
   sheet.showModal();
   $('[name=title]', sheet).focus();
 }

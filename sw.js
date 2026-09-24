@@ -1,7 +1,7 @@
 // App-shell service worker: precache the shell, serve it cache-first, and
 // leave Supabase API traffic to the network. Bump VERSION on every deploy
 // that changes a shell file so clients pick up the new copy.
-const VERSION = 'v46';
+const VERSION = 'v47';
 const SHELL = [
   './',
   'index.html',
@@ -29,7 +29,7 @@ const SHELL = [
   'js/editors/attachField.js',
   'js/editors/historyField.js',
   'js/pushResult.js',
-  'js/tree.js', 'js/perspective-engine.js', 'js/perspectives.js', 'js/views/perspective.js', 'js/editors/perspective.js', 'js/editors/props.js', 'js/omnifocus-import.js', 'js/views/import.js', 'js/templates.js', 'js/views/templates.js', 'js/prefs.js', 'js/shortcuts.js', 'js/editors/focus.js', 'js/ics.js', 'js/calendars.js', 'js/gtd.js', 'js/views/gtd.js', 'js/views/clarify.js', 'js/editors/gtd.js', 'js/weekly.js', 'js/views/weekly.js', 'js/views/sweep.js', 'js/views/someday.js', 'js/whatnow.js', 'js/views/horizons.js', 'js/views/now.js', 'js/views/plan.js',
+  'js/tree.js', 'js/perspective-engine.js', 'js/perspectives.js', 'js/views/perspective.js', 'js/editors/perspective.js', 'js/editors/props.js', 'js/omnifocus-import.js', 'js/views/import.js', 'js/templates.js', 'js/views/templates.js', 'js/prefs.js', 'js/shortcuts.js', 'js/editors/focus.js', 'js/ics.js', 'js/calendars.js', 'js/gtd.js', 'js/views/gtd.js', 'js/views/clarify.js', 'js/editors/gtd.js', 'js/weekly.js', 'js/views/weekly.js', 'js/views/sweep.js', 'js/views/someday.js', 'js/whatnow.js', 'js/views/horizons.js', 'js/views/now.js', 'js/views/plan.js', 'js/views/capture.js',
   'js/editors/breakdown.js',
   'js/editors/steps.js',
   'js/editors/place.js',
@@ -64,13 +64,26 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== 'todo-share').map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
 
+// Shared to the app (Android / desktop Share menu): stash what came in, then open #share, where the
+// app adds it to the Inbox with any files attached.
+async function receiveShare(request) {
+  const form = await request.formData();
+  const cache = await caches.open('todo-share');
+  const files = form.getAll('files').filter((f) => f && f.size);
+  await Promise.all(files.map((f, i) => cache.put(`/__share/file/${i}`, new Response(f, { headers: { 'Content-Type': f.type || 'application/octet-stream' } }))));
+  const meta = { title: form.get('title') || '', text: form.get('text') || '', url: form.get('url') || '', files: files.map((f, i) => ({ i, name: f.name || `file-${i}`, type: f.type || 'application/octet-stream' })) };
+  await cache.put('/__share/meta', new Response(JSON.stringify(meta), { headers: { 'Content-Type': 'application/json' } }));
+  return Response.redirect(new URL('./#share', self.registration.scope).href, 303);
+}
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+  if (e.request.method === 'POST' && url.origin === self.location.origin && url.pathname.endsWith('/share')) { e.respondWith(receiveShare(e.request)); return; }
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || fetch(e.request))
