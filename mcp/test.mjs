@@ -63,6 +63,23 @@ globalThis.fetch = async (url, init = {}) => {
     Object.assign(t, { dropped_at: new Date().toISOString(), completion_note: `Became the project “${t.title}”` });
     return new Response(JSON.stringify(pid), { status: 200 });
   }
+  if (String(url).includes('/rest/v1/rpc/apply_project_plan')) { // SQL is tested in supabase/tests/project_planning.sql; a small mirror
+    const b = JSON.parse(init.body); const p = db.projects.find((x) => x.id === b.project && x.user_id === b.owner);
+    if (!p) return new Response(JSON.stringify({ message: 'Project not found.' }), { status: 400 });
+    if (p.plan && p.plan.applied) return new Response(JSON.stringify({ message: 'This plan was already created. Undo it first to create it again.' }), { status: 400 });
+    const pl = p.plan || {}; const ids = [];
+    const mk = (o) => { const t = { id: id(), user_id: b.owner, in_inbox: false, completed_at: null, dropped_at: null, parent_id: null, created_at: new Date().toISOString(), ...o }; db.tasks.push(t); ids.push(t.id); return t; };
+    (pl.ideas || []).filter((i) => !i.bucket || i.bucket === 'action').forEach((i) => mk({ title: i.text, project_id: p.id }));
+    (pl.groups || []).forEach((g) => { const mine = (pl.ideas || []).filter((i) => i.bucket === `g:${g.id}`); if (!mine.length) return; const gt = mk({ title: g.name, project_id: p.id, steps_in_order: !!g.in_order }); mine.forEach((i) => mk({ title: i.text, project_id: p.id, parent_id: gt.id })); });
+    p.plan = { ...pl, applied: { at: new Date().toISOString(), task_ids: ids, reference_ids: [] } };
+    return new Response(JSON.stringify({ tasks: ids.length, references: 0, task_ids: ids, reference_ids: [] }), { status: 200 });
+  }
+  if (String(url).includes('/rest/v1/rpc/undo_project_plan')) {
+    const b = JSON.parse(init.body); const p = db.projects.find((x) => x.id === b.project);
+    const a = p.plan.applied; db.tasks.filter((t) => a.task_ids.includes(t.id)).forEach((t) => { t.dropped_at = new Date().toISOString(); });
+    const { applied, ...rest } = p.plan; p.plan = rest;
+    return new Response(JSON.stringify({ tasks_dropped: a.task_ids.length, references_archived: 0 }), { status: 200 });
+  }
   if (String(url).includes('/rest/v1/rpc/')) { rpcCalls.push({ fn: String(url).split('/rpc/')[1], body: JSON.parse(init.body) }); return new Response('{}', { status: 200 }); }
   const u = new URL(url); const table = u.pathname.split('/').pop();
   const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','or'].includes(k));
@@ -129,7 +146,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 62 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 62 tools, no internals leaked');
+assert(list.body.result.tools.length === 63 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 63 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -862,5 +879,21 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(short.items.every((x) => !x.estimate_minutes || x.estimate_minutes <= 5) && short.items.some((x) => x.id === flagged.id), 'what_now respects the time available');
   const achieved = await tool('save_goal', { id: 'Grow maintenance revenue', status: 'achieved' });
   assert(achieved.status === 'achieved', 'goals are achieved, not deleted');
+}
+// ---------- plan_project ----------
+{
+  const pj = await tool('create_project', { name: 'Smith bathroom remodel' });
+  const saved = await tool('plan_project', { project: 'Smith bathroom remodel', action: 'save', purpose: 'Usable by the holidays', principles: ['Under $18k', 'Water off 2 days max'], outcome: 'Final inspection passed',
+    groups: [{ name: 'Permits', in_order: true }, { name: 'Materials' }],
+    ideas: [{ text: 'Book the tile sub', next: true }, { text: 'Pull permit', where: 'Permits', next: true }, { text: 'Rough-in inspection', where: 'Permits' }, { text: 'Order vanity', where: 'Materials' }, { text: 'Heated floor', where: 'someday' }] });
+  assert(saved.purpose === 'Usable by the holidays' && saved.principles.length === 2 && saved.preview.groups === 2 && saved.preview.actions === 4 && saved.preview.someday === 1 && saved.ideas.find((i) => i.text === 'Pull permit').next, 'plan_project save: purpose, principles, outcome, ideas, preview');
+  let bad = ''; try { await tool('plan_project', { project: pj.id, action: 'save', ideas: [{ text: 'x', where: 'Nowhere' }] }); } catch (e) { bad = e.message; }
+  assert(/isn't a group/.test(bad), 'plan_project: unknown group is an error');
+  const made = await tool('plan_project', { project: pj.id, action: 'create' });
+  assert(made.created.actions === 6 && db.tasks.some((t) => t.title === 'Permits' && t.steps_in_order) && made.project.outcome === 'Final inspection passed' && made.project.principles.length === 2, 'plan_project create');
+  const twice = await call('tools/call', { name: 'plan_project', arguments: { project: pj.id, action: 'create' } });
+  assert(twice.body.result.isError && /already created/.test(twice.body.result.content[0].text), 'can’t create twice');
+  const un = await tool('plan_project', { project: pj.id, action: 'undo' });
+  assert(un.undone.tasks_dropped === 6 && db.tasks.filter((t) => t.project_id === pj.id && !t.dropped_at).length === 0, 'plan_project undo drops what it made');
 }
 console.log('ALL PASSED');

@@ -22,6 +22,7 @@ import { viewSweep, mountSweep } from './views/sweep.js';
 import { viewSomeday } from './views/someday.js';
 import { viewHorizons, viewArea, viewGoal } from './views/horizons.js';
 import { viewNow } from './views/now.js';
+import { viewPlan, mountPlan } from './views/plan.js';
 import { withFocus, getFocus, focusLabel, focusedProjectIds } from './prefs.js';
 
 const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person', 'weekly', 'sweep', 'someday', 'horizons', 'area', 'goal']);
@@ -31,12 +32,12 @@ const VIEWS = {
   nearby: viewNearby, places: viewPlaces, alerts: viewAlerts, perspective: viewPerspective, perspectives: viewPerspectives, import: viewImport, template: viewTemplate,
   clarify: viewClarify, tickler: viewTickler, reference: viewReference, waiting: viewWaiting, person: viewPerson,
   weekly: viewWeekly, sweep: viewSweep, someday: viewSomeday,
-  horizons: viewHorizons, area: viewArea, goal: viewGoal, now: viewNow,
+  horizons: viewHorizons, area: viewArea, goal: viewGoal, now: viewNow, plan: viewPlan,
 };
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
-const AFTER = { nearby: mountNearbyMap, clarify: mountClarify, sweep: mountSweep, weekly: (step) => step === 'sweep' && mountSweep(), reference: (id) => id && mountReferenceFiles(id) };
+const AFTER = { plan: mountPlan, nearby: mountNearbyMap, clarify: mountClarify, sweep: mountSweep, weekly: (step) => step === 'sweep' && mountSweep(), reference: (id) => id && mountReferenceFiles(id) };
 // Detail views highlight their parent tab.
-const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting', review: 'weekly', sweep: 'inbox', area: 'horizons', goal: 'horizons' };
+const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting', review: 'weekly', sweep: 'inbox', area: 'horizons', goal: 'horizons', plan: 'projects' };
 
 export function render() {
   if (location.hash === '#today') { history.replaceState(null, '', '#forecast'); } // old links

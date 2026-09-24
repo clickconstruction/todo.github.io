@@ -233,7 +233,7 @@
       energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null }),
     projects: () => ({ folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
       review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null, defer_at: null, planned_at: null, due_at: null, estimate_minutes: null,
-      place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null, repeat_rule: null, outcome: '', area_id: null, goal_id: null }),
+      place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null, repeat_rule: null, outcome: '', area_id: null, goal_id: null, purpose: '', principles: '', plan: null }),
     folders: () => ({ archived_at: null }),
     tags: () => ({ parent_id: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null }),
     places: () => ({ address: '', google_place_id: null, radius_m: 402, notes: '', archived_at: null }),
@@ -394,6 +394,43 @@
           tables.tasks.filter((c) => c.parent_id === t.id).forEach((c) => { c.parent_id = null; c.project_id = pid; follow(c); });
           t.dropped_at = now(); t.completion_note = `Became the project “${t.title}”`;
           return { data: pid, error: null };
+        }
+        // Mirrors apply_project_plan() / undo_project_plan() (migration 20261007000001).
+        if (name === 'apply_project_plan') {
+          const p = tables.projects.find((x) => x.id === args.project);
+          if (!p) return { data: null, error: { message: 'Project not found.' } };
+          const pl = p.plan || {};
+          if (pl.applied) return { data: null, error: { message: 'This plan was already created. Undo it first to create it again.' } };
+          const ideas = pl.ideas || []; const ids = []; const refs = [];
+          let n = Math.max(-1, ...tables.tasks.filter((t) => t.project_id === p.id && !t.parent_id).map((t) => t.sort || 0)) + 1;
+          const add = (o) => { const t = { ...DEFAULTS.tasks(), id: id(), user_id: uid, in_inbox: false, created_at: now(), updated_at: now(), ...o }; tables.tasks.push(t); ids.push(t.id); return t; };
+          const lead = (list, nx) => [...list.filter((i) => i.id === nx), ...list.filter((i) => i.id !== nx)];
+          lead(ideas.filter((i) => !i.bucket || i.bucket === 'action'), (pl.next || {}).project).forEach((i) => add({ title: i.text, project_id: p.id, sort: n++ }));
+          (pl.groups || []).forEach((g) => {
+            const mine = ideas.filter((i) => i.bucket === `g:${g.id}`);
+            if (!mine.length) return;
+            const gt = add({ title: g.name, project_id: p.id, sort: n++, steps_in_order: !!g.in_order });
+            lead(mine, (pl.next || {})[g.id]).forEach((i, k) => add({ title: i.text, project_id: p.id, parent_id: gt.id, sort: k }));
+          });
+          const some = ideas.filter((i) => i.bucket === 'someday');
+          if (some.length) {
+            let tag = tables.tags.find((g) => !g.parent_id && /^someday/i.test(g.name));
+            if (!tag) { tag = { id: id(), user_id: uid, name: 'Someday', parent_id: null, status: 'on_hold', sort: 0 }; tables.tags.push(tag); } else tag.status = 'on_hold';
+            some.forEach((i) => { const t = add({ title: i.text, project_id: p.id, sort: n++ }); tables.task_tags.push({ task_id: t.id, tag_id: tag.id, user_id: uid, created_at: now() }); });
+          }
+          ideas.filter((i) => i.bucket === 'reference').forEach((i) => { const r = { ...DEFAULTS.reference_items(), id: id(), user_id: uid, title: i.text, topic: p.name, project_id: p.id, created_at: now(), updated_at: now() }; tables.reference_items.push(r); refs.push(r.id); });
+          p.plan = { ...pl, applied: { at: now(), task_ids: ids, reference_ids: refs } };
+          return { data: { tasks: ids.length, references: refs.length, task_ids: ids, reference_ids: refs }, error: null };
+        }
+        if (name === 'undo_project_plan') {
+          const p = tables.projects.find((x) => x.id === args.project);
+          const a = p && p.plan && p.plan.applied;
+          if (!a) return { data: null, error: { message: 'Nothing to undo.' } };
+          let d = 0;
+          tables.tasks.filter((t) => a.task_ids.includes(t.id) && !t.completed_at && !t.dropped_at).forEach((t) => { t.dropped_at = now(); d += 1; });
+          tables.reference_items.filter((r) => a.reference_ids.includes(r.id)).forEach((r) => { r.archived_at = now(); });
+          const { applied, ...rest } = p.plan; p.plan = rest;
+          return { data: { tasks_dropped: d, references_archived: a.reference_ids.length }, error: null };
         }
         // Mirrors import_omnifocus() / undo_import() (migrations 20260929000001/2).
         if (name === 'import_omnifocus') {

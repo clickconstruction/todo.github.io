@@ -38,6 +38,7 @@ import { sweepAction, sweepSubmit, sweepKey } from './views/sweep.js';
 import { somedayAction, somedaySubmit, somedayCount } from './views/someday.js';
 import { horizonsAction, horizonsInput, horizonsChange } from './views/horizons.js';
 import { nowAction } from './views/now.js';
+import { planAction, planSubmit, planInput, planChange } from './views/plan.js';
 
 const view = $('#view');
 const typing = () => /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
@@ -147,6 +148,7 @@ const CLICKS = [
   ['[data-sweep]', (el, e) => { e.stopPropagation(); sweepAction(el); }],
   ['[data-someday]', (el, e) => { e.stopPropagation(); somedayAction(el); }],
   ['[data-hz]', (el, e) => { e.stopPropagation(); horizonsAction(el); }],
+  ['[data-plan]', (el, e) => { e.stopPropagation(); planAction(el); }],
   ['[data-now], [data-now-set]', (el, e) => { e.stopPropagation(); nowAction(el); }],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
   ['[data-copy-geo]', (el) => copyGeoUrl(el)],
@@ -178,7 +180,7 @@ document.addEventListener('click', (e) => {
 });
 
 view.addEventListener('submit', async (e) => {
-  if (onClarifySubmit(e) || gtdSubmit(e) || weeklySubmit(e) || sweepSubmit(e) || somedaySubmit(e)) return;
+  if (onClarifySubmit(e) || gtdSubmit(e) || weeklySubmit(e) || sweepSubmit(e) || somedaySubmit(e) || planSubmit(e)) return;
   const senderForm = e.target.closest('[data-add-sender]');
   if (senderForm) { e.preventDefault(); await addSender(senderForm); return; }
   const form = e.target.closest('[data-capture]');
@@ -195,6 +197,7 @@ view.addEventListener('submit', async (e) => {
 
 view.addEventListener('change', (e) => {
   if (e.target.closest('[data-hz-link-area], [data-hz-link-goal]')) { horizonsChange(e); return; }
+  if (planChange(e)) return;
   const doneCtl = e.target.closest('[data-done]');
   if (doneCtl) { onDoneFilterChange(doneCtl); return; }
   const withinCtl = e.target.closest('[data-within]');
@@ -217,6 +220,7 @@ view.addEventListener('input', (e) => {
   if (e.target.id === 'search-input') onSearchInput(e.target);
   if (e.target.id === 'ref-search') onRefSearch(e.target);
   horizonsInput(e);
+  planInput(e);
 });
 
 $('#fab').onclick = openQuickEntry;

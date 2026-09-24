@@ -17,6 +17,7 @@ import * as TPL from '../../js/templates.js';
 import { gtdTools } from './gtd.js';
 import { weeklyTools } from './weekly.js';
 import { horizonsTools } from './horizons.js';
+import { planTools } from './plan.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -30,7 +31,7 @@ Notifications: pass notifications (e.g. [{"kind":"before_due","minutes":60}]) to
 Attachments: add_attachment attaches text, base64 or a URL's file to an action or project; get_task returns download links; remove_attachment archives.
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 Weekly Review: call weekly_review (action start) and walk the user through each step in order (Get clear: papers, mind sweep with mind_sweep_prompts, inbox with clarify_item; Get current: calendars, stale actions, waiting, projects via list_review/mark_reviewed; Get creative: list_someday, anything new), marking each done_step, then finish. Someday/Maybe: clarify_item someday (with a category), list_someday, activate_someday.
-Horizons of Focus: list_horizons shows purpose, vision, goals and areas (with balance warnings); save_area, save_goal, save_horizon edit them; projects take outcome ("done looks like"), area and goal. For "what should I do now?", call what_now (where, minutes, energy) and explain its reasons.
+Horizons of Focus: list_horizons shows purpose, vision, goals and areas (with balance warnings); save_area, save_goal, save_horizon edit them; projects take outcome ("done looks like"), area and goal. To plan a project with the user (Natural Planning Model), use plan_project: why, done looks like, brainstorm, organize, next actions; show the preview, then create. For "what should I do now?", call what_now (where, minutes, energy) and explain its reasons.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
 Templates: for repeated projects (a new job, a trip), list_templates then create_from_template with the blanks' values; save_as_template turns a project into one.
 Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); undo_import takes an import back.
@@ -1968,6 +1969,7 @@ async function availableTasks(api) {
   const { available } = availabilityOf(open, projects, undefined, parkedOf({ tasks: open, tags, taskTags: links, projectTags: projectLinks, people }));
   return { tasks: open.filter((t) => !t.in_inbox && available(t)), tags, links, projectLinks, projects };
 }
+TOOLS.push(...planTools({ projectOut }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 
@@ -2023,7 +2025,7 @@ function projectOut(api, p, folders = []) {
   return {
     id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, flagged: p.flagged,
     notes: p.notes || undefined,
-    outcome: p.outcome || undefined, area_id: p.area_id || undefined, goal_id: p.goal_id || undefined,
+    outcome: p.outcome || undefined, purpose: p.purpose || undefined, principles: p.principles ? p.principles.split('\n').filter(Boolean) : undefined, area_id: p.area_id || undefined, goal_id: p.goal_id || undefined,
     folder: (folders.find((f) => f.id === p.folder_id) || {}).name || null,
     defer: localDate(p.defer_at, api.tz), planned: localDate(p.planned_at, api.tz), due: localDate(p.due_at, api.tz),
     estimate_minutes: p.estimate_minutes ?? undefined,

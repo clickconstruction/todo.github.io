@@ -222,7 +222,7 @@ async function submitForm(form) {
     record(snap, 'project', async () => {
       if (p) { const [r] = await run(sb.from('projects').update({ status: 'dropped' }).eq('id', p.id).select()); syncRow('projects', p, r); }
     });
-    toast(`Project “${name}” created`, [{ label: 'Open', run: () => { location.hash = `#project/${pid}`; } }]);
+    toast(`Project “${name}” created`, [{ label: 'Plan it', run: () => { location.hash = `#plan/${pid}`; } }, { label: 'Open', run: () => { location.hash = `#project/${pid}`; } }]);
   } else if (kind === 'someday') {
     const f = new FormData(form);
     const category = String(f.get('new_category') || '').trim() || String(f.get('category') || '');

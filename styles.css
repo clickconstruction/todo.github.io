@@ -1038,3 +1038,31 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .chip.now-flag { background: color-mix(in srgb, var(--flag) 18%, transparent); color: var(--flag); }
 .chip.now-goal { background: color-mix(in srgb, #0d9488 16%, transparent); color: #0d9488; }
 .now-acts { justify-content: flex-start; padding-left: 0; margin-top: 4px; }
+
+/* ---------- Plan it ---------- */
+.plan-mode { width: auto; }
+.plan-dots { display: flex; gap: 4px; margin: 6px 0 14px; overflow-x: auto; }
+.plan-dot { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 8px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plan-dot span { flex: none; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--line); color: var(--text); font-weight: 700; font-size: 11px; }
+.plan-dot.on span { background: var(--accent); color: #fff; }
+.plan-dot.cur { border-color: var(--accent); color: var(--text); }
+@media (max-width: 560px) { .plan-dot { font-size: 0; justify-content: center; } .plan-dot span { font-size: 11px; } }
+.plan-q { font-size: 18px; margin: 12px 0 4px; }
+.plan-text { width: 100%; }
+.plan-outcome { width: 100%; font-size: 17px; }
+.plan-idea { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); margin-bottom: 5px; color: var(--text); font: inherit; overflow-wrap: anywhere; }
+.plan-idea.old { color: var(--muted); background: transparent; border-style: dashed; }
+.plan-idea.pick { cursor: pointer; }
+.plan-idea.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.plan-nudge { margin: 8px 0 4px; font-weight: 600; color: var(--accent); }
+.plan-buckets { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; margin: 6px 0 10px; border-radius: 12px; background: var(--surface); border: 1px solid var(--accent); }
+.plan-bucket { padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; font-size: 14px; cursor: pointer; min-height: 36px; }
+.plan-bucket.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.plan-newgroup input { width: 130px; min-height: 36px; padding: 6px 10px; }
+.plan-next { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); margin-bottom: 5px; cursor: pointer; overflow-wrap: anywhere; }
+.plan-next input { flex: none; }
+.plan-next span:first-of-type { flex: 1; }
+.plan-summary { margin: 14px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--accent-soft); font-weight: 600; }
+.plan-why { margin: 0 0 8px; }
+.plan-why p { margin: 2px 0; overflow-wrap: anywhere; }
+.plan-principles { display: flex; flex-wrap: wrap; gap: 4px; }

@@ -18,7 +18,7 @@ async function reload() {
   const insp = await import('/js/state.js'); insp.app.selected = null;
   try { localStorage.removeItem('todo.filter'); localStorage.removeItem('todo.collapsed'); } catch { /* ignore */ }
   const { app } = await import('/js/state.js');
-  app.review = null; app.reviewStats = null; app.here = null; app.locationState = null; app.clarify = null; app.refQuery = ''; app.sweep = null; app.weeklyJust = null; app.now = null; app.hzStats = null;
+  app.review = null; app.reviewStats = null; app.here = null; app.locationState = null; app.clarify = null; app.refQuery = ''; app.sweep = null; app.weeklyJust = null; app.now = null; app.hzStats = null; app.plan = null;
   try { localStorage.removeItem('todo.now'); } catch { /* ignore */ }
   window.__openLink = (url) => { window.__opened = url; };
   window.__noMaps = true; // never call Google from tests
@@ -40,7 +40,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -55,6 +55,62 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Plan it: the Natural Planning Model, saved as you go, created in one step with one Undo.
+async function planIt(check) {
+  await go('#project/p3');
+  check('project has a Plan it button', !!$('a[href="#plan/p3"]'));
+  await go('#plan/p3');
+  check('small project starts in Quick mode (3 steps)', $$('.plan-dot').length === 3 && has(undefined, 'plan it', 'picture it finished'));
+  const typeIn = async (sel, v) => { const el = $(sel); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); await wait(700); };
+  await typeIn('[data-plan-field="outcome"]', 'Trailer bought, registered and parked');
+  check('outcome saves to the project', T().projects.find((p) => p.id === 'p3').outcome === 'Trailer bought, registered and parked');
+  const full = $('[data-plan-mode][value="full"]'); full.checked = true; full.dispatchEvent(new Event('change', { bubbles: true })); await wait(150);
+  check('Full mode: 5 steps, stays on the same step', $$('.plan-dot').length === 5 && $('.plan-dot.cur').textContent.includes('Done looks like'));
+  $('[data-plan="go"][data-i="0"]').click(); await wait(120);
+  await typeIn('[data-plan-field="purpose"]', 'Haul materials without renting');
+  const pr = $('[data-plan-add="principle"] input'); pr.value = 'Under $3,000'; pr.closest('form').requestSubmit(); await wait(300);
+  const p3 = T().projects.find((p) => p.id === 'p3');
+  check('purpose and principles saved', p3.purpose === 'Haul materials without renting' && p3.principles === 'Under $3,000' && has(undefined, 'under $3,000'));
+  $('[data-plan="go"][data-i="2"]').click(); await wait(120);
+  check('brainstorm shows the existing actions, greyed', has('.plan-idea.old', 'measure driveway'));
+  for (const t of ['Compare 5x8 and 6x10 trailers', 'Get a hitch installed', 'Register at the county', 'Trailer lock', 'Spare tire', 'Title and bill of sale go in the file', 'Custom paint job']) {
+    const i = $('#plan-idea'); i.value = t; i.closest('form').requestSubmit(); await wait(120);
+  }
+  check('ideas captured, saved on the project', (T().projects.find((p) => p.id === 'p3').plan || { ideas: [] }).ideas.length === 7 || (await wait(600), T().projects.find((p) => p.id === 'p3').plan.ideas.length === 7));
+  $('[data-plan="nudge"]').click(); await wait(100);
+  check('Stuck? nudges ask a question', has('.plan-nudge', 'who’s involved'));
+  $('[data-plan="go"][data-i="3"]').click(); await wait(120);
+  const pick = async (text) => { $$('[data-plan="select"]').find((b) => b.textContent === text).click(); await wait(80); };
+  await pick('Register at the county');
+  const g = $('.plan-newgroup input'); g.value = 'Paperwork'; g.closest('form').requestSubmit(); await wait(120);
+  check('new group from the selected idea', has(undefined, 'paperwork · 1', 'register at the county'));
+  const bucket = async (text, b) => { await pick(text); $$('[data-plan="bucket"]').find((x) => x.textContent === b).click(); await wait(80); };
+  await bucket('Get a hitch installed', 'Paperwork'); // wrong on purpose, then fix
+  await bucket('Get a hitch installed', 'Action');
+  await bucket('Compare 5x8 and 6x10 trailers', 'Action');
+  await bucket('Trailer lock', 'Action');
+  await bucket('Spare tire', 'Someday');
+  await bucket('Title and bill of sale go in the file', 'Reference');
+  await bucket('Custom paint job', 'Drop');
+  $('[data-plan="order"]').click(); await wait(80);
+  const pl = (await import('/js/state.js')).app.plan;
+  check('tap-tap organizing: re-bucketing works, in order toggles', pl.ideas.find((i) => i.text === 'Get a hitch installed').bucket === 'action' && pl.groups[0].in_order && !pl.ideas.some((i) => !i.bucket));
+  $('[data-plan="go"][data-i="4"]').click(); await wait(120);
+  check('next actions: one choice per group and for the project', $$('input[data-plan-next="project"]').length === 3 && $$(`input[data-plan-next="${pl.groups[0].id}"]`).length === 1);
+  const tl = $$('input[data-plan-next="project"]').find((r) => r.nextElementSibling.textContent === 'Compare 5x8 and 6x10 trailers'); tl.checked = true; tl.dispatchEvent(new Event('change', { bubbles: true })); await wait(150);
+  check('preview says what will be created', has('.plan-summary', 'creates 1 group', '4 actions', '1 in someday', '1 reference item'), text('.plan-summary'));
+  $('[data-plan="create"]').click(); await wait(700);
+  const made = T().tasks.filter((t) => t.project_id === 'p3' && !t.dropped_at);
+  const top = made.filter((t) => !t.parent_id).sort((a, b) => a.sort - b.sort).map((t) => t.title);
+  check('created: next action leads the new ones, group with its step, someday parked, reference filed', top[0] === 'Measure driveway' && top[1] === 'Compare 5x8 and 6x10 trailers' && made.some((t) => t.title === 'Register at the county' && t.parent_id) && T().tasks.some((t) => t.title === 'Paperwork' && t.steps_in_order) && T().reference_items.some((r) => r.title.startsWith('Title and bill') && r.project_id === 'p3') && !T().tasks.some((t) => t.title === 'Custom paint job'), top.join(' | '));
+  check('back on the project: outcome and why shown', location.hash === '#project/p3' && has(undefined, 'done looks like', 'haul materials without renting', 'under $3,000'));
+  await go('#plan/p3');
+  check('the plan page shows it was created, with Undo', has(undefined, 'planned', 'created') && !!$('[data-plan="undo"]'));
+  $('[data-plan="undo"]').click(); await wait(600);
+  check('Undo drops what the plan made (not deleted), archives the reference, keeps the original action', !T().tasks.some((t) => t.project_id === 'p3' && !t.dropped_at && t.title !== 'Measure driveway') && T().tasks.find((t) => t.title === 'Measure driveway' && !t.dropped_at) && T().reference_items.find((r) => r.title.startsWith('Title and bill')).archived_at);
+  check('after Undo the plan is still there to edit and create again', has(undefined, 'plan it') && (T().projects.find((p) => p.id === 'p3').plan.ideas || []).length === 7);
+}
 
 // Horizons of Focus: ladder, areas (standards, balance), goals (progress), purpose/vision, outcomes.
 async function horizons(check) {
