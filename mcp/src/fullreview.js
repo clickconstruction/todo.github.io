@@ -114,13 +114,15 @@ actions:
   status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
   suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
   upcoming {count? ≤10} → the next cards in full, for drafting ahead
+  add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
   annotate {…same fields…} / decide {decision, note?} → apply now (only when asked to just do it)
   prioritize {task_ids} · goto {item_id | "next" | "previous"} · undo {item_id?} · list
 Decisions: action cards keep|someday|done|drop|skip; group cards accept|one_by_one|keep_all|skip.`,
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['start', 'status', 'suggest', 'upcoming', 'annotate', 'decide', 'prioritize', 'goto', 'undo', 'list'], default: 'status' },
+        action: { type: 'string', enum: ['start', 'status', 'suggest', 'upcoming', 'add', 'annotate', 'decide', 'prioritize', 'goto', 'undo', 'list'], default: 'status' },
+        notes: { type: 'string', description: 'add: notes for the new idea' },
         items: { type: 'array', description: 'suggest: several cards at once, each {item_id, decision, title?, gain?, project?, planned?, due?, defer?, flagged?, add_tags?, remove_tags?, proposal?, note?}', items: { type: 'object' } },
         ahead: { type: 'boolean', description: 'suggest: drafted before talking it through (shown as “drafted ahead”)' },
         count: { type: 'integer', description: 'upcoming: how many cards (max 10)' },
@@ -170,6 +172,17 @@ Decisions: action cards keep|someday|done|drop|skip; group cards accept|one_by_o
       let list = await items(api, s.id);
       const cur = await itemFull(api, (list.find((x) => x.id === s.current_item) || {}).id);
       if (action === 'status') { await touch(api, s.id); return stateOut(api, s, list); }
+      if (action === 'add') {
+        // A new idea during the review: captured to the Inbox (with its gain) and added as the last card.
+        if (!a.title || !String(a.title).trim()) throw new Error('title is required');
+        const made = await tool('capture').run(api, { title: String(a.title).trim(), notes: a.notes || '', ...(a.gain ? { gain: a.gain, gain_suggested: !!a.gain_suggested } : {}) });
+        const lastSort = list.reduce((m, x) => Math.max(m, x.sort), 0);
+        const [row] = await api.q('review_items', { method: 'POST', prefer: 'return=representation', body: { session_id: s.id, user_id: api.userId, sort: Math.floor(lastSort + 1), kind: 'task', task_id: made.id, priority: false } });
+        const reopen = s.status === 'done' || !s.current_item;
+        await touch(api, s.id, reopen ? { current_item: row.id, status: 'active', finished_at: null } : {});
+        return { added: { item_id: row.id, task_id: made.id, title: made.title }, card: list.filter((x) => x.status !== 'void').length + 1, fits: made.fits,
+          next: 'It is in the Inbox and at the end of this review; carry on with the current card.' };
+      }
       if (action === 'suggest') {
         // One card (item_id, default the current one) or several: items [{item_id, decision, …}].
         const wanted = Array.isArray(a.items) && a.items.length ? a.items.slice(0, 25) : [{ ...a, item_id: a.item_id || (cur && cur.id) }];

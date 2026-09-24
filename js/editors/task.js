@@ -246,9 +246,10 @@ export function renderTaskInspector(container, task) {
   form.flushSave = () => (timer ? save() : Promise.resolve());
 }
 
-export function openQuickEntry() {
+// opts.heading / opts.onCaptured(row): e.g. Full Review adds the capture to the review as a later card.
+export function openQuickEntry(opts = {}) {
   const sheet = openSheet(`<form method="dialog" id="quick">
-    <h2>Capture to Inbox</h2>
+    <h2>${esc(opts.heading || 'Capture to Inbox')}</h2>
     <input type="text" name="title" placeholder="What's on your mind?" autocomplete="off" enterkeyhint="next">
     <label class="gain-quick"><span class="gain-label"><span aria-hidden="true">✦</span> What do I gain?</span>
       <input type="text" name="gain" maxlength="500" placeholder="Optional · say why it’s worth doing" autocomplete="off" enterkeyhint="done"></label>
@@ -267,6 +268,7 @@ export function openQuickEntry() {
     if (!split.title) { form.elements.title.focus(); return; }
     sheet.close();
     const row = await capture(split.title, gain ? { gain } : {});
+    if (opts.onCaptured) { await opts.onCaptured(row); return; }
     if (row) offerPlacement(row, location.hash === '#inbox' ? '' : 'Captured to Inbox'); // in the Inbox, only when it fits somewhere
     else if (location.hash !== '#inbox') toast('Captured to Inbox');
   };
@@ -283,6 +285,7 @@ export function openQuickEntry() {
     app.render();
     const up = await uploadFiles('task_id', row.id, files);
     app.render();
+    if (opts.onCaptured) { await opts.onCaptured(row); return; }
     toast(`Captured with ${up.length} ${files[0].type.startsWith('image/') && up.length === 1 ? 'photo' : `file${up.length === 1 ? '' : 's'}`}`);
   }));
   sheet.showModal();

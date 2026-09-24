@@ -1182,6 +1182,11 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
     const ah = await tool('full_review', { action: 'suggest', items: [{ item_id: nextTask.id, decision: 'someday', note: 'Like the other movies' }] });
     assert(ah.items[0].ahead === true && nextTask.suggestion.ahead === true, 'drafted ahead: marked as such');
   }
+  const before2 = db.review_items.length;
+  const ad = await tool('full_review', { action: 'add', title: 'Ask the bank about a HELOC', gain: 'Cash for the barn without selling' });
+  const newTask = db.tasks.find((t) => t.title === 'Ask the bank about a HELOC');
+  const newCard = db.review_items.find((x) => x.task_id === (newTask || {}).id);
+  assert(newTask && newTask.in_inbox !== false && newTask.gain === 'Cash for the barn without selling' && newCard && db.review_items.length === before2 + 1 && newCard.sort === Math.max(...db.review_items.filter((x) => x.session_id === st.session_id).map((x) => x.sort)) && ad.added.title === 'Ask the bank about a HELOC', 'add: a new idea is captured and becomes the last card');
   const ls = await tool('full_review', { action: 'list' });
   assert(ls.some((x) => x.id === st.session_id), 'list sessions');
 }

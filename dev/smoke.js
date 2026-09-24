@@ -94,6 +94,20 @@ async function fullReview(check) {
   await until(() => has(undefined, 'family is not left guessing') && has(undefined, 'claude is here'));
   check('the prompt button stays while Claude is here (to resume later)', !!$('[data-fr="invite"]'));
   check('live: Claude’s gain appears, highlighted, with its note and presence', has(undefined, 'family is not left guessing', 'you said this matters more now', 'claude is here · editing') && !!$('.fr-new'));
+  // A good idea mid-review: + captures it and adds it as the last card.
+  check('the review has its own + (the app’s is hidden here)', !!$('.fr-fab') && getComputedStyle($('.fr-fab')).display !== 'none');
+  const cardsBefore = t.review_items.filter((x) => x.session_id === sid && x.status !== 'void').length;
+  $('.fr-fab').click(); await wait(100);
+  check('it opens capture, saying where it goes', $('#sheet').open && has('#sheet', 'added to this review'));
+  $('#sheet [name=title]').value = 'Ask the bank about a HELOC → cash for the barn';
+  $('#quick').requestSubmit();
+  await until(() => t.tasks.some((x) => x.title === 'Ask the bank about a HELOC'));
+  await until(() => has('#toast', 'added to the review'));
+  const idea = t.tasks.find((x) => x.title === 'Ask the bank about a HELOC');
+  const ideaCard = t.review_items.find((x) => x.task_id === (idea || {}).id);
+  const maxSort = Math.max(...t.review_items.filter((x) => x.session_id === sid).map((x) => x.sort));
+  check('captured (Inbox, with its gain) and added as the last card', idea && idea.in_inbox && idea.gain === 'cash for the barn' && ideaCard && ideaCard.sort === maxSort && t.review_items.filter((x) => x.session_id === sid && x.status !== 'void').length === cardsBefore + 1, text('#toast'));
+  check('you stay on the card you were on', has(undefined, 'update my will'));
   // Claude suggests; nothing changes until Submit.
   const sug = { decision: 'keep', title: 'Update my will and trust', gain: 'Nobody is left guessing', project_id: 'pfE', project_name: 'Estate and legacy', planned: new Date(Date.now() + 3 * 86400000).toISOString(), flagged: true, add_tag_names: ['Paperwork'], add_tag_labels: ['Paperwork (new)'], note: 'You said this one matters most', at: new Date().toISOString() };
   Object.assign(cur, { suggestion: sug, updated_at: new Date().toISOString() });
@@ -124,7 +138,8 @@ async function fullReview(check) {
   const some = t.tags.find((g) => g.name === 'Someday');
   check('Accept: all 14 → Someday', some && t.task_tags.filter((l) => l.tag_id === some.id && /^fM/.test(l.task_id)).length === 14);
   const before = $('.fr-title').textContent; key('s'); await until(() => $('.fr-title') && $('.fr-title').textContent !== before);
-  key('2'); await until(() => has(undefined, 'all reviewed'));
+  // Someday the rest (including the idea captured mid-review, now the last card) to reach the end.
+  for (let i = 0; i < 4 && !has(undefined, 'all reviewed'); i++) { const was = $('.fr-title') && $('.fr-title').textContent; key('2'); await until(() => has(undefined, 'all reviewed') || ($('.fr-title') && $('.fr-title').textContent !== was)); }
   check('skip and someday: the end, with the skipped one offered', has(undefined, 'all reviewed', 'skipped') && !!$('[data-fr="reopen-skipped"]'));
   $('[data-fr="reopen-skipped"]').click(); await until(() => !has(undefined, 'all reviewed'));
   check('go through the skipped ones', !has(undefined, 'all reviewed') && (has(undefined, 'fix the gate latch') || has(undefined, 'sort the garage shelves')));

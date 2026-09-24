@@ -1322,3 +1322,5 @@ body.fr-mode .view { margin-left: auto !important; margin-right: auto !important
 .fr-btns-quiet:hover, .fr-btns-quiet:focus-within { opacity: 1; }
 .fr-copy { white-space: nowrap; }
 .fr-prompt textarea { width: 100%; font-size: 14px; }
+/* Full Review: its own capture button (the app's is hidden there) */
+body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24px; bottom: calc(24px + env(safe-area-inset-bottom)); z-index: 12; }

@@ -210,13 +210,40 @@ export function viewFullReview(id) {
       <a class="icon-btn fr-close" href="#${esc((s.scope && s.scope.import_id) ? `settle/${s.scope.import_id}` : s.scope && s.scope.project_id ? `project/${s.scope.project_id}` : 'inbox')}" aria-label="Close" title="Close (Esc)">✕</a></div>
     <div class="cl-progress"><i style="width:${live.length ? Math.round((done / live.length) * 100) : 0}%"></i></div>`;
   if (!cur) {
-    return `<div class="fr">${head}<div class="cl-done"><div class="cl-big">✓</div><h2>All reviewed</h2>
+    return `<div class="fr">${head}<button class="fab fr-fab" data-fr="capture" aria-label="Capture an idea (added to this review)">+</button><div class="cl-done"><div class="cl-big">✓</div><h2>All reviewed</h2>
       <p>${n(done)} decided${skipped ? `, ${n(skipped)} skipped` : ''}.</p>
       <p>${skipped ? '<button class="btn" data-fr="reopen-skipped">Go through the skipped ones</button> ' : ''}${f.undo.length ? '<button class="btn" data-fr="undo">↶ Undo last</button>' : ''}</p></div></div>`;
   }
   return `<div class="fr">${head}
+    <button class="fab fr-fab" data-fr="capture" aria-label="Capture an idea (added to this review)" title="Capture an idea: it's added to this review as a later card (N)">+</button>
     ${cur.kind === 'group' ? groupCard(cur) : taskCard(cur)}
     <div class="cl-bar"><button class="btn small" data-fr="undo" ${f.undo.length ? '' : 'disabled'}>↶ Undo</button><span class="hint cl-keys">1–4 decide · s skip · u undo · Esc close</span><button class="btn small" data-fr="decide" data-decision="skip">Skip →</button></div></div>`;
+}
+
+// ---------- capture during the review ----------
+// A good idea mid-review: capture it (Inbox, with its gain) and add it to the end of this review as a later card.
+export async function addToReview(taskId) {
+  const f = F();
+  const s = f.session;
+  if (!s || !taskId) return null;
+  const lastSort = f.items.reduce((m, x) => Math.max(m, x.sort), 0);
+  const [row] = await run(sb.from('review_items').insert({ session_id: s.id, sort: Math.floor(lastSort + 1), kind: 'task', task_id: taskId, priority: false }).select());
+  f.items.push(row); f.byId.set(row.id, row);
+  if (s.status === 'done' || !s.current_item) { // the review had finished: this is the next card
+    await run(sb.from('review_sessions').update({ current_item: row.id, status: 'active', finished_at: null }).eq('id', s.id));
+    f.session = { ...s, current_item: row.id, status: 'active' };
+  }
+  return row;
+}
+export async function captureIntoReview() {
+  const { openQuickEntry } = await import('../editors/task.js');
+  openQuickEntry({ heading: 'Capture · added to this review', onCaptured: async (task) => {
+    if (!task) { toast('Saved offline; add it to the review once you’re back online'); return; }
+    await addToReview(task.id);
+    const live = F().items.filter((x) => x.status !== 'void').length;
+    app.render();
+    toast(`Captured · added to the review as card ${live.toLocaleString()}`);
+  } });
 }
 
 // ---------- actions ----------
@@ -233,6 +260,7 @@ export async function fullReviewAction(el) {
     const ta = sheet.querySelector('textarea'); ta.focus(); ta.select();
     return;
   }
+  if (a === 'capture') { captureIntoReview(); return; }
   if (a === 'reopen-skipped') {
     await run(sb.from('review_items').update({ status: 'pending' }).eq('session_id', s.id).eq('status', 'skipped'));
     const first = f.items.filter((x) => x.status === 'skipped').sort((x, y) => x.sort - y.sort)[0];
@@ -312,6 +340,7 @@ async function act(a, el) {
 export function fullReviewKey(e) {
   if (!location.hash.startsWith('#full/') || e.metaKey || e.ctrlKey || e.altKey) return false;
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return false;
+  if (e.key === 'n') { e.preventDefault(); captureIntoReview(); return true; }
   if (e.key === 'Enter') { const b = document.querySelector('[data-fr="submit"]'); if (b) { e.preventDefault(); b.click(); return true; } }
   const btns = [...document.querySelectorAll('.fr-btns [data-fr="decide"]')];
   if (/^[1-4]$/.test(e.key) && btns[Number(e.key) - 1]) { e.preventDefault(); btns[Number(e.key) - 1].click(); return true; }

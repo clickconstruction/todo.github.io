@@ -4,7 +4,7 @@
 // A new version installs in the background and waits; the page switches to it at a safe moment
 // (js/updates.js sends SKIP_WAITING). MIN_VERSION: pages older than this switch at the next safe moment
 // even mid-screen (raise it only when old code can't work with the data or has a security problem).
-const VERSION = 'v59';
+const VERSION = 'v60';
 const MIN_VERSION = 'v1';
 const SHELL = [
   './',
