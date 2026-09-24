@@ -25,6 +25,7 @@ import { getFocus, focusLabel } from './prefs.js';
 import { newCaptureKey, captureGuide } from './views/settings.js';
 import { noticeEmailPeople } from './views/capture.js';
 import { checklistAction, checklistChange } from './views/checklists.js';
+import { dailyAction, dailySubmit } from './views/daily.js';
 import { newFeedLink } from './views/settings.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
@@ -157,6 +158,7 @@ const CLICKS = [
   ['[data-hz]', (el, e) => { e.stopPropagation(); horizonsAction(el); }],
   ['[data-plan]', (el, e) => { e.stopPropagation(); planAction(el); }],
   ['[data-ck]', (el, e) => { e.stopPropagation(); checklistAction(el); }],
+  ['[data-daily]', (el, e) => { e.stopPropagation(); dailyAction(el); }],
   ['[data-cl-tick]', () => {}], // a checklist tick is handled on change
   ['[data-now], [data-now-set]', (el, e) => { e.stopPropagation(); nowAction(el); }],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
@@ -189,7 +191,7 @@ document.addEventListener('click', (e) => {
 });
 
 view.addEventListener('submit', async (e) => {
-  if (onClarifySubmit(e) || gtdSubmit(e) || weeklySubmit(e) || sweepSubmit(e) || somedaySubmit(e) || planSubmit(e)) return;
+  if (onClarifySubmit(e) || gtdSubmit(e) || weeklySubmit(e) || sweepSubmit(e) || somedaySubmit(e) || planSubmit(e) || dailySubmit(e)) return;
   const senderForm = e.target.closest('[data-add-sender]');
   if (senderForm) { e.preventDefault(); await addSender(senderForm); return; }
   const form = e.target.closest('[data-capture]');
@@ -241,7 +243,7 @@ $('#more-tab').onclick = () => {
   const due = reviewDueCount();
   const here = hereNowCount();
   const waiting = waitingBadgeCount();
-  const links = [['#now', '▶️', 'What now?'], ['#checklists', '☑️', 'Checklists'], ['#horizons', '🏔️', 'Horizons'], ['#waiting', '⏳', `Waiting For${waiting ? ` <b class="badge due inline">${waiting}</b>` : ''}`], ['#tickler', '📆', 'Tickler'], ['#reference', '🗄️', 'Reference'], ['#someday', '💭', `Someday/Maybe${somedayCount() ? ` <span class="hint">${somedayCount()}</span>` : ''}`], ['#weekly', '🧭', `Weekly Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#sweep', '🧹', 'Mind sweep'], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
+  const links = [['#daily', '☀️', 'Daily review'], ['#now', '▶️', 'What now?'], ['#checklists', '☑️', 'Checklists'], ['#horizons', '🏔️', 'Horizons'], ['#waiting', '⏳', `Waiting For${waiting ? ` <b class="badge due inline">${waiting}</b>` : ''}`], ['#tickler', '📆', 'Tickler'], ['#reference', '🗄️', 'Reference'], ['#someday', '💭', `Someday/Maybe${somedayCount() ? ` <span class="hint">${somedayCount()}</span>` : ''}`], ['#weekly', '🧭', `Weekly Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#sweep', '🧹', 'Mind sweep'], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
   const persp = livePerspectives().map((p) => { const n = badgeCount(p); return [`#perspective/${p.id}`, esc(p.icon), `${esc(p.name)}${n ? ` <b class="badge persp inline">${n}</b>` : ''}`]; });
   const sheet = openSheet(`<form method="dialog" class="more-sheet"><button type="button" class="btn focus-more" data-act="focus">🎯 ${getFocus() ? `Focused on ${esc(focusLabel())} · change` : 'Focus'}</button><h2>Perspectives</h2>
     <nav class="more-links">${persp.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}<a href="#perspectives" data-more-link><span>🔭</span>${persp.length ? 'All perspectives' : 'Perspectives: saved views'}</a></nav>

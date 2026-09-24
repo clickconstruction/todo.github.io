@@ -248,13 +248,15 @@ function reviewSection() {
   const st = { ...DEFAULT_SETTINGS, ...(app.settings || {}) };
   const hidden = (st.trigger_hidden || []).length;
   const custom = (st.trigger_custom || []).length;
-  return `<h2 class="section-title">Weekly Review</h2>
+  return `<h2 class="section-title">Weekly and daily review</h2>
     <p class="view-sub">The day you get clear, get current and get creative. On that day Forecast reminds you, and (if you like) your devices do too.</p>
     <div class="settings-card">
       <label class="set-row"><span class="set-text"><b>Review day</b><span class="hint">Friday afternoon clears your head for the weekend</span></span>
         <select data-setting-review-day>${WEEKDAYS.map((d, i) => `<option value="${i}" ${Number(st.review_day) === i ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
       <label class="set-row"><span class="set-text"><b>Time</b><span class="hint">when it’s due that day</span></span><input type="time" step="900" data-setting-time="review_minutes" value="${minutesToInput(st.review_minutes)}"></label>
       <label class="set-row"><span class="set-text"><b>Notification</b><span class="hint">a push to your devices at that time, unless you’ve already reviewed</span></span><input type="checkbox" data-setting-review-notify ${st.review_notify ? 'checked' : ''}></label>
+      <label class="set-row"><span class="set-text"><b>Morning reminder</b><span class="hint">“☀️ Start your day”, skipped once you have</span></span><input type="checkbox" data-setting-daily-notify ${st.daily_notify ? 'checked' : ''}></label>
+      <label class="set-row"><span class="set-text"><b>At</b><span class="hint">${st.daily_weekdays_only ? 'Monday to Friday' : 'every day'} · <button type="button" class="link-btn" data-setting-daily-days>${st.daily_weekdays_only ? 'every day' : 'weekdays only'}</button></span></span><input type="time" step="900" data-setting-time="daily_minutes" value="${minutesToInput(st.daily_minutes)}"></label>
       <p class="hint">Mind sweep prompts: ${hidden ? `${hidden} hidden · ` : ''}${custom ? `${custom} of your own · ` : ''}<a href="#sweep">open the mind sweep</a> to add or change them.</p>
     </div>`;
 }
@@ -266,6 +268,10 @@ function keyboardSection() {
     <div class="settings-card">${keyboardHtml()}<div class="kbd-lists">${shortcutListHtml()}</div></div>`;
 }
 
+document.addEventListener('click', async (e) => {
+  const dd = e.target.closest && e.target.closest('[data-setting-daily-days]');
+  if (dd) { await saveSettings({ daily_weekdays_only: !(app.settings || {}).daily_weekdays_only }); app.render(); }
+});
 document.addEventListener('change', async (e) => {
   const time = e.target.closest && e.target.closest('[data-setting-time]');
   if (time) { const m = inputToMinutes(time.value); if (m !== null) await saveSettings({ [time.dataset.settingTime]: m }); return; }
@@ -275,6 +281,8 @@ document.addEventListener('change', async (e) => {
   if (day) { await saveSettings({ review_day: Number(day.value) }); return; }
   const wdays = e.target.closest && e.target.closest('[data-setting-waiting-days]');
   if (wdays) { await saveSettings({ waiting_followup_days: Number(wdays.value) }); return; }
+  const dn = e.target.closest && e.target.closest('[data-setting-daily-notify]');
+  if (dn) { await saveSettings({ daily_notify: dn.checked }); return; }
   const notify = e.target.closest && e.target.closest('[data-setting-review-notify]');
   if (notify) await saveSettings({ review_notify: notify.checked });
 });

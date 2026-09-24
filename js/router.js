@@ -25,21 +25,22 @@ import { viewNow } from './views/now.js';
 import { viewPlan, mountPlan } from './views/plan.js';
 import { viewShare, mountShare } from './views/capture.js';
 import { viewChecklists, viewChecklist } from './views/checklists.js';
+import { viewDaily } from './views/daily.js';
 import { withFocus, getFocus, focusLabel, focusedProjectIds } from './prefs.js';
 
-const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person', 'weekly', 'sweep', 'someday', 'horizons', 'area', 'goal', 'share', 'checklists', 'checklist']);
+const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person', 'weekly', 'sweep', 'someday', 'horizons', 'area', 'goal', 'share', 'checklists', 'checklist', 'daily']);
 const VIEWS = {
   search: viewSearch, inbox: viewInbox, forecast: viewForecast, projects: viewProjects, project: viewProject,
   tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone, flagged: viewFlagged, review: viewReview,
   nearby: viewNearby, places: viewPlaces, alerts: viewAlerts, perspective: viewPerspective, perspectives: viewPerspectives, import: viewImport, template: viewTemplate,
   clarify: viewClarify, tickler: viewTickler, reference: viewReference, waiting: viewWaiting, person: viewPerson,
   weekly: viewWeekly, sweep: viewSweep, someday: viewSomeday,
-  horizons: viewHorizons, area: viewArea, goal: viewGoal, now: viewNow, plan: viewPlan, share: viewShare, checklists: viewChecklists, checklist: viewChecklist,
+  horizons: viewHorizons, area: viewArea, goal: viewGoal, now: viewNow, plan: viewPlan, share: viewShare, checklists: viewChecklists, checklist: viewChecklist, daily: viewDaily,
 };
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
 const AFTER = { share: mountShare, plan: mountPlan, nearby: mountNearbyMap, clarify: mountClarify, sweep: mountSweep, weekly: (step) => step === 'sweep' && mountSweep(), reference: (id) => id && mountReferenceFiles(id) };
 // Detail views highlight their parent tab.
-const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting', review: 'weekly', sweep: 'inbox', area: 'horizons', goal: 'horizons', plan: 'projects', checklist: 'checklists' };
+const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting', review: 'weekly', sweep: 'inbox', area: 'horizons', goal: 'horizons', plan: 'projects', checklist: 'checklists', daily: 'forecast' };
 
 export function render() {
   if (location.hash === '#today') { history.replaceState(null, '', '#forecast'); } // old links

@@ -65,3 +65,24 @@ export async function sendReviewReminders(env, rest, now = new Date()) {
   }
   return sent;
 }
+
+// Daily review reminder (off unless turned on): at the user's time, weekdays only by default, once a
+// day, unless they've already started their day.
+export async function sendDailyReminders(env, rest, now = new Date()) {
+  const rows = await rest('user_settings?daily_notify=is.true&select=user_id,daily_minutes,daily_weekdays_only,daily_notified_at,timezone');
+  let sent = 0;
+  for (const s of rows) {
+    const tz = s.timezone || env.TIMEZONE || 'America/Chicago';
+    const { day, minutes } = localDayMinutes(now, tz);
+    if (s.daily_weekdays_only && (day === 0 || day === 6)) continue;
+    if (minutes < s.daily_minutes || minutes >= s.daily_minutes + 120) continue;
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now); // YYYY-MM-DD
+    if (s.daily_notified_at && new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(s.daily_notified_at)) === today) continue;
+    await rest(`user_settings?user_id=eq.${s.user_id}`, { method: 'PATCH', body: { daily_notified_at: now.toISOString() } });
+    const started = await rest(`daily_reviews?user_id=eq.${s.user_id}&day=eq.${today}&started_at=not.is.null&select=id`);
+    if (started.length) continue;
+    await deliver(env, rest, s.user_id, { title: '☀️ Start your day', body: 'Two minutes: your calendar, what’s due, and three things for today.', tag: 'daily-review', url: '#daily' }, { kind: 'daily' });
+    sent += 1;
+  }
+  return sent;
+}

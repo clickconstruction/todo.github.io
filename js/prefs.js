@@ -6,7 +6,7 @@ import { db, app, sb, run, byId, toast } from './state.js';
 import { setDefaultTimes } from './dates.js';
 import { localTz } from './repeat.js';
 
-export const DEFAULT_SETTINGS = { due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7 };
+export const DEFAULT_SETTINGS = { due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true };
 
 export async function loadSettings() {
   let row = null;

@@ -7,6 +7,7 @@ import { taskList, projectRow } from '../rows.js';
 import { filterBar, passes, sortTasks } from '../filter.js';
 import { isFlaggedTask } from './basic.js';
 import { weeklyBanner } from './weekly.js';
+import { dailyBanner } from './daily.js';
 import { followUpDue, isWaiting, livePeople, agendaFor, mentions } from '../gtd.js';
 import { calendarEvents, calendarErrors, liveCalendars, fmtEventTime } from '../calendars.js';
 
@@ -135,7 +136,7 @@ export function viewForecast(selected = 'today') {
       body += `<h2 class="section-title">${sched.length ? 'Day' : 'Calendar'} · ${allDay.length + timed.length}</h2><ul class="list cal-list">${allDay.map(eventRow).join('')}${rows.join('')}</ul>`;
     }
     calendarErrors().forEach((c) => { body += `<p class="persp-warning">📅 ${esc(c.name)}: ${esc(c.error)} <a href="#settings">Settings</a></p>`; });
-    if (isToday) body += weeklyBanner();
+    if (isToday) body += dailyBanner() + weeklyBanner();
     if (isToday && pastCount) body += `<a class="fc-banner" href="#forecast/past">${overdue.length ? `<b>${overdue.length} overdue</b>` : ''}${overdue.length && plannedPast.length ? ' · ' : ''}${plannedPast.length ? `${plannedPast.length} planned earlier` : ''} → triage</a>`;
     const follow = isToday ? db.tasks.filter((t) => followUpDue(t) && isWaiting(t)) : []; // not your actions, so the view filter doesn't apply
     if (follow.length) body += `<h2 class="section-title">Follow up · ${follow.length} <a class="btn small" href="#waiting">Waiting For</a></h2>${taskList(follow)}`;

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -146,7 +146,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 66 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 66 tools, no internals leaked');
+assert(list.body.result.tools.length === 67 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 67 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -1001,5 +1001,38 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(solo.ticked === 0 && solo.items.length === 3, 'a new run starts fresh');
   await tool('save_checklist', { id: ck.id, archived: true });
   assert(db.checklists.find((c) => c.id === ck.id).archived_at && (await tool('list_checklists', {})).checklists.length === 0, 'checklists archive, not delete');
+}
+// ---------- daily review ----------
+{
+  const b = await tool('daily_review', {});
+  assert(b.day && !b.started && b.must_dos && typeof b.must_dos.inbox_count === 'number' && Array.isArray(b.suggestions) && b.suggestions.every((x) => Array.isArray(x.why)), 'daily_review briefing: calendar, must-dos, suggestions with reasons');
+  const picks = b.suggestions.slice(0, 4).map((x) => x.id);
+  const f = await tool('daily_review', { action: 'focus', ids: picks });
+  assert(f.focus.length === Math.min(3, picks.length) && db.daily_reviews.length === 1 && db.daily_reviews[0].focus.length === f.focus.length, 'focus: up to 3 saved for today');
+  const p0 = db.tasks.find((t) => t.id === f.focus[0].id);
+  assert(p0.planned_at && Math.abs(Date.parse(p0.planned_at) - Date.now()) < 24 * 3600e3, 'focus items are planned today');
+  const st = await tool('daily_review', { action: 'start' });
+  assert(st.started && db.daily_reviews[0].started_at, 'start marks the day started');
+  await tool('update_task', { id: f.focus[0].id, status: 'completed' });
+  const w = await tool('daily_review', { action: 'wrapup' });
+  assert(w.done === 1 && w.focus.length === f.focus.length && w.tomorrow.day, 'wrapup: what got done, tomorrow at a glance');
+  const rest = w.focus.filter((x) => !x.done);
+  const c = await tool('daily_review', { action: 'carry', carry: rest.map((x, i) => ({ id: x.id, to: i === 0 ? 'tomorrow' : 'drop' })) });
+  if (rest[0]) { const t = db.tasks.find((x) => x.id === rest[0].id); assert(Date.parse(t.planned_at) > Date.now() && !t.scheduled_at, 'carry: tomorrow'); }
+  if (rest[1]) assert(db.tasks.find((x) => x.id === rest[1].id).dropped_at, 'carry: drop (not delete)');
+  const sd = await tool('daily_review', { action: 'shutdown' });
+  assert(sd.shut_down && db.daily_reviews[0].shutdown_at, 'shutdown closes the day');
+  // Morning reminder: off by default; when on, once, weekdays, not after starting.
+  const { sendDailyReminders } = await import('./src/reminders.js');
+  const calls = []; const settings = [{ user_id: 'u9', daily_minutes: 420, daily_weekdays_only: true, daily_notified_at: null, timezone: 'America/Chicago' }]; let started = [];
+  const fake = async (path, opts = {}) => { calls.push([opts.method || 'GET', path, opts.body]); if (path.startsWith('user_settings?daily_notify')) return settings; if (path.startsWith('daily_reviews')) return started; return []; };
+  const thu730 = new Date('2026-09-24T12:30:00Z'); // Thu 7:30 in Chicago
+  assert(await sendDailyReminders(env, fake, thu730) === 1 && calls.some(([m, p2, bd]) => m === 'POST' && p2 === 'push_log' && bd.kind === 'daily'), 'daily reminder at the user\'s time');
+  settings[0].daily_notified_at = thu730.toISOString();
+  assert(await sendDailyReminders(env, fake, new Date(thu730.getTime() + 30 * 60000)) === 0, 'once a day');
+  settings[0].daily_notified_at = null;
+  assert(await sendDailyReminders(env, fake, new Date('2026-09-26T12:30:00Z')) === 0, 'weekdays only: not on Saturday');
+  started = [{ id: 'x' }];
+  assert(await sendDailyReminders(env, fake, thu730) === 0, 'not if the day was already started');
 }
 console.log('ALL PASSED');

@@ -8,7 +8,7 @@
 
 import PostalMime from 'postal-mime';
 import { handleGeo, makePlaceResolver, loadPlaceData } from './geo.js';
-import { sendDueReminders, sendReviewReminders } from './reminders.js';
+import { sendDueReminders, sendReviewReminders, sendDailyReminders } from './reminders.js';
 import { deliver, sendQueuedTests } from './deliver.js';
 import { handleCalendarFetch, calendarEvents } from './calendar.js';
 import * as P from '../../js/perspective-engine.js';
@@ -20,6 +20,7 @@ import { horizonsTools } from './horizons.js';
 import { planTools } from './plan.js';
 import { handleCapture, followTag, nameFor } from './capture.js';
 import { checklistTools } from './checklists.js';
+import { dailyTools } from './daily.js';
 import { eventOf, icsCalendar } from '../../js/schedule.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
@@ -34,6 +35,7 @@ Notifications: pass notifications (e.g. [{"kind":"before_due","minutes":60}]) to
 Attachments: add_attachment attaches text, base64 or a URL's file to an action or project; get_task returns download links; remove_attachment archives.
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 Weekly Review: call weekly_review (action start) and walk the user through each step in order (Get clear: papers, mind sweep with mind_sweep_prompts, inbox with clarify_item; Get current: calendars, stale actions, waiting, projects via list_review/mark_reviewed; Get creative: list_someday, anything new), marking each done_step, then finish. Someday/Maybe: clarify_item someday (with a category), list_someday, activate_someday.
+Daily review: in the morning call daily_review (briefing), help the user pick up to 3 focus items (action focus), then start; in the evening wrapup, carry what didn't happen, shutdown.
 Time blocks: update_task schedule ("YYYY-MM-DDTHH:MM") puts an action on their calendar (Forecast and their calendar feed); check forecast for free time first. Checklists (routines run again and again): list_checklists, save_checklist (attach_to an action), run_checklist to tick through one with them.
 Horizons of Focus: list_horizons shows purpose, vision, goals and areas (with balance warnings); save_area, save_goal, save_horizon edit them; projects take outcome ("done looks like"), area and goal. To plan a project with the user (Natural Planning Model), use plan_project: why, done looks like, brainstorm, organize, next actions; show the preview, then create. For "what should I do now?", call what_now (where, minutes, energy) and explain its reasons.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
@@ -116,6 +118,7 @@ export default {
       sendDueReminders(env, r).then((x) => { if (x.due) console.log('reminders', x); }),
       sendQueuedTests(env, r).then((n) => { if (n) console.log('queued tests', n); }),
       sendReviewReminders(env, r).then((n) => { if (n) console.log('review reminders', n); }).catch((e) => console.log('review cron', e.message)),
+      sendDailyReminders(env, r).then((n) => { if (n) console.log('daily reminders', n); }).catch((e) => console.log('daily cron', e.message)),
       r('rpc/run_template_schedules', { method: 'POST', body: {} }).then((n) => { if (n) console.log('scheduled templates', n); }).catch((e) => console.log('templates cron', e.message)),
     ]));
   },
@@ -399,7 +402,7 @@ class Api {
       if (!s) return;
       this.settings = s;
       if (s.timezone) this.tz = s.timezone;
-      this.hours = { due: s.due_minutes / 60, planned: s.planned_minutes / 60, defer: s.defer_minutes / 60 };
+      this.hours = { due: (s.due_minutes ?? 1020) / 60, planned: (s.planned_minutes ?? 540) / 60, defer: (s.defer_minutes ?? 0) / 60 };
     } catch { /* defaults */ }
   }
   q(path, opts) { return rest(this.env, path, opts); }
@@ -2082,6 +2085,7 @@ async function availableTasks(api) {
 }
 TOOLS.push(...planTools({ projectOut }));
 TOOLS.push(...checklistTools({ localDate }));
+TOOLS.push(...dailyTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 

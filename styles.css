@@ -1105,3 +1105,27 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .ck-field select { width: 100%; margin-bottom: 6px; }
 .feed-card { margin-top: 12px; }
 .feed-card p { margin: 0 0 8px; }
+
+/* ---------- Daily review ---------- */
+.view-head h1.daily { color: #f59e0b; }
+.dv-sec { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.dv-sec .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.dv-day { margin-bottom: 6px; }
+.dv-row { display: flex; align-items: center; gap: 8px; padding: 8px 2px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.dv-row[data-task] { cursor: pointer; }
+.dv-t { flex: 0 0 64px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.dv-bar { width: 4px; align-self: stretch; min-height: 18px; border-radius: 2px; background: var(--cal, #1D9E75); }
+.dv-bar.block { background: var(--accent); }
+.dv-x { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
+.dv-x.done { color: var(--muted); text-decoration: line-through; }
+.dv-pick { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); margin-bottom: 6px; cursor: pointer; }
+.dv-pick.on { border-color: var(--accent); }
+.dv-box { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 2px solid var(--line); background: var(--surface-2); color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; }
+.dv-box.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.dv-why { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.dv-sug { margin: 10px 0 4px; }
+.dv-ready { display: grid; gap: 6px; justify-items: center; text-align: center; padding: 14px; border-radius: 12px; background: var(--accent-soft); margin: 6px 0 10px; }
+.dv-carry { display: flex; gap: 6px; flex-wrap: wrap; }
+.dv-foot { margin-top: 16px; text-align: center; }
+.chip.red { background: color-mix(in srgb, var(--due) 16%, transparent); color: var(--due); }
+.chip.acc { background: var(--accent-soft); color: var(--accent); }

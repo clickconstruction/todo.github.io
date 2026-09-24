@@ -1,0 +1,22 @@
+-- Daily review (migration 20261010000001). One rolled-back transaction; every row should be ok = true.
+begin;
+insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000a5','00000000-0000-0000-0000-000000000000','authenticated','authenticated','dr1@test.invalid'),('00000000-0000-0000-0000-0000000000a6','00000000-0000-0000-0000-000000000000','authenticated','authenticated','dr2@test.invalid');
+create temp table r (n int generated always as identity, test text, ok boolean, detail text); grant all on r to authenticated;
+insert into public.daily_reviews (user_id, day) values ('00000000-0000-0000-0000-0000000000a6', '2026-09-24');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a5","role":"authenticated"}', true);
+insert into public.daily_reviews (day, focus, started_at) values ('2026-09-24', '["a","b","c"]', now());
+insert into r (test, ok, detail) select 'owner starts a day; can''t see others', count(*) = 1, '' from public.daily_reviews;
+do $$ begin insert into public.daily_reviews (day) values ('2026-09-24'); insert into r (test, ok, detail) values ('one row per day', false, '');
+exception when unique_violation then insert into r (test, ok, detail) values ('one row per day', true, sqlerrm); end $$;
+do $$ begin update public.daily_reviews set focus = '["a","b","c","d","e","f"]'; insert into r (test, ok, detail) values ('focus is short (5 at most)', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('focus is short (5 at most)', true, sqlerrm); end $$;
+insert into public.user_settings (daily_notify, daily_minutes) values (true, 450);
+insert into r (test, ok, detail) select 'morning reminder settings (off unless turned on)', daily_notify and daily_minutes = 450 and daily_weekdays_only, '' from public.user_settings;
+delete from public.daily_reviews;
+insert into r (test, ok, detail) select 'daily reviews can''t be deleted', count(*) = 1, '' from public.daily_reviews;
+reset role;
+insert into public.push_log (user_id, kind, title) values ('00000000-0000-0000-0000-0000000000a5', 'daily', 'Start your day');
+insert into r (test, ok, detail) values ('push log accepts the daily reminder', true, '');
+select test, ok, detail from r order by n;
+rollback;

@@ -40,7 +40,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -55,6 +55,63 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Daily review: start your day (calendar, must-dos, up to 3 focus), then shut down.
+async function dailyReview(check) {
+  const { db } = await import('/js/state.js');
+  // A follow-up due today, from someone with an email (for Nudge).
+  T().people.push({ id: 'pj', user_id: 'u1', name: 'Jodi Park', email: 'jodi@x.com', phone: null, notes: '', tag_id: null, sort: 0, archived_at: null, added_via: 'app', created_at: new Date().toISOString() });
+  Object.assign(T().tasks.find((t) => t.id === 't5'), { waiting_on: 'pj', follow_up_at: new Date(Date.now() - 3600e3).toISOString() });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  await go('#forecast');
+  check('Forecast offers the daily review', !!$('a.dv-banner[href="#daily"]') && /start your day|plan today/i.test($('a.dv-banner').textContent));
+  await go('#daily');
+  check('your day, must-dos, focus', has(undefined, 'your day', 'must-dos', 'today’s focus', '0 of 3'));
+  check('must-dos: overdue, due today, follow-up with Nudge', has(undefined, 'call gvec about utilities', 'overdue', 'get plans released', 'due today', 'make funeral playlist', 'follow up') && !!$('[data-daily="nudge"][data-id="t5"]'));
+  window.__opened = null;
+  $('[data-daily="nudge"][data-id="t5"]').click(); await wait(50);
+  check('Nudge opens your mail app', String(window.__opened).startsWith('mailto:jodi%40x.com'));
+  const sugg = () => $$('[data-daily="focus"].dv-box');
+  check('suggestions from What now?, with reasons', sugg().length >= 3 && $$('.dv-why .chip').length >= 1);
+  const picked = [];
+  for (let i = 0; i < 3; i++) { const b = sugg()[0]; picked.push(b.dataset.id); b.click(); await wait(250); }
+  const row = T().daily_reviews[0];
+  check('up to 3 focus items, saved for today', row && row.focus.length === 3 && has(undefined, '3 of 3') && sugg().length === 0);
+  const t0 = T().tasks.find((t) => t.id === picked[0]);
+  check('focus items are planned today', t0.planned_at && new Date(t0.planned_at).toDateString() === new Date().toDateString());
+  $$('[data-daily="fit"]')[0].click(); await wait(150);
+  check('Fit in opens Schedule it', $('#sheet').open && has('#sheet', 'schedule it'));
+  $('#sheet').close();
+  $('[data-daily="unfocus"]').click(); await wait(250);
+  check('tap ✓ to take one off today', T().daily_reviews[0].focus.length === 2);
+  sugg()[0].click(); await wait(250);
+  $('[data-daily="start"]').click(); await wait(250);
+  check('Start the day: ready, with What now?', T().daily_reviews[0].started_at && has('.dv-ready', 'ready for today', '3 focus') && !!$('.dv-ready a[href="#now"]'));
+  await go('#forecast');
+  check('the morning banner is gone once started', !$$('a.dv-banner').some((a) => /start your day|plan today/i.test(a.textContent)));
+  const focus = T().daily_reviews[0].focus;
+  T().tasks.find((t) => t.id === focus[0]).completed_at = new Date().toISOString(); await loadAll();
+  await go('#daily/shutdown');
+  check('shut down: capture, focus done or not, tomorrow', has(undefined, 'shut down', 'anything on your mind', '1 of 3 done', 'tomorrow'));
+  const cap = $('[data-daily-capture] input'); cap.value = 'Call the bank about the line of credit'; cap.closest('form').requestSubmit(); await wait(250);
+  check('capture before you stop', T().tasks.some((t) => t.title === 'Call the bank about the line of credit' && t.in_inbox));
+  $(`[data-daily="tomorrow"][data-id="${focus[1]}"]`).click(); await wait(250);
+  const tm = new Date(); tm.setDate(tm.getDate() + 1);
+  check('Tomorrow: planned tomorrow', new Date(T().tasks.find((t) => t.id === focus[1]).planned_at).toDateString() === tm.toDateString());
+  $(`[data-daily="drop"][data-id="${focus[2]}"]`).click(); await wait(250);
+  check('Drop (with Undo, not deleted)', !!T().tasks.find((t) => t.id === focus[2]).dropped_at);
+  $('[data-daily="shutdown"]').click(); await wait(250);
+  check('Done for today', T().daily_reviews[0].shutdown_at && has(undefined, 'done for today'));
+  const { dailyStreak } = await import('/js/views/daily.js');
+  check('streak counts today', dailyStreak() === 1);
+  const S = await import('/js/views/settings.js'); S.resetSettings();
+  await go('#settings'); for (let i = 0; i < 20 && !has(undefined, 'morning reminder'); i++) await wait(100);
+  const cb = $('[data-setting-daily-notify]'); check('morning reminder is off by default', cb && !cb.checked);
+  cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); await wait(250);
+  check('turn on the morning reminder', T().user_settings[0].daily_notify === true);
+  let blocked = false; try { const r = await window.sb.from('daily_reviews').delete().eq('id', row.id); blocked = !!r.error; } catch { blocked = true; }
+  check('daily reviews can’t be deleted', blocked);
+}
 
 // Schedule it: free slots around calendar events, the day view, add to calendar, What now, the feed.
 async function scheduleIt(check) {
@@ -1429,7 +1486,7 @@ async function datesSettings(check) {
   const { db, app } = await import('/js/state.js');
   const { HOURS } = await import('/js/dates.js');
   await go('#settings');
-  check('dates section with three times and the Today tag (plus the review time)', $$('[data-setting-time]').length === 4 && !!$('[data-setting-forecast-tag]') && has(undefined, 'due dates', 'defer dates', 'planned dates', 'always show in today'));
+  check('dates section with three times and the Today tag (plus the review time)', $$('[data-setting-time]').length === 5 && !!$('[data-setting-forecast-tag]') && has(undefined, 'due dates', 'defer dates', 'planned dates', 'always show in today'));
   const due = $('[data-setting-time="due_minutes"]'); due.value = '15:30'; due.dispatchEvent(new Event('change', { bubbles: true }));
   await wait(200);
   check('saved to the account and used right away', T().user_settings[0].due_minutes === 930 && HOURS.due_at === 15.5);
