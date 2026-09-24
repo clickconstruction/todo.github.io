@@ -40,6 +40,8 @@ export const SHORTCUTS = [
   { key: '8', group: 'Go to', label: 'Nearby', run: () => { location.hash = '#nearby'; } },
   { key: '9', group: 'Go to', label: 'Done', run: () => { location.hash = '#done'; } },
   { key: '0', group: 'Go to', label: 'Settings', run: () => { location.hash = '#settings'; } },
+  { key: '.', group: 'Go to', label: 'What now?', run: () => { location.hash = '#now'; } },
+  { key: 'H', shift: true, group: 'Go to', label: 'Horizons', run: () => { location.hash = '#horizons'; } },
   { key: 'c', group: 'Go to', label: 'Clarify: process the Inbox', run: () => { location.hash = '#clarify'; } },
   { key: 'w', group: 'Go to', label: 'Waiting For', run: () => { location.hash = '#waiting'; } },
   { key: 'r', group: 'Go to', label: 'Reference', run: () => { location.hash = '#reference'; } },
@@ -116,7 +118,7 @@ export function shortcutListHtml() {
 }
 
 export function tipFor(k) {
-  if (k === 'Shift') return '⇧ Shift with a letter: N new project · F focus · U unfocus · D drop · T tickler · S someday · M mind sweep · ? this list';
+  if (k === 'Shift') return '⇧ Shift with a letter: N new project · F focus · U unfocus · D drop · T tickler · S someday · M mind sweep · H horizons · ? this list';
   if (k === 'ArrowUp' || k === 'ArrowDown') return `${k === 'ArrowUp' ? '↑' : '↓'}: select the ${k === 'ArrowUp' ? 'previous' : 'next'} item`;
   const list = shortcutsOn(k);
   if (!list.length) return `${labelFor(k)}: no shortcut`;

@@ -36,6 +36,8 @@ import { openDelegate, openTickle } from './editors/gtd.js';
 import { weeklyAction, staleAction, weeklySubmit } from './views/weekly.js';
 import { sweepAction, sweepSubmit, sweepKey } from './views/sweep.js';
 import { somedayAction, somedaySubmit, somedayCount } from './views/someday.js';
+import { horizonsAction, horizonsInput, horizonsChange } from './views/horizons.js';
+import { nowAction } from './views/now.js';
 
 const view = $('#view');
 const typing = () => /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
@@ -144,6 +146,8 @@ const CLICKS = [
   ['[data-stale]', (el, e) => { e.stopPropagation(); staleAction(el); }],
   ['[data-sweep]', (el, e) => { e.stopPropagation(); sweepAction(el); }],
   ['[data-someday]', (el, e) => { e.stopPropagation(); somedayAction(el); }],
+  ['[data-hz]', (el, e) => { e.stopPropagation(); horizonsAction(el); }],
+  ['[data-now], [data-now-set]', (el, e) => { e.stopPropagation(); nowAction(el); }],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
   ['[data-copy-geo]', (el) => copyGeoUrl(el)],
   ['[data-setup-auto]', (el) => openAutomationGuide(el.dataset.setupAuto)],
@@ -190,6 +194,7 @@ view.addEventListener('submit', async (e) => {
 });
 
 view.addEventListener('change', (e) => {
+  if (e.target.closest('[data-hz-link-area], [data-hz-link-goal]')) { horizonsChange(e); return; }
   const doneCtl = e.target.closest('[data-done]');
   if (doneCtl) { onDoneFilterChange(doneCtl); return; }
   const withinCtl = e.target.closest('[data-within]');
@@ -211,6 +216,7 @@ view.addEventListener('change', (e) => {
 view.addEventListener('input', (e) => {
   if (e.target.id === 'search-input') onSearchInput(e.target);
   if (e.target.id === 'ref-search') onRefSearch(e.target);
+  horizonsInput(e);
 });
 
 $('#fab').onclick = openQuickEntry;
@@ -221,7 +227,7 @@ $('#more-tab').onclick = () => {
   const due = reviewDueCount();
   const here = hereNowCount();
   const waiting = waitingBadgeCount();
-  const links = [['#waiting', '⏳', `Waiting For${waiting ? ` <b class="badge due inline">${waiting}</b>` : ''}`], ['#tickler', '📆', 'Tickler'], ['#reference', '🗄️', 'Reference'], ['#someday', '💭', `Someday/Maybe${somedayCount() ? ` <span class="hint">${somedayCount()}</span>` : ''}`], ['#weekly', '🧭', `Weekly Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#sweep', '🧹', 'Mind sweep'], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
+  const links = [['#now', '▶️', 'What now?'], ['#horizons', '🏔️', 'Horizons'], ['#waiting', '⏳', `Waiting For${waiting ? ` <b class="badge due inline">${waiting}</b>` : ''}`], ['#tickler', '📆', 'Tickler'], ['#reference', '🗄️', 'Reference'], ['#someday', '💭', `Someday/Maybe${somedayCount() ? ` <span class="hint">${somedayCount()}</span>` : ''}`], ['#weekly', '🧭', `Weekly Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#sweep', '🧹', 'Mind sweep'], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
   const persp = livePerspectives().map((p) => { const n = badgeCount(p); return [`#perspective/${p.id}`, esc(p.icon), `${esc(p.name)}${n ? ` <b class="badge persp inline">${n}</b>` : ''}`]; });
   const sheet = openSheet(`<form method="dialog" class="more-sheet"><button type="button" class="btn focus-more" data-act="focus">🎯 ${getFocus() ? `Focused on ${esc(focusLabel())} · change` : 'Focus'}</button><h2>Perspectives</h2>
     <nav class="more-links">${persp.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}<a href="#perspectives" data-more-link><span>🔭</span>${persp.length ? 'All perspectives' : 'Perspectives: saved views'}</a></nav>

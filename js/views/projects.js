@@ -1,5 +1,6 @@
 // Projects list (by folder) and the single-project view.
 import { referencesFor } from '../gtd.js';
+import { outcomeLine } from './review.js';
 import { db, app, esc, byId, isOpen, taskSort, bySort, projectTagsFor, tagLabel, PROJECT_STATUSES } from '../state.js';
 import { projectRow, treeList } from '../rows.js';
 import { flattenTree } from '../tree.js';
@@ -49,6 +50,8 @@ export function viewProject(id) {
   return `<a class="back" href="#projects">‹ Projects${folder ? ` / 📁 ${esc(folder.name)}` : ''}</a>
     <div class="view-head"><h1>${esc(p.name)}</h1><span class="head-actions"><button class="btn small" data-focus-here="${p.id}" title="Focus on this project" aria-label="Focus on this project">🎯</button><button class="btn small" data-save-template="${p.id}" title="Save as template" aria-label="Save as template">📋</button><button class="btn small" data-edit-project="${p.id}">Edit</button></span></div>
     ${p.template_id && byId(db.templates || [], p.template_id) ? `<p class="view-sub from-template">From the template <a href="#template/${p.template_id}">${esc(byId(db.templates, p.template_id).name)}</a></p>` : ''}
+    ${outcomeLine(p)}
+    ${p.area_id || p.goal_id ? `<p class="view-sub hz-chips">${p.area_id && byId(db.areas || [], p.area_id) ? `<a class="chip" href="#area/${p.area_id}">⛰ ${esc(byId(db.areas, p.area_id).name)}</a>` : ''}${p.goal_id && byId(db.goals || [], p.goal_id) ? `<a class="chip" href="#goal/${p.goal_id}">🎯 ${esc(byId(db.goals, p.goal_id).title)}</a>` : ''}</p>` : ''}
     ${p.notes ? `<p class="view-sub" style="white-space:pre-wrap">${esc(p.notes)}</p>` : ''}
     <p class="view-sub project-props"><select data-project-status="${p.id}" aria-label="Project status" style="width:auto;padding:6px 10px">${PROJECT_STATUSES.map(([v, l]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <span class="chip" title="${esc(PROJECT_KINDS.find(([v]) => v === p.kind)[2])}">${PROJECT_KINDS.find(([v]) => v === p.kind)[1]}</span>

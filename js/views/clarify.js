@@ -113,6 +113,7 @@ function projectForm(t) {
   return `<form class="cl-form" data-clarify-form="project">
     <label>Project (the outcome)<input type="text" name="name" value="${esc(t.title)}" required autocomplete="off"></label>
     ${folders.length ? `<label>Folder<select name="folder_id"><option value="">No folder</option>${folders.map((f) => `<option value="${f.id}">${esc(f.name)}</option>`).join('')}</select></label>` : ''}
+    <label>Done looks like <span class="hint">optional</span><input type="text" name="outcome" placeholder="Permit approved and posted on site" maxlength="1000" autocomplete="off"></label>
     <label>Very next action<input type="text" name="first" placeholder="e.g. Call Hiro about dates" autocomplete="off"></label>
     <p class="hint">The item becomes the project (its notes and steps come along).${db.templates && db.templates.some((x) => !x.archived_at) ? ' Or <a href="#projects">start from a template</a>.' : ''}</p>
     <div class="cl-foot"><button type="button" class="btn" data-clarify="back">‹ Back</button><button type="submit" class="btn primary">Create project ⏎</button></div>
@@ -214,7 +215,8 @@ async function submitForm(form) {
     if (name !== t.title) { snap.row.title = t.title; const [r] = await run(sb.from('tasks').update({ title: name }).eq('id', t.id).select()); syncRow('tasks', t, r); }
     const pid = await convertToProject(byId(db.tasks, t.id) || t);
     const p = byId(db.projects, pid);
-    if (p && f.get('folder_id')) { const [r] = await run(sb.from('projects').update({ folder_id: f.get('folder_id') }).eq('id', p.id).select()); syncRow('projects', p, r); }
+    const extra = { ...(f.get('folder_id') ? { folder_id: f.get('folder_id') } : {}), ...(String(f.get('outcome') || '').trim() ? { outcome: String(f.get('outcome')).trim() } : {}) };
+    if (p && Object.keys(extra).length) { const [r] = await run(sb.from('projects').update(extra).eq('id', p.id).select()); syncRow('projects', p, r); }
     const first = String(f.get('first') || '').trim();
     if (p && first) await capture(first, { project_id: p.id, in_inbox: false });
     record(snap, 'project', async () => {

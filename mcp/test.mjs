@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -129,7 +129,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 57 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 57 tools, no internals leaked');
+assert(list.body.result.tools.length === 62 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 62 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -787,7 +787,7 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
 // ---------- Weekly Review, mind sweep, Someday/Maybe ----------
 {
   const st0 = await tool('weekly_review', {});
-  assert(!st0.in_progress && st0.steps.length === 10 && st0.steps[0].key === 'papers' && st0.minutes_left > 0, 'weekly_review status before starting');
+  assert(!st0.in_progress && st0.steps.length === 11 && st0.steps[0].key === 'papers' && st0.minutes_left > 0, 'weekly_review status before starting');
   const started = await tool('weekly_review', { action: 'start' });
   assert(started.in_progress && db.weekly_reviews.length === 1, 'weekly_review start saves a review');
   const inboxStep = started.steps.find((x) => x.key === 'inbox');
@@ -828,5 +828,39 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(await sendReviewReminders(env, fakeRest, fri4) === 0, 'not sent if a review was done in the last 5 days');
   reviews = [];
   assert(await sendReviewReminders(env, fakeRest, new Date('2026-09-24T21:00:00Z')) === 0 && await sendReviewReminders(env, fakeRest, new Date('2026-09-25T19:00:00Z')) === 0, 'not on other days or before the time');
+}
+// ---------- Horizons of Focus, what_now ----------
+{
+  const area = await tool('save_area', { name: 'Click Plumbing', standards: 'Every job invoiced within 2 days.' });
+  const pr = (await tool('create_project', { name: 'Maintenance plan launch', outcome: 'Ten customers on a plan', area: 'Click Plumbing' }));
+  assert(pr.outcome === 'Ten customers on a plan' && pr.area_id === area.id, 'create_project with outcome and area');
+  let bad = ''; try { await tool('update_project', { project: pr.id, goal: 'Nope' }); } catch (e) { bad = e.message; }
+  assert(/No goal "Nope"/.test(bad), 'unknown goal: clear error');
+  const goal = await tool('save_goal', { title: 'Grow maintenance revenue', target: '2027-06-30', area: 'Click Plumbing', projects: ['Maintenance plan launch'] });
+  assert(goal.status === 'active' && db.projects.find((p) => p.id === pr.id).goal_id === goal.id, 'save_goal links projects');
+  const up = await tool('update_project', { project: pr.id, outcome: 'Ten customers signed up' });
+  assert(up.outcome === 'Ten customers signed up', 'update_project outcome');
+  await tool('save_horizon', { kind: 'purpose', text: 'Build things that last.\nTreat people fairly.', read: true });
+  await tool('save_horizon', { kind: 'vision', text: 'Two crews, no nights on the phone.', year: 2029 });
+  const hz = await tool('list_horizons', {});
+  assert(hz.goals.some((g) => g.title === 'Grow maintenance revenue' && g.projects.includes('Maintenance plan launch')) && hz.areas.some((a) => a.name === 'Click Plumbing' && a.standards) && hz.vision.year === 2029 && hz.purpose.text === 'Build things that last.', 'list_horizons: goals, areas, purpose (first line), vision');
+  const hzFull = await tool('list_horizons', { include_text: true });
+  assert(hzFull.purpose.text.includes('Treat people fairly'), 'list_horizons include_text');
+  const empty = await tool('save_area', { name: 'Health' });
+  assert((await tool('list_horizons', {})).areas.find((a) => a.name === 'Health').warnings.includes('nothing active'), 'balance: an area with nothing active is flagged');
+  await tool('save_area', { id: 'Health', archived: true });
+  assert(db.areas.find((a) => a.id === empty.id).archived_at && !(await tool('list_horizons', {})).areas.some((a) => a.name === 'Health'), 'areas archive, not delete');
+  // what_now: goal-serving action ranks above a plain one; context and time filter.
+  const act = await tool('capture', { title: 'Call three customers about plans', project: pr.id, tags: ['Phone'], estimate_minutes: 10 });
+  const plain = await tool('capture', { title: 'Sort the parts bin', tags: ['Phone'], estimate_minutes: 10 });
+  const flagged = await tool('capture', { title: 'Return the inspector’s call', tags: ['Phone'], flagged: true, estimate_minutes: 5 });
+  const wn = await tool('what_now', { where: 'Phone', minutes: 15, energy: 'medium', limit: 10 });
+  const order = wn.items.map((x) => x.id);
+  assert(order.indexOf(flagged.id) < order.indexOf(act.id) && order.indexOf(act.id) < order.indexOf(plain.id), 'what_now ranks flagged > serves a goal > the rest');
+  assert(wn.items.find((x) => x.id === act.id).why.includes('serves: Grow maintenance revenue') && wn.items.every((x) => x.tags.includes('Phone') || (x.project_tags || []).includes('Phone')), 'what_now explains why; context filters');
+  const short = await tool('what_now', { where: 'Phone', minutes: 5 });
+  assert(short.items.every((x) => !x.estimate_minutes || x.estimate_minutes <= 5) && short.items.some((x) => x.id === flagged.id), 'what_now respects the time available');
+  const achieved = await tool('save_goal', { id: 'Grow maintenance revenue', status: 'achieved' });
+  assert(achieved.status === 'achieved', 'goals are achieved, not deleted');
 }
 console.log('ALL PASSED');

@@ -131,7 +131,7 @@ export function viewForecast(selected = 'today') {
 
   const title = selected === 'today' ? `Today · ${today.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}`
     : selected === 'past' ? 'Past' : selected === 'future' ? 'Later' : new Date(selected + 'T00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-  return `<div class="view-head"><h1 class="today">Forecast</h1></div>
+  return `<div class="view-head"><h1 class="today">Forecast</h1><a class="btn small" href="#now">▶️ What now?</a></div>
     <nav class="fc-strip" aria-label="Days">${strip}</nav>
     ${filterBar()}
     <p class="view-sub">${esc(title)}</p>

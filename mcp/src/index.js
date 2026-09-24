@@ -16,6 +16,7 @@ import * as OF from '../../js/omnifocus-import.js';
 import * as TPL from '../../js/templates.js';
 import { gtdTools } from './gtd.js';
 import { weeklyTools } from './weekly.js';
+import { horizonsTools } from './horizons.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -29,6 +30,7 @@ Notifications: pass notifications (e.g. [{"kind":"before_due","minutes":60}]) to
 Attachments: add_attachment attaches text, base64 or a URL's file to an action or project; get_task returns download links; remove_attachment archives.
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 Weekly Review: call weekly_review (action start) and walk the user through each step in order (Get clear: papers, mind sweep with mind_sweep_prompts, inbox with clarify_item; Get current: calendars, stale actions, waiting, projects via list_review/mark_reviewed; Get creative: list_someday, anything new), marking each done_step, then finish. Someday/Maybe: clarify_item someday (with a category), list_someday, activate_someday.
+Horizons of Focus: list_horizons shows purpose, vision, goals and areas (with balance warnings); save_area, save_goal, save_horizon edit them; projects take outcome ("done looks like"), area and goal. For "what should I do now?", call what_now (where, minutes, energy) and explain its reasons.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
 Templates: for repeated projects (a new job, a trip), list_templates then create_from_template with the blanks' values; save_as_template turns a project into one.
 Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); undo_import takes an import back.
@@ -343,6 +345,23 @@ class Api {
     const tag = tags.find((g) => g.parent_id && g.name.toLowerCase() === r.toLowerCase() && /waiting/i.test((tags.find((x) => x.id === g.parent_id) || {}).name || ''));
     const [row] = await this.q('people', { method: 'POST', prefer: 'return=representation', body: { user_id: this.userId, name: r, email: email || null, phone: phone || null, tag_id: tag ? tag.id : null } });
     return row;
+  }
+
+  // Project outcome, area and goal (Horizons of Focus), by name or id.
+  async horizonsPatch(a) {
+    const patch = {};
+    if (a.outcome !== undefined) patch.outcome = String(a.outcome || '').trim();
+    const pick = async (table, key, ref) => {
+      if (ref === null || ref === '') return null;
+      const rows = await this.q(`${table}?${this.u}&select=id,${key}`);
+      const r = String(ref).trim().toLowerCase();
+      const hit = rows.find((x) => x.id === ref) || rows.find((x) => String(x[key]).toLowerCase() === r);
+      if (!hit) throw new Error(`No ${table === 'areas' ? 'area' : 'goal'} "${ref}". Use save_${table === 'areas' ? 'area' : 'goal'} first.`);
+      return hit.id;
+    };
+    if (a.area !== undefined) patch.area_id = await pick('areas', 'name', a.area);
+    if (a.goal !== undefined) patch.goal_id = await pick('goals', 'title', a.goal);
+    return patch;
   }
 
   // Waiting on someone (delegated, a person's tag, or on an agenda): the shared rule (js/perspective-engine.js).
@@ -1540,12 +1559,15 @@ const TOOLS = [
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
+        outcome: { type: 'string', description: 'What done looks like, e.g. "Final inspection passed, paid in full"' },
+        area: { type: ['string', 'null'], description: 'Area of focus (name or id); null to remove' },
+        goal: { type: ['string', 'null'], description: 'Goal it serves (title or id); null to remove' },
       },
       required: ['name'],
     },
     async run(api, { name, folder, notes = '', kind = 'parallel', complete_with_last = false, ...more }) {
       const folder_id = folder ? await api.resolveFolder(folder) : null;
-      const body = { user_id: api.userId, name: String(name).trim(), notes, folder_id, kind, complete_with_last: !!complete_with_last, ...(await api.locationPatch(more)), ...projectPatch(api, more) };
+      const body = { user_id: api.userId, name: String(name).trim(), notes, folder_id, kind, complete_with_last: !!complete_with_last, ...(await api.locationPatch(more)), ...projectPatch(api, more), ...(await api.horizonsPatch(more)) };
       const [row] = await api.q('projects', { method: 'POST', prefer: 'return=representation', body });
       if (Array.isArray(more.notifications)) await api.setNotifications('project_id', row.id, more.notifications);
       return { ...projectOut(api, row, folder ? [{ id: folder_id, name: folder }] : []), notifications: (await api.notificationsFor('project_id', [row.id]))[row.id] };
@@ -1588,6 +1610,9 @@ const TOOLS = [
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
+        outcome: { type: 'string', description: 'What done looks like, e.g. "Final inspection passed, paid in full"' },
+        area: { type: ['string', 'null'], description: 'Area of focus (name or id); null to remove' },
+        goal: { type: ['string', 'null'], description: 'Goal it serves (title or id); null to remove' },
       },
       required: ['project'],
     },
@@ -1601,7 +1626,7 @@ const TOOLS = [
       if (a.kind !== undefined) patch.kind = a.kind;
       if (a.complete_with_last !== undefined) patch.complete_with_last = !!a.complete_with_last;
       if (a.flagged !== undefined) patch.flagged = !!a.flagged;
-      Object.assign(patch, await api.locationPatch(a), projectPatch(api, a));
+      Object.assign(patch, await api.locationPatch(a), projectPatch(api, a), await api.horizonsPatch(a));
       if (a.review_every_days !== undefined) patch.review_every_days = Math.min(3650, Math.max(1, Math.round(Number(a.review_every_days))));
       if (Array.isArray(a.tags)) {
         const tagIds = [];
@@ -1934,6 +1959,16 @@ const TOOLS = [
   },
 ];
 TOOLS.push(...gtdTools({ OPEN, zonedToIso, localDate, inList, tool: (name) => TOOLS.find((t) => t.name === name) }));
+// Available actions (not Inbox items) with what What now? needs to filter and rank them.
+async function availableTasks(api) {
+  const [open, projects, tags, links, projectLinks, people] = await Promise.all([
+    api.q(`tasks?${api.u}&${OPEN}&select=*`), api.q(`projects?${api.u}&select=*`), api.q(`tags?${api.u}&select=id,name,parent_id,status`),
+    api.q(`task_tags?${api.u}&select=task_id,tag_id`), api.q(`project_tags?${api.u}&select=project_id,tag_id`), api.q(`people?${api.u}&archived_at=is.null&select=id,name,tag_id,archived_at`),
+  ]);
+  const { available } = availabilityOf(open, projects, undefined, parkedOf({ tasks: open, tags, taskTags: links, projectTags: projectLinks, people }));
+  return { tasks: open.filter((t) => !t.in_inbox && available(t)), tags, links, projectLinks, projects };
+}
+TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 
 // ---------- repeat ----------
@@ -1988,6 +2023,7 @@ function projectOut(api, p, folders = []) {
   return {
     id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, flagged: p.flagged,
     notes: p.notes || undefined,
+    outcome: p.outcome || undefined, area_id: p.area_id || undefined, goal_id: p.goal_id || undefined,
     folder: (folders.find((f) => f.id === p.folder_id) || {}).name || null,
     defer: localDate(p.defer_at, api.tz), planned: localDate(p.planned_at, api.tz), due: localDate(p.due_at, api.tz),
     estimate_minutes: p.estimate_minutes ?? undefined,

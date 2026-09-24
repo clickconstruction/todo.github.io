@@ -1,0 +1,33 @@
+-- Horizons of Focus: areas, goals, project outcome/area/goal, purpose and vision (migration 20261006000001).
+-- One rolled-back transaction; every row should be ok = true.
+begin;
+insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000e7','00000000-0000-0000-0000-000000000000','authenticated','authenticated','hz1@test.invalid'),('00000000-0000-0000-0000-0000000000e8','00000000-0000-0000-0000-000000000000','authenticated','authenticated','hz2@test.invalid');
+create temp table r (n int generated always as identity, test text, ok boolean, detail text); grant all on r to authenticated;
+insert into public.areas (id, user_id, name) values ('00000000-0000-0000-0000-0000000000f8', '00000000-0000-0000-0000-0000000000e8', 'Theirs');
+insert into public.goals (id, user_id, title) values ('00000000-0000-0000-0000-0000000000f9', '00000000-0000-0000-0000-0000000000e8', 'Their goal');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e7","role":"authenticated"}', true);
+insert into public.areas (id, name, standards) values ('00000000-0000-0000-0000-0000000000a7', 'Click Plumbing', 'Invoice within 2 days');
+insert into r (test, ok, detail) select 'owner adds an area; can''t see others', count(*) = 1, '' from public.areas;
+insert into public.goals (id, title, area_id, target_date) values ('00000000-0000-0000-0000-0000000000a8', 'Grow maintenance revenue', '00000000-0000-0000-0000-0000000000a7', '2027-06-30');
+insert into r (test, ok, detail) select 'goal in the area; can''t see others', count(*) = 1 and bool_and(status = 'active'), '' from public.goals;
+do $$ begin insert into public.goals (title, area_id) values ('x', '00000000-0000-0000-0000-0000000000f8'); insert into r (test, ok, detail) values ('a goal can''t use another user''s area', false, '');
+exception when foreign_key_violation then insert into r (test, ok, detail) values ('a goal can''t use another user''s area', true, sqlerrm); end $$;
+update public.goals set status = 'achieved' where id = '00000000-0000-0000-0000-0000000000a8';
+insert into r (test, ok, detail) select 'achieving stamps achieved_at', achieved_at is not null, '' from public.goals where id = '00000000-0000-0000-0000-0000000000a8';
+update public.goals set status = 'active' where id = '00000000-0000-0000-0000-0000000000a8';
+insert into r (test, ok, detail) select 'reopening clears it', achieved_at is null, '' from public.goals where id = '00000000-0000-0000-0000-0000000000a8';
+insert into public.projects (id, name, outcome, area_id, goal_id) values ('00000000-0000-0000-0000-0000000000a9', 'Maintenance plan launch', 'Ten customers on a plan', '00000000-0000-0000-0000-0000000000a7', '00000000-0000-0000-0000-0000000000a8');
+insert into r (test, ok, detail) select 'project with outcome, area and goal', outcome <> '' and area_id is not null and goal_id is not null, '' from public.projects where id = '00000000-0000-0000-0000-0000000000a9';
+do $$ begin update public.projects set goal_id = '00000000-0000-0000-0000-0000000000f9' where id = '00000000-0000-0000-0000-0000000000a9'; insert into r (test, ok, detail) values ('a project can''t serve another user''s goal', false, '');
+exception when foreign_key_violation then insert into r (test, ok, detail) values ('a project can''t serve another user''s goal', true, sqlerrm); end $$;
+do $$ begin update public.projects set area_id = '00000000-0000-0000-0000-0000000000f8' where id = '00000000-0000-0000-0000-0000000000a9'; insert into r (test, ok, detail) values ('a project can''t be in another user''s area', false, '');
+exception when foreign_key_violation then insert into r (test, ok, detail) values ('a project can''t be in another user''s area', true, sqlerrm); end $$;
+do $$ begin update public.goals set status = 'maybe'; insert into r (test, ok, detail) values ('goal status is active/achieved/dropped', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('goal status is active/achieved/dropped', true, sqlerrm); end $$;
+insert into public.user_settings (purpose, vision, vision_year) values ('Build things that last.', 'Two crews.', 2029);
+insert into r (test, ok, detail) select 'purpose and vision saved', purpose <> '' and vision_year = 2029, '' from public.user_settings;
+delete from public.areas; delete from public.goals;
+insert into r (test, ok, detail) select 'areas and goals can''t be deleted', (select count(*) from public.areas) = 1 and (select count(*) from public.goals) = 1, '';
+select test, ok, detail from r order by n;
+rollback;

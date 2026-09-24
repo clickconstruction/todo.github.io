@@ -15,6 +15,14 @@ import { section, prop, propInline, wireProps } from './props.js';
 
 export const REVIEW_UNITS = [['day', 'Days'], ['week', 'Weeks'], ['month', 'Months'], ['year', 'Years']];
 
+// Area of focus and goal (Horizons). Hidden until there's at least one of either.
+function horizonsFields(p) {
+  const areas = (db.areas || []).filter((a) => !a.archived_at || a.id === p.area_id).sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
+  const goals = (db.goals || []).filter((g) => g.status === 'active' || g.id === p.goal_id).sort((a, b) => a.title.localeCompare(b.title));
+  return `${areas.length ? propInline('Area', `<select name="area_id"><option value="">No area</option>${areas.map((a) => `<option value="${a.id}" ${a.id === p.area_id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>`) : ''}
+    ${goals.length ? propInline('Serves goal', `<select name="goal_id"><option value="">No goal</option>${goals.map((g) => `<option value="${g.id}" ${g.id === p.goal_id ? 'selected' : ''}>${esc(g.title)}</option>`).join('')}</select>`) : ''}`;
+}
+
 function projectFieldsHtml(p, project) {
   const folderOptions = db.folders.filter((f) => !f.archived_at || f.id === p.folder_id).sort(bySort)
     .map((f) => `<option value="${f.id}" ${f.id === p.folder_id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
@@ -23,10 +31,12 @@ function projectFieldsHtml(p, project) {
       <input type="text" name="name" value="${esc(p.name)}" placeholder="Outcome, e.g. Launch todotooling.com" required autocomplete="off" aria-label="Project name">
       <label class="flag-pill" title="Flag (its actions show in Flagged)"><input type="checkbox" name="flagged" ${p.flagged ? 'checked' : ''}><span aria-hidden="true">⚑</span><span class="sr-only">Flagged</span></label>
     </div>
-    <label class="notes-field"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes: purpose, what done looks like…" rows="2">${esc(p.notes)}</textarea></label>
+    <label class="outcome-field"><span class="field-label">Done looks like</span><input type="text" name="outcome" value="${esc(p.outcome || '')}" maxlength="1000" placeholder="Final inspection passed, paid in full" autocomplete="off"></label>
+    <label class="notes-field"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes: purpose, ideas, details…" rows="2">${esc(p.notes)}</textarea></label>
     ${section('organize', 'Organize', `
       ${propInline('Folder', `<select name="folder_id"><option value="">No folder</option>${folderOptions}<option value="__new">+ New folder…</option></select>`)}
       <input type="text" name="new_folder" placeholder="New folder name" autocomplete="off" hidden>
+      ${horizonsFields(p)}
       <div class="field kind-field"><div class="segmented" role="radiogroup" aria-label="Project type">
         ${PROJECT_KINDS.map(([v, l, hint]) => `<label title="${esc(hint)}"><input type="radio" name="kind" value="${v}" ${p.kind === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}
       </div><p class="hint kind-hint" style="margin:0">${esc(PROJECT_KINDS.find(([v]) => v === p.kind)[2])}</p></div>
@@ -84,7 +94,10 @@ function wireProjectForm(form, project, onTagsChange) {
       folder_id = folder.id;
     }
     const fields = { name: (f.get('name') || '').trim(), folder_id, notes: f.get('notes'), kind: f.get('kind') || 'parallel',
-      complete_with_last: f.get('complete_with_last') === 'on', flagged: f.get('flagged') === 'on', ...collectLocation() };
+      complete_with_last: f.get('complete_with_last') === 'on', flagged: f.get('flagged') === 'on', ...collectLocation(),
+      outcome: String(f.get('outcome') || '').trim() };
+    if (form.elements.area_id) fields.area_id = f.get('area_id') || null;
+    if (form.elements.goal_id) fields.goal_id = f.get('goal_id') || null;
     Object.assign(fields, {
       defer_at: fromDateInput(f.get('defer_at'), HOURS.defer_at),
       planned_at: fromDateInput(f.get('planned_at'), HOURS.planned_at),

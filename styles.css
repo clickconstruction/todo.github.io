@@ -1001,3 +1001,40 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .sd-row { flex-wrap: wrap; }
 @media (max-width: 560px) { .sd-row .row-actions { flex-basis: 100%; padding-left: 0; } }
 .cl-cats { flex-wrap: wrap; }
+
+/* ---------- Horizons of Focus, What now? ---------- */
+.view-head h1.horizons { color: #0d9488; }
+.view-head h1.now { color: var(--accent); }
+.hz-ladder { display: grid; gap: 6px; margin: 8px 0; }
+.hz-level { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); color: var(--text); text-decoration: none; min-height: 56px; }
+.hz-level:hover { border-color: var(--accent); }
+.hz-alt { flex: 0 0 52px; font-size: 12px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hz-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.hz-main .hint { overflow-wrap: anywhere; }
+.hz-go { color: var(--muted); font-size: 20px; }
+.chip.warn { background: color-mix(in srgb, var(--flag) 18%, transparent); color: var(--flag); }
+.hz-standards { padding: 12px 14px; border-radius: 12px; background: var(--surface-2); margin: 8px 0; }
+.hz-standards p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hz-bar { display: block; height: 5px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 4px; max-width: 260px; }
+.hz-bar.big { height: 8px; max-width: none; }
+.hz-bar i { display: block; height: 100%; background: #0d9488; border-radius: 3px; }
+.hz-progress { display: grid; gap: 6px; margin: 10px 0; }
+.hz-link { display: grid; gap: 6px; margin: 10px 0; font-size: 14px; font-weight: 600; color: var(--muted); }
+.hz-text { width: 100%; min-height: 280px; line-height: 1.6; font-size: 16px; }
+.hz-year { max-width: 260px; }
+.hz-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.outcome-line { margin: 4px 0 8px; font-size: 15px; overflow-wrap: anywhere; }
+.outcome-line .hint { margin-right: 4px; }
+.outcome-field { display: grid; gap: 4px; margin: 6px 0; }
+.now-q { padding: 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); margin-bottom: 8px; }
+.now-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.now-opt { padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; font-size: 14px; cursor: pointer; min-height: 36px; }
+.now-opt.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.now-item { display: grid; gap: 4px; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); margin-bottom: 8px; cursor: pointer; }
+.now-item b { font-size: 16px; overflow-wrap: anywhere; }
+.now-why { display: flex; flex-wrap: wrap; gap: 4px; }
+.now-why .chip { font-size: 12px; }
+.chip.now-due { background: color-mix(in srgb, var(--due) 16%, transparent); color: var(--due); }
+.chip.now-flag { background: color-mix(in srgb, var(--flag) 18%, transparent); color: var(--flag); }
+.chip.now-goal { background: color-mix(in srgb, #0d9488 16%, transparent); color: #0d9488; }
+.now-acts { justify-content: flex-start; padding-left: 0; margin-top: 4px; }

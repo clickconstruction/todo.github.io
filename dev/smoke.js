@@ -18,7 +18,8 @@ async function reload() {
   const insp = await import('/js/state.js'); insp.app.selected = null;
   try { localStorage.removeItem('todo.filter'); localStorage.removeItem('todo.collapsed'); } catch { /* ignore */ }
   const { app } = await import('/js/state.js');
-  app.review = null; app.reviewStats = null; app.here = null; app.locationState = null; app.clarify = null; app.refQuery = ''; app.sweep = null; app.weeklyJust = null;
+  app.review = null; app.reviewStats = null; app.here = null; app.locationState = null; app.clarify = null; app.refQuery = ''; app.sweep = null; app.weeklyJust = null; app.now = null; app.hzStats = null;
+  try { localStorage.removeItem('todo.now'); } catch { /* ignore */ }
   window.__openLink = (url) => { window.__opened = url; };
   window.__noMaps = true; // never call Google from tests
   window.__noRefresh = true; // no background reloads mid-suite (the pane's visibility flips)
@@ -39,7 +40,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -55,18 +56,99 @@ export async function run({ only } = {}) {
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
 
+// Horizons of Focus: ladder, areas (standards, balance), goals (progress), purpose/vision, outcomes.
+async function horizons(check) {
+  const { db } = await import('/js/state.js');
+  await go('#horizons');
+  check('ladder: six levels from purpose to actions', $$('.hz-level').length === 6 && has(undefined, 'purpose and principles', 'vision', 'goals · 0 active', 'areas of focus · 0', 'projects', 'actions'));
+  await go('#horizons/areas');
+  check('areas: offers to make areas from folders', has(undefined, 'make areas from 2 folders', 'priorities', 'personal'));
+  $('[data-hz="areas-from-folders"]').click(); await wait(500);
+  const prio = T().areas.find((a) => a.name === 'PRIORITIES');
+  check('areas made; folder projects join them; folders untouched', prio && T().projects.find((p) => p.id === 'p1').area_id === prio.id && T().folders.length === 2 && !T().folders.some((f) => f.archived_at));
+  await wait(200);
+  check('balance: an area with nothing active is flagged', has(undefined, 'personal') && T().areas.length === 2);
+  await go(`#area/${prio.id}`);
+  check('area page: standards prompt, projects, balance, mark reviewed', has(undefined, 'what good looks like', 'click plumbing', 'balance') && !!$('[data-hz="review-area"]'));
+  $('[data-hz="edit-area"]').click(); await wait(80);
+  const af = $('#sheet form'); af.elements.standards.value = 'Every job invoiced within 2 days.'; af.requestSubmit(); await wait(300);
+  check('standards saved and shown', T().areas.find((a) => a.id === prio.id).standards.includes('invoiced') && has('.hz-standards', 'invoiced within 2 days'));
+  $('[data-hz="review-area"]').click(); await wait(250);
+  check('mark reviewed', !!T().areas.find((a) => a.id === prio.id).last_reviewed_at);
+  $('[data-hz="new-goal"]').click(); await wait(80);
+  const gf = $('#sheet form'); gf.elements.title.value = 'Grow maintenance revenue to $15k a month'; gf.elements.target_date.value = '2027-06-30'; gf.requestSubmit(); await wait(300);
+  const goal = T().goals.find((g) => g.title.startsWith('Grow maintenance'));
+  check('goal created in the area, opens its page', goal && goal.area_id === prio.id && location.hash === `#goal/${goal.id}` && has(undefined, '0 of 0 projects'));
+  const sel = $('[data-hz-link-goal]'); sel.value = 'p1'; sel.dispatchEvent(new Event('change', { bubbles: true })); await wait(300);
+  check('link a project; progress counts it', T().projects.find((p) => p.id === 'p1').goal_id === goal.id && has(undefined, '0 of 1 projects', 'click plumbing'));
+  $('[data-hz="achieve"]').click(); await wait(250);
+  check('achieved (with Undo); dated by the database', T().goals.find((g) => g.id === goal.id).status === 'achieved');
+  $('[data-hz="reopen-goal"]').click(); await wait(250);
+  await go('#horizons/purpose');
+  const ta = $('[data-hz-field="purpose"]'); ta.value = 'Build things that last. Treat people fairly.'; ta.dispatchEvent(new Event('input', { bubbles: true })); await wait(900);
+  check('purpose saves as you type', (T().user_settings[0] || {}).purpose === 'Build things that last. Treat people fairly.');
+  $('[data-hz="read"]').click(); await wait(250);
+  check('mark as read', !!T().user_settings[0].purpose_read_at);
+  await go('#horizons');
+  check('ladder shows it all', has(undefined, 'build things that last', 'goals · 1 active', 'grow maintenance', 'areas of focus · 2'));
+  // Project: outcome, area and goal chips.
+  await go('#project/p1');
+  check('project without an outcome asks for one', has(undefined, 'what does done look like?') && has(undefined, 'priorities', 'grow maintenance'));
+  const { openProjectEditor } = await import('/js/editors/project.js');
+  openProjectEditor(db.projects.find((p) => p.id === 'p1')); await wait(80);
+  const pf = $('#project-form');
+  const hasHz = !!pf.elements.area_id && !!pf.elements.goal_id && pf.elements.area_id.value && pf.elements.goal_id.value;
+  pf.elements.outcome.value = 'All Click Plumbing jobs invoiced and paid'; pf.requestSubmit(); await wait(400);
+  check('outcome saved and shown on the project', T().projects.find((p) => p.id === 'p1').outcome === 'All Click Plumbing jobs invoiced and paid' && has(undefined, 'done looks like', 'invoiced and paid'));
+  check('editor has Area and Serves goal, prefilled', hasHz);
+  let blocked = false; try { const r = await window.sb.from('areas').delete().eq('id', prio.id); blocked = !!r.error; } catch { blocked = true; }
+  check('areas can’t be deleted', blocked);
+}
+
+// What now?: context, time and energy filter; priority ranks with reasons; Done / Not now.
+async function whatNow(check) {
+  const { rankNow, gapUntilNext } = await import('/js/whatnow.js');
+  const now = new Date(); const iso = (d) => new Date(now.getTime() + d * 86400000).toISOString();
+  const mk = (o) => ({ id: o.id, title: o.id, created_at: iso(-1), ...o });
+  const r = rankNow([mk({ id: 'old', created_at: iso(-40) }), mk({ id: 'goal', project_id: 'pg' }), mk({ id: 'plan', planned_at: iso(0) }), mk({ id: 'flag', flagged: true }), mk({ id: 'due', due_at: iso(-1) })],
+    { now, projects: [{ id: 'pg', goal_id: 'g1' }], goals: [{ id: 'g1', status: 'active', title: 'G' }] });
+  check('ranking: due > flagged > planned > goal > oldest', r.items.map((x) => x.t.id).join() === 'due,flag,plan,goal,old', r.items.map((x) => x.t.id).join());
+  check('reasons explain it', r.items[0].reasons.some((x) => x.text === 'overdue') && r.items[3].reasons.some((x) => x.text === 'serves: G') && r.items[4].reasons.some((x) => /waiting/.test(x.text)));
+  const f = rankNow([mk({ id: 'long', estimate_minutes: 60 }), mk({ id: 'short', estimate_minutes: 10 }), mk({ id: 'hard', energy: 'high' }), mk({ id: 'unknown' })], { now, minutes: 15, energy: 'medium' });
+  check('time and energy filter (no estimate/energy still counts)', f.items.map((x) => x.t.id).sort().join() === 'short,unknown');
+  const g = gapUntilNext([{ start: new Date(now.getTime() + 45 * 60000).toISOString(), title: 'Site walk' }, { allDay: true, start: now.toISOString(), title: 'x' }], now);
+  check('gap until the next event', g && g.minutes >= 44 && g.minutes <= 45 && g.title === 'Site walk');
+  await go('#now');
+  check('picker: where, time, energy, results with reasons', has(undefined, 'what now?', 'where', 'time', 'energy', 'anywhere') && $$('.now-item').length >= 1 && $$('.now-why .chip').length >= 1, text());
+  check('best first: the flagged, due-today action tops the list', $('.now-item b').textContent === 'Get plans released' || $('.now-item b').textContent === 'Call GVEC about utilities', $('.now-item b').textContent);
+  $('[data-now-set="where"][data-v="' + T().tags.find((x) => x.name === 'Phone').id + '"]').click(); await wait(150);
+  check('context filter: Phone', $$('.now-item').length >= 1 && $$('.now-item b').every((b) => ['Call GVEC about utilities'].includes(b.textContent)), $$('.now-item b').map((b) => b.textContent).join('|'));
+  check('remembered for next time', JSON.parse(localStorage.getItem('todo.now')).where === T().tags.find((x) => x.name === 'Phone').id);
+  $('[data-now-set="minutes"][data-v="5"]').click(); await wait(150);
+  check('time filter: nothing fits 5 minutes on the phone → offers Anywhere / Any length', has(undefined, 'try anywhere') || has(undefined, 'any length'));
+  $('[data-now-set="where"][data-v="anywhere"]').click(); await wait(100);
+  $('[data-now-set="minutes"][data-v="0"]').click(); await wait(150);
+  const first = $('.now-item').dataset.task;
+  $('.now-item [data-now="later"]').click(); await wait(300);
+  const t = T().tasks.find((x) => x.id === first);
+  check('Not now defers to tomorrow and drops off the list', t.defer_at && new Date(t.defer_at) > new Date() && !$(`.now-item[data-task="${first}"]`));
+  const second = $('.now-item').dataset.task;
+  $('.now-item [data-now="done"]').click(); await wait(300);
+  check('Done completes it', !!T().tasks.find((x) => x.id === second).completed_at);
+}
+
 // Weekly Review: guided steps, saved progress, auto-done steps, stale actions, summary.
 async function weeklyReview(check) {
   const { db } = await import('/js/state.js');
   T().tasks.find((t) => t.id === 't5').updated_at = new Date(Date.now() - 90 * 86400000).toISOString(); // stale
   const { loadAll } = await import('/js/data.js'); await loadAll();
   await go('#weekly');
-  check('overview: three stages, ten steps, time estimate, start button', has(undefined, 'weekly review', 'get clear', 'get current', 'get creative', 'about') && $$('.wk-step').length === 10 && !!$('[data-weekly="start"]'), text());
+  check('overview: three stages, eleven steps, time estimate, start button', has(undefined, 'weekly review', 'get clear', 'get current', 'get creative', 'about') && $$('.wk-step').length === 11 && !!$('[data-weekly="start"]'), text());
   check('steps with nothing to do are already ticked (waiting)', $('a.wk-step[href="#weekly/waiting"]').classList.contains('done'));
   $('[data-weekly="start"]').click(); await wait(250);
-  check('starting saves a review row', T().weekly_reviews.length === 1 && !T().weekly_reviews[0].completed_at && has(undefined, '2 of 10 steps') === false && has(undefined, 'of 10 steps'));
+  check('starting saves a review row', T().weekly_reviews.length === 1 && !T().weekly_reviews[0].completed_at && has(undefined, '2 of 10 steps') === false && has(undefined, 'of 11 steps'));
   await go('#weekly/papers');
-  check('a step page: title, step 1 of 10, hint, capture box', has(undefined, 'collect loose papers', '1 of 10', 'receipts') && !!$('[data-wk-capture]'));
+  check('a step page: title, step 1 of 10, hint, capture box', has(undefined, 'collect loose papers', '1 of 11', 'receipts') && !!$('[data-wk-capture]'));
   const cap = $('[data-wk-capture] input'); cap.value = 'Receipt from the supply house'; cap.closest('form').requestSubmit(); await wait(250);
   check('capture from a step lands in the Inbox', T().tasks.some((t) => t.title === 'Receipt from the supply house' && t.in_inbox));
   $('[data-weekly="step-done"]').click(); await wait(300);
@@ -554,7 +636,8 @@ async function projectTypes(check) {
   const input = $('[data-capture] input');
   input.value = 'Smoke last action';
   $('[data-capture]').requestSubmit();
-  await wait(200);
+  for (let i = 0; i < 20 && !db.tasks.some((t) => t.title === 'Smoke last action'); i++) await wait(100);
+  await wait(100);
   const orderAfter = $$('#view [data-task]').map((el) => el.dataset.task);
   const added = db.tasks.find((t) => t.title === 'Smoke last action');
   check('new action appends to the end', added && orderAfter[orderAfter.length - 1] === added.id, orderAfter.join(','));
