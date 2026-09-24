@@ -79,7 +79,10 @@ async function matrix(check) {
   const { loadAll } = await import('/js/data.js'); await loadAll();
   const { matrixBoxes } = await import('/js/views/matrix.js');
   const where = (id) => Object.entries(matrixBoxes()).find(([, l]) => l.some((x) => x.t.id === id))?.[0] || null;
-  check('Matrix in the sidebar under Reflect', !!$('#sidebar a[href="#matrix"], nav a[href="#matrix"]'));
+  check('Matrix in the sidebar’s Do group, after What now?', (() => { const a = $('a[data-nav="matrix"]'); return !!a && a.previousElementSibling && a.previousElementSibling.dataset.nav === 'now'; })());
+  location.hash = '#inbox'; await wait(60);
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'E', shiftKey: true, bubbles: true })); await wait(80);
+  check('Shift+E opens the Matrix', location.hash === '#matrix');
   check('sorted: flagged+due soon → Do; goal → Schedule; due soon → Delegate; neither → Park', where('mx1') === 'do' && where('mx2') === 'schedule' && where('mx3') === 'delegate' && where('mx4') === 'park' && where('mx5') === 'park', ['mx1', 'mx2', 'mx3', 'mx4'].map(where).join());
   check('late follow-up counts as urgent; far due date isn’t; Inbox stays out', where('mx6') === 'delegate' && where('mx7') === 'park' && where('mx8') === null, [where('mx6'), where('mx7'), where('mx8')].join());
   await go('#matrix');
@@ -506,6 +509,8 @@ async function sidebar(check) {
   $('#sheet [data-nav-toggle="nearby"]').click(); await until(() => ((T().user_settings[0] || {}).sidebar?.hidden || []).includes('nearby'));
   check('hide Nearby: gone from the sidebar, saved to the account', $('[data-nav="nearby"]').classList.contains('nav-hidden') && T().user_settings[0].sidebar.hidden.includes('nearby'));
   $('#sheet [data-nav-move="flagged"][data-dir="-1"]').click(); await until(() => ((T().user_settings[0] || {}).sidebar?.order || {}).do);
+  await until(() => T().user_settings[0].sidebar.order.do.indexOf('flagged') < T().user_settings[0].sidebar.order.do.indexOf('matrix'));
+  $('#sheet [data-nav-move="flagged"][data-dir="-1"]').click(); await until(() => T().user_settings[0].sidebar.order.do[1] === 'flagged');
   const o2 = $$('.nav-group[data-group="do"] [data-nav]').map((a) => a.dataset.nav);
   check('▲ moves Flagged above What now?', o2.indexOf('flagged') < o2.indexOf('now') && T().user_settings[0].sidebar.order.do[1] === 'flagged', o2.join());
   const pin = $('#sheet [data-nav-pin="psB"]'); pin.checked = true; pin.dispatchEvent(new Event('change', { bubbles: true }));

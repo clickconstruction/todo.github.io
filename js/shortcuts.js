@@ -42,6 +42,7 @@ export const SHORTCUTS = [
   { key: '0', group: 'Go to', label: 'Settings', run: () => { location.hash = '#settings'; } },
   { key: '.', group: 'Go to', label: 'What now?', run: () => { location.hash = '#now'; } },
   { key: 'g', group: 'Go to', label: 'Daily review (start your day / shut down)', run: () => { location.hash = '#daily'; } },
+  { key: 'E', shift: true, group: 'Go to', label: 'Matrix (Eisenhower)', run: () => { location.hash = '#matrix'; } },
   { key: 'H', shift: true, group: 'Go to', label: 'Horizons', run: () => { location.hash = '#horizons'; } },
   { key: 'c', group: 'Go to', label: 'Clarify: process the Inbox', run: () => { location.hash = '#clarify'; } },
   { key: 'w', group: 'Go to', label: 'Waiting For', run: () => { location.hash = '#waiting'; } },
