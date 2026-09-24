@@ -1170,3 +1170,46 @@ a.btn { text-decoration: none; }
 .chip-radio { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 14px; cursor: pointer; }
 .chip-radio:has(input:checked) { border-color: var(--accent); color: var(--accent); }
 .gain-field textarea, .gain-quick input, .gain-card input, .gain-cost textarea { color: var(--text); min-height: 44px; }
+
+/* Sidebar: GTD groups, compact rows, collapsible (phones: groups flatten into the tab bar) */
+.nav-group, .nav-items { display: contents; }
+.nav-tools, .nav-head, .nav-foot, .nav-customize { display: none; }
+@media (min-width: 900px) {
+  .tabs { gap: 1px; padding: 16px 10px 12px; }
+  .tabs a { padding: 6px 10px; font-size: 14px; border-radius: 8px; gap: 9px; }
+  .tabs a .tab-icon { font-size: 16px; width: 20px; text-align: center; }
+  .tabs a.nav-hidden { display: none !important; }
+  .nav-tools { display: flex !important; gap: 6px; margin-bottom: 8px; }
+  .nav-tools .nav-tool { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
+    background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; text-decoration: none; cursor: pointer; }
+  .nav-tools .nav-tool .tab-icon { font-size: 14px; width: auto; }
+  .nav-tools .nav-tool.active, body.is-focused .nav-tools .nav-focus { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .tabs .nav-tools button.nav-focus { display: flex; flex: 1; padding: 6px 8px; font-size: 13px; border: 1px solid var(--line); border-radius: 8px; justify-content: center; }
+  body.is-focused .tabs .nav-tools button.nav-focus { border-color: transparent; }
+  .nav-group { display: block; }
+  .nav-items { display: flex; flex-direction: column; gap: 1px; }
+  .nav-group.collapsed .nav-items { display: none; }
+  .nav-head { display: flex !important; align-items: center; gap: 6px; width: 100%; margin-top: 10px; padding: 4px 10px; background: none; border: none; cursor: pointer;
+    color: var(--muted); font: inherit; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  .nav-head:hover { color: var(--text); }
+  .nav-head .nav-sum { margin-left: auto; }
+  .nav-head .nav-sum .badge { font-size: 10px; letter-spacing: 0; }
+  .nav-chev { width: 12px; text-align: center; transition: transform .15s; }
+  .nav-group.collapsed .nav-chev { transform: rotate(-90deg); }
+  .nav-foot { display: flex !important; flex-direction: column; gap: 1px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); }
+  .nav-customize { display: block !important; background: none; border: none; color: var(--muted); font: inherit; font-size: 12px; text-align: left; padding: 4px 10px; cursor: pointer; }
+  .nav-customize:hover { color: var(--accent); }
+  .tabs a.nav-persp { padding: 5px 10px 5px 18px; font-size: 13px; }
+  .badge.quiet { background: none; color: var(--muted); font-weight: 500; }
+  .badge.review:not(:empty) { min-width: 8px; }
+}
+.nav-custom-list { list-style: none; margin: 0 0 6px; padding: 0; }
+.nav-custom-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.nav-custom-list li.off > span:first-child { color: var(--muted); text-decoration: line-through; }
+.more-sheet .more-links { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.more-sheet .more-links a { padding: 11px 10px; font-size: 15px; gap: 8px; min-width: 0; }
+.more-sheet .more-links a span { font-size: 18px; width: 22px; flex: none; }
+.more-sheet h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 12px 0 6px; }
+.more-sheet .more-links a { overflow: hidden; line-height: 1.2; }
+.more-sheet .more-links a .hint, .more-sheet .more-links a .badge { margin-left: auto; flex: none; }
+.more-sheet .more-links a .ml { font-style: normal; min-width: 0; overflow-wrap: anywhere; display: flex; align-items: center; gap: 6px; flex: 1; }

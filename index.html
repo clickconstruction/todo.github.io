@@ -39,26 +39,52 @@
 
 <div id="app" class="app" hidden>
   <nav class="tabs" aria-label="Views">
-    <a href="#search" data-view="search" class="desktop-only"><span class="tab-icon">🔍</span><span>Search</span></a>
-    <button type="button" class="desktop-only nav-focus" data-act="focus"><span class="tab-icon">🎯</span><span>Focus</span></button>
-    <a href="#inbox" data-view="inbox"><span class="tab-icon">📥</span><span>Inbox</span><b class="badge" id="badge-inbox"></b></a>
-    <a href="#forecast" data-view="forecast"><span class="tab-icon">📅</span><span>Forecast</span><b class="badge due" id="badge-forecast"></b></a>
-    <a href="#flagged" data-view="flagged"><span class="tab-icon">🚩</span><span>Flagged</span><b class="badge flag" id="badge-flagged"></b></a>
-    <a href="#daily" data-view="daily" class="desktop-only"><span class="tab-icon">☀️</span><span>Daily review</span></a>
-    <a href="#now" data-view="now" class="desktop-only"><span class="tab-icon">▶️</span><span>What now?</span></a>
-    <a href="#projects" data-view="projects"><span class="tab-icon">🗂️</span><span>Projects</span></a>
-    <div id="nav-perspectives" class="nav-perspectives"></div>
-    <a href="#nearby" data-view="nearby" class="desktop-only"><span class="tab-icon">📍</span><span>Nearby</span><b class="badge here" id="badge-nearby"></b></a>
-    <a href="#waiting" data-view="waiting" class="desktop-only"><span class="tab-icon">⏳</span><span>Waiting For</span><b class="badge due" id="badge-waiting"></b></a>
-    <a href="#tickler" data-view="tickler" class="desktop-only"><span class="tab-icon">📆</span><span>Tickler</span></a>
-    <a href="#reference" data-view="reference" class="desktop-only"><span class="tab-icon">🗄️</span><span>Reference</span></a>
-    <a href="#checklists" data-view="checklists" class="desktop-only"><span class="tab-icon">☑️</span><span>Checklists</span></a>
-    <a href="#horizons" data-view="horizons" class="desktop-only"><span class="tab-icon">🏔️</span><span>Horizons</span></a>
-    <a href="#someday" data-view="someday" class="desktop-only"><span class="tab-icon">💭</span><span>Someday/Maybe</span></a>
-    <a href="#weekly" data-view="weekly" class="desktop-only"><span class="tab-icon">🧭</span><span>Weekly Review</span><b class="badge review" id="badge-review"></b></a>
-    <a href="#tags" data-view="tags" class="desktop-only"><span class="tab-icon">🏷️</span><span>Tags</span></a>
-    <a href="#done" data-view="done" class="desktop-only"><span class="tab-icon">✅</span><span>Done</span></a>
-    <a href="#settings" data-view="settings" class="desktop-only"><span class="tab-icon">⚙️</span><span>Settings</span></a>
+    <div class="nav-tools desktop-only">
+      <a href="#search" data-view="search" class="nav-tool"><span class="tab-icon">🔍</span><span>Search</span></a>
+      <button type="button" class="nav-tool nav-focus" data-act="focus"><span class="tab-icon">🎯</span><span>Focus</span></button>
+    </div>
+    <a href="#inbox" data-view="inbox" data-nav="inbox"><span class="tab-icon">📥</span><span>Inbox</span><b class="badge" id="badge-inbox"></b></a>
+    <div class="nav-group" data-group="do">
+      <button type="button" class="nav-head desktop-only" data-nav-group="do" aria-expanded="true"><span>Do</span><span class="nav-sum"></span><span class="nav-chev" aria-hidden="true">▾</span></button>
+      <div class="nav-items">
+        <a href="#forecast" data-view="forecast" data-nav="forecast"><span class="tab-icon">📅</span><span>Forecast</span><b class="badge due" id="badge-forecast"></b></a>
+        <a href="#now" data-view="now" data-nav="now" class="desktop-only"><span class="tab-icon">▶️</span><span>What now?</span></a>
+        <a href="#flagged" data-view="flagged" data-nav="flagged"><span class="tab-icon">🚩</span><span>Flagged</span><b class="badge flag" id="badge-flagged"></b></a>
+        <a href="#nearby" data-view="nearby" data-nav="nearby" class="desktop-only"><span class="tab-icon">📍</span><span>Nearby</span><b class="badge here" id="badge-nearby"></b></a>
+        <div id="nav-perspectives" class="nav-perspectives"></div>
+      </div>
+    </div>
+    <div class="nav-group" data-group="organize">
+      <button type="button" class="nav-head desktop-only" data-nav-group="organize" aria-expanded="true"><span>Organize</span><span class="nav-sum"></span><span class="nav-chev" aria-hidden="true">▾</span></button>
+      <div class="nav-items">
+        <a href="#projects" data-view="projects" data-nav="projects"><span class="tab-icon">🗂️</span><span>Projects</span></a>
+        <a href="#tags" data-view="tags" data-nav="tags" class="desktop-only"><span class="tab-icon">🏷️</span><span>Tags</span></a>
+        <a href="#perspectives" data-view="perspectives" data-nav="perspectives" class="desktop-only"><span class="tab-icon">🔭</span><span>Perspectives</span></a>
+        <a href="#checklists" data-view="checklists" data-nav="checklists" class="desktop-only"><span class="tab-icon">☑️</span><span>Checklists</span></a>
+      </div>
+    </div>
+    <div class="nav-group" data-group="lists">
+      <button type="button" class="nav-head desktop-only" data-nav-group="lists" aria-expanded="true"><span>Lists</span><span class="nav-sum"></span><span class="nav-chev" aria-hidden="true">▾</span></button>
+      <div class="nav-items">
+        <a href="#waiting" data-view="waiting" data-nav="waiting" class="desktop-only"><span class="tab-icon">⏳</span><span>Waiting For</span><b class="badge due" id="badge-waiting"></b></a>
+        <a href="#someday" data-view="someday" data-nav="someday" class="desktop-only"><span class="tab-icon">💭</span><span>Someday/Maybe</span><b class="badge quiet" id="badge-someday"></b></a>
+        <a href="#tickler" data-view="tickler" data-nav="tickler" class="desktop-only"><span class="tab-icon">📆</span><span>Tickler</span></a>
+        <a href="#reference" data-view="reference" data-nav="reference" class="desktop-only"><span class="tab-icon">🗄️</span><span>Reference</span></a>
+      </div>
+    </div>
+    <div class="nav-group" data-group="reflect">
+      <button type="button" class="nav-head desktop-only" data-nav-group="reflect" aria-expanded="true"><span>Reflect</span><span class="nav-sum"></span><span class="nav-chev" aria-hidden="true">▾</span></button>
+      <div class="nav-items">
+        <a href="#daily" data-view="daily" data-nav="daily" class="desktop-only"><span class="tab-icon">☀️</span><span>Daily review</span><b class="badge review" id="badge-daily"></b></a>
+        <a href="#weekly" data-view="weekly" data-nav="weekly" class="desktop-only"><span class="tab-icon">🧭</span><span>Weekly Review</span><b class="badge review" id="badge-review"></b></a>
+        <a href="#horizons" data-view="horizons" data-nav="horizons" class="desktop-only"><span class="tab-icon">🏔️</span><span>Horizons</span><b class="badge review" id="badge-horizons"></b></a>
+      </div>
+    </div>
+    <div class="nav-foot desktop-only">
+      <a href="#done" data-view="done" data-nav="done"><span class="tab-icon">✅</span><span>Done</span></a>
+      <a href="#settings" data-view="settings" data-nav="settings"><span class="tab-icon">⚙️</span><span>Settings</span></a>
+      <button type="button" class="nav-customize" data-act="customize-sidebar">Customize</button>
+    </div>
     <button type="button" class="mobile-only more-tab" id="more-tab" data-view="more"><span class="tab-icon">⋯</span><span>More</span></button>
   </nav>
   <a href="#search" class="search-fab" aria-label="Search">🔍</a>

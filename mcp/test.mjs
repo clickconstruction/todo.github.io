@@ -1124,4 +1124,11 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const pg = db.projects.find((p) => p.id === 'pG1');
   assert(pg.purpose === 'Crews never wait for equipment' && pg.purpose_by === 'agent', 'update_project gain = purpose, marked suggested');
 }
+// ---------- sidebar: pinned perspectives ----------
+{
+  const made = await tool('create_perspective', { name: 'Quick pins', rules: { match: 'all', rules: [{ type: 'flagged' }] }, pinned: false });
+  assert(made.pinned === false && db.perspectives.find((p) => p.name === 'Quick pins').pinned === false, 'create_perspective: pinned false keeps it out of the sidebar');
+  const again = await tool('update_perspective', { perspective: made.id, pinned: true });
+  assert(again.pinned === true, 'update_perspective: pin it');
+}
 console.log('ALL PASSED');

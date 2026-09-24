@@ -27,6 +27,7 @@ import { noticeEmailPeople } from './views/capture.js';
 import { checklistAction, checklistChange } from './views/checklists.js';
 import { dailyAction, dailySubmit } from './views/daily.js';
 import { settleAction, settleKey } from './views/settle.js';
+import { moreSheetHtml, openCustomize } from './sidebar.js';
 import { newFeedLink } from './views/settings.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
@@ -58,6 +59,7 @@ app.openTask = (id) => inspectOrEdit(id);
 const findTask = (id) => byId(db.tasks, id) || byId(app.searchExtra, id) || (app.doneCache && byId(app.doneCache.rows, id));
 
 const ACTIONS = {
+  'customize-sidebar': () => openCustomize(),
   'new-project': () => openNewProject(null, () => openProjectEditor(null)),
   'new-template': openNewTemplate,
   focus: openFocusPicker,
@@ -246,13 +248,11 @@ $('#more-tab').onclick = () => {
   const due = reviewDueCount();
   const here = hereNowCount();
   const waiting = waitingBadgeCount();
-  const links = [['#daily', '☀️', 'Daily review'], ['#now', '▶️', 'What now?'], ['#checklists', '☑️', 'Checklists'], ['#horizons', '🏔️', 'Horizons'], ['#waiting', '⏳', `Waiting For${waiting ? ` <b class="badge due inline">${waiting}</b>` : ''}`], ['#tickler', '📆', 'Tickler'], ['#reference', '🗄️', 'Reference'], ['#someday', '💭', `Someday/Maybe${somedayCount() ? ` <span class="hint">${somedayCount()}</span>` : ''}`], ['#weekly', '🧭', `Weekly Review${due ? ` <b class="badge review inline">${due}</b>` : ''}`], ['#sweep', '🧹', 'Mind sweep'], ['#nearby', '📍', `Nearby${here ? ` <b class="badge here inline">${here}</b>` : ''}`], ['#alerts', '🔔', 'Alerts'], ['#tags', '🏷️', 'Tags'], ['#done', '✅', 'Done'], ['#search', '🔍', 'Search'], ['#settings', '⚙️', 'Settings']];
-  const persp = livePerspectives().map((p) => { const n = badgeCount(p); return [`#perspective/${p.id}`, esc(p.icon), `${esc(p.name)}${n ? ` <b class="badge persp inline">${n}</b>` : ''}`]; });
-  const sheet = openSheet(`<form method="dialog" class="more-sheet"><button type="button" class="btn focus-more" data-act="focus">🎯 ${getFocus() ? `Focused on ${esc(focusLabel())} · change` : 'Focus'}</button><h2>Perspectives</h2>
-    <nav class="more-links">${persp.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}<a href="#perspectives" data-more-link><span>🔭</span>${persp.length ? 'All perspectives' : 'Perspectives: saved views'}</a></nav>
-    <h2>More</h2>
-    <nav class="more-links">${links.map(([href, icon, label]) => `<a href="${href}" data-more-link><span>${icon}</span>${label}</a>`).join('')}</nav>
-    <div class="actions"><div class="right"><button class="btn">Close</button></div></div></form>`);
+  const some = somedayCount();
+  const badges = { waiting: waiting ? ` <b class="badge due inline">${waiting}</b>` : '', someday: some ? ` <span class="hint">${some}</span>` : '', weekly: due ? ` <b class="badge review inline">${due}</b>` : '', nearby: here ? ` <b class="badge here inline">${here}</b>` : '' };
+  const perspectives = livePerspectives().filter((p) => p.pinned !== false).map((p) => { const n = badgeCount(p); return [`#perspective/${p.id}`, esc(p.icon), `${esc(p.name)}${n ? ` <b class="badge persp inline">${n}</b>` : ''}`]; });
+  const focusLine = `<button type="button" class="btn focus-more" data-act="focus">🎯 ${getFocus() ? `Focused on ${esc(focusLabel())} · change` : 'Focus'}</button>`;
+  const sheet = openSheet(moreSheetHtml({ badges, perspectives, focusLine }));
   sheet.querySelectorAll('[data-more-link]').forEach((a) => { a.onclick = () => sheet.close(); });
   sheet.showModal();
 };

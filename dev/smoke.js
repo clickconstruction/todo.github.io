@@ -25,6 +25,7 @@ async function reload() {
   window.__noRefresh = true; // no background reloads mid-suite (the pane's visibility flips)
   (await import('/js/alerts.js')).resetAlertState();
   window.__geo = { state: 'prompt', position: { lat: 29.7610, lng: -95.3705, accuracy: 20 } }; // ~400 ft from mock Home Depot
+  try { localStorage.removeItem('todo.nav.collapsed'); } catch { /* ignore */ }
   try { ['todo.here', 'todo.nearby.within', 'todo.geo.alerts', 'todo.geo.key', 'todo.geo.done', 'todo.alerts.nudge', 'todo.alerts.seen'].forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ }
   const { setFilter } = await import('/js/filter.js');
   setFilter({ show: 'remaining', fits: 0, energy: '' });
@@ -40,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -55,6 +56,59 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Sidebar: GTD groups, collapsible with a summary, customize (hide, order, pin), grouped More sheet.
+async function sidebar(check) {
+  const { app } = await import('/js/state.js');
+  try { localStorage.removeItem('todo.nav.collapsed'); } catch { /* ignore */ }
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const now = new Date().toISOString();
+  T().people.push({ id: 'peS', user_id: 'u1', name: 'Jodi Park', email: null, phone: null, notes: '', tag_id: null, sort: 0, archived_at: null, added_via: 'app', created_at: now });
+  T().tasks.push({ ...T().tasks[0], id: 'tsW', title: 'Signed change order', project_id: null, in_inbox: false, waiting_on: 'peS', delegated_at: now, follow_up_at: new Date(Date.now() - 86400000).toISOString(), completed_at: null, dropped_at: null, created_at: now, updated_at: now });
+  T().perspectives.push({ id: 'psA', user_id: 'u1', name: 'Calls', icon: '📞', rules: { v: 1, match: 'all', rules: [] }, options: { show: 'remaining', group_by: 'project', sort_by: 'project', layout: 'tree' }, badge: false, pinned: true, sort: 0, archived_at: null, created_at: now, updated_at: now });
+  T().perspectives.push({ id: 'psB', user_id: 'u1', name: 'Errands run', icon: '🚗', rules: { v: 1, match: 'all', rules: [] }, options: { show: 'remaining', group_by: 'project', sort_by: 'project', layout: 'tree' }, badge: false, pinned: false, sort: 1, archived_at: null, created_at: now, updated_at: now });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  await go('#forecast'); await go('#inbox');
+  const heads = $$('.tabs .nav-head').map((h) => h.textContent.replace(/[▾•\d]/g, '').trim());
+  check('four groups by GTD step', heads.join('|') === 'Do|Organize|Lists|Reflect', heads.join('|'));
+  const order = $$('.tabs [data-nav]').map((a) => a.dataset.nav);
+  check('Inbox first; Search and Focus as tools; Done and Settings in the footer', order[0] === 'inbox' && !!$('.nav-tools [data-view="search"]') && !!$('.nav-tools .nav-focus') && !!$('.nav-foot [data-nav="done"]') && !!$('.nav-foot [data-nav="settings"]'));
+  check('grouped: Do, Organize, Lists, Reflect in order', ['forecast', 'now', 'flagged', 'nearby', 'projects', 'tags', 'perspectives', 'checklists', 'waiting', 'someday', 'tickler', 'reference', 'daily', 'weekly', 'horizons'].every((k, i, a) => i === 0 || order.indexOf(a[i - 1]) < order.indexOf(k)), order.join());
+  check('pinned perspectives sit in Do; unpinned ones don’t', has('.nav-group[data-group="do"]', 'calls') && !has('.tabs', 'errands run'));
+  check('Someday shows a quiet count', $('#badge-someday').classList.contains('quiet'));
+  // Collapse Lists: items go, the summary stays.
+  $('[data-nav-group="lists"]').click(); await wait(50);
+  const lists = $('.nav-group[data-group="lists"]');
+  check('a group collapses and says so', lists.classList.contains('collapsed') && $('[data-nav-group="lists"]').getAttribute('aria-expanded') === 'false' && $('[data-nav="tickler"]').offsetParent === null);
+  check('collapsed, it still shows what needs you (the waiting count)', $('#badge-waiting').textContent !== '' && $('[data-nav-group="lists"] .nav-sum .badge').textContent === $('#badge-waiting').textContent, `${$('#badge-waiting').textContent} / ${text('[data-nav-group="lists"]')}`);
+  check('collapsed groups are remembered on this device', (JSON.parse(localStorage.getItem('todo.nav.collapsed') || '[]')).includes('lists'), localStorage.getItem('todo.nav.collapsed'));
+  await go('#forecast'); await go('#inbox');
+  check('…across renders', $('.nav-group[data-group="lists"]').classList.contains('collapsed'));
+  $('[data-nav-group="lists"]').click(); await wait(50);
+  check('and opens again', !$('.nav-group[data-group="lists"]').classList.contains('collapsed'));
+  // Customize.
+  $('.nav-customize').click(); await wait(100);
+  check('Customize: every view, grouped; Forecast and Projects always shown', has('#sheet', 'customize sidebar', 'do', 'organize', 'lists', 'reflect', 'always shown') && !$('#sheet [data-nav-toggle="forecast"]') && !!$('#sheet [data-nav-toggle="nearby"]'));
+  $('#sheet [data-nav-toggle="nearby"]').click(); await until(() => ((T().user_settings[0] || {}).sidebar?.hidden || []).includes('nearby'));
+  check('hide Nearby: gone from the sidebar, saved to the account', $('[data-nav="nearby"]').classList.contains('nav-hidden') && T().user_settings[0].sidebar.hidden.includes('nearby'));
+  $('#sheet [data-nav-move="flagged"][data-dir="-1"]').click(); await until(() => ((T().user_settings[0] || {}).sidebar?.order || {}).do);
+  const o2 = $$('.nav-group[data-group="do"] [data-nav]').map((a) => a.dataset.nav);
+  check('▲ moves Flagged above What now?', o2.indexOf('flagged') < o2.indexOf('now') && T().user_settings[0].sidebar.order.do[1] === 'flagged', o2.join());
+  const pin = $('#sheet [data-nav-pin="psB"]'); pin.checked = true; pin.dispatchEvent(new Event('change', { bubbles: true }));
+  await until(() => T().perspectives.find((x) => x.id === 'psB').pinned);
+  check('pin a perspective: it joins Do', has('.nav-group[data-group="do"]', 'errands run'));
+  // Phones: the More sheet in the same groups, hidden views included.
+  $('#sheet').close();
+  $('#more-tab').click(); await wait(100);
+  check('More sheet: same groups, hidden views still there', has('#sheet', 'do', 'organize', 'lists', 'reflect', 'nearby', 'mind sweep', 'errands run', 'settings') && !$('#sheet a[href="#forecast"]'), text('#sheet').slice(0, 200));
+  $('#sheet').close();
+  $('.nav-customize').click(); await wait(100);
+  $('#sheet [data-nav-reset]').click(); await until(() => !Object.keys((T().user_settings[0] || {}).sidebar || {}).length);
+  check('Reset to default', !$('[data-nav="nearby"]').classList.contains('nav-hidden') && Object.keys(T().user_settings[0].sidebar).length === 0);
+  $('#sheet').close();
+  await go('#settings');
+  check('Settings links to Customize sidebar', !!$('#view [data-act="customize-sidebar"]'));
+}
 
 // What do I gain?: asked at capture, placed by it, shown and used everywhere, checked after completing.
 async function gains(check) {
@@ -1382,7 +1436,7 @@ async function perspectives(check) {
   // Phones: More lists perspectives.
   $('#more-tab').click();
   await wait(100);
-  check('More sheet lists perspectives', has('#sheet', 'perspectives', 'calls', 'calls copy', 'all perspectives'));
+  check('More sheet lists pinned perspectives and the Perspectives page', has('#sheet', 'perspectives', 'calls', 'calls copy') && !!$('#sheet a[href="#perspectives"]'));
   $('#sheet').close();
 }
 

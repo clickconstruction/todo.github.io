@@ -41,6 +41,9 @@ export function viewSettings() {
       <button class="btn small danger" data-revoke="${t.id}">Revoke</button></li>`).join('');
   return `<div class="view-head"><h1>Settings</h1></div>
     <p class="view-sub">Signed in as ${esc(app.user.email)}</p>
+    <h2 class="section-title">Sidebar</h2>
+    <p class="view-sub" style="margin-bottom:8px">Hide views you don’t use, order each group, and pin perspectives to Do.</p>
+    <button class="btn" data-act="customize-sidebar">Customize sidebar</button>
     <h2 class="section-title">Agent access (MCP)</h2>
     <p class="view-sub">Tokens let AI agents like Claude read and update your todos through <code>${MCP_URL}</code>. Agent tokens have full access to your account; location keys (from Nearby → Alerts) can only trigger alerts. Revoke any you no longer use.</p>
     <button class="btn primary" data-act="new-token">Create token</button>

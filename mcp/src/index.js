@@ -818,7 +818,7 @@ async function findPerspective(api, ref) {
 }
 
 function perspectiveOut(p, data) {
-  return { id: p.id, name: p.name, icon: p.icon, summary: P.describe(p, data), rules: p.rules, options: { ...P.DEFAULT_OPTIONS, ...(p.options || {}) }, badge: p.badge, archived: !!p.archived_at };
+  return { id: p.id, name: p.name, icon: p.icon, summary: P.describe(p, data), rules: p.rules, options: { ...P.DEFAULT_OPTIONS, ...(p.options || {}) }, badge: p.badge, pinned: p.pinned !== false, archived: !!p.archived_at };
 }
 
 
@@ -1435,6 +1435,7 @@ const TOOLS = [
         rules: { type: 'object' },
         options: { type: 'object' },
         badge: { type: 'boolean', description: 'Show its count in the sidebar' },
+        pinned: { type: 'boolean', description: 'Pinned in the sidebar\'s Do group (default true); unpinned ones are under Perspectives' },
       },
     },
     async run(api, a) {
@@ -1448,7 +1449,7 @@ const TOOLS = [
       const existing = await api.q(`perspectives?${api.u}&select=sort,name,archived_at`);
       if (existing.some((x) => !x.archived_at && x.name.toLowerCase() === name.toLowerCase())) throw new Error(`A perspective called “${name}” already exists; use update_perspective`);
       const sort = Math.max(-1, ...existing.map((x) => x.sort || 0)) + 1;
-      const [row] = await api.q('perspectives', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name, icon: a.icon || base.icon, rules, options, badge: !!a.badge, sort } });
+      const [row] = await api.q('perspectives', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name, icon: a.icon || base.icon, rules, options, badge: !!a.badge, pinned: a.pinned !== false, sort } });
       return perspectiveOut(row, data);
     },
   },
@@ -1460,7 +1461,7 @@ const TOOLS = [
       properties: {
         perspective: { type: 'string', description: 'Name or id' },
         name: { type: 'string' }, icon: { type: 'string' },
-        rules: { type: 'object' }, options: { type: 'object' }, badge: { type: 'boolean' },
+        rules: { type: 'object' }, options: { type: 'object' }, badge: { type: 'boolean' }, pinned: { type: 'boolean', description: 'Pinned in the sidebar (Do group)' },
         archived: { type: 'boolean' },
         move: { type: 'string', enum: ['up', 'down', 'top', 'bottom'] },
       },
@@ -1473,6 +1474,7 @@ const TOOLS = [
       if (a.name !== undefined) patch.name = String(a.name).trim();
       if (a.icon !== undefined) patch.icon = a.icon;
       if (a.badge !== undefined) patch.badge = !!a.badge;
+      if (a.pinned !== undefined) patch.pinned = !!a.pinned;
       if (a.rules !== undefined) patch.rules = resolveRuleNames(a.rules, data);
       if (a.options !== undefined) patch.options = { ...P.DEFAULT_OPTIONS, ...(p.options || {}), ...a.options };
       if (a.archived !== undefined) patch.archived_at = a.archived ? new Date().toISOString() : null;

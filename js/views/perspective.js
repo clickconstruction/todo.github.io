@@ -54,9 +54,8 @@ export function viewPerspectives() {
     ${archived.length ? `<h2 class="section-title">Archived · ${archived.length}</h2><ul class="list persp-list">${archived.map((p) => `<li class="persp-row archived"><span class="persp-link"><span class="persp-icon" aria-hidden="true">${esc(p.icon)}</span><span class="persp-main"><span class="persp-name">${esc(p.name)}</span></span></span><button class="btn small" data-persp-restore="${p.id}">Restore</button></li>`).join('')}</ul>` : ''}`;
 }
 
-// Sidebar (desktop) entries with optional badges.
+// Sidebar (desktop): pinned perspectives, in the Do group, with optional badges.
 export const perspectiveNav = (currentId) => {
-  const list = livePerspectives();
-  return `<a href="#perspectives" data-view="perspectives" class="nav-section ${location.hash === '#perspectives' ? 'active' : ''}"><span class="tab-icon">🔭</span><span>Perspectives</span></a>`
-    + list.map((p) => { const n = badgeCount(p); return `<a href="#perspective/${p.id}" class="nav-persp ${p.id === currentId ? 'active' : ''}"><span class="tab-icon">${esc(p.icon)}</span><span>${esc(p.name)}</span>${n ? `<b class="badge persp">${n}</b>` : ''}</a>`; }).join('');
+  const list = livePerspectives().filter((p) => p.pinned !== false);
+  return list.map((p) => { const n = badgeCount(p); return `<a href="#perspective/${p.id}" class="nav-persp ${p.id === currentId ? 'active' : ''}"><span class="tab-icon">${esc(p.icon)}</span><span>${esc(p.name)}</span>${n ? `<b class="badge persp">${n}</b>` : ''}</a>`; }).join('');
 };

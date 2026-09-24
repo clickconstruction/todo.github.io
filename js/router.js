@@ -28,6 +28,10 @@ import { viewChecklists, viewChecklist } from './views/checklists.js';
 import { viewDaily } from './views/daily.js';
 import { viewSettle } from './views/settle.js';
 import { withFocus, getFocus, focusLabel, focusedProjectIds } from './prefs.js';
+import { applySidebar } from './sidebar.js';
+import { somedayCount } from './views/someday.js';
+import { rowFor } from './views/daily.js';
+import { bigDue } from './views/horizons.js';
 
 const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person', 'weekly', 'sweep', 'someday', 'horizons', 'area', 'goal', 'share', 'checklists', 'checklist', 'daily', 'settle']);
 const VIEWS = {
@@ -73,10 +77,16 @@ export function render() {
   $('#badge-review').textContent = (ids ? withFocus(reviewDueCount) : reviewDueCount()) || (isWeeklyDue() || openReview() ? '•' : '');
   $('#badge-nearby').textContent = hereNowCount() || '';
   $('#badge-waiting').textContent = waitingBadgeCount() || '';
+  $('#badge-someday').textContent = somedayCount() || ''; // quiet: a size, not a to-do
+  const today = rowFor();
+  $('#badge-daily').textContent = today && today.started_at ? '' : '•';
+  const big = bigDue();
+  $('#badge-horizons').textContent = big.yearly.length || big.quarterly ? '•' : '';
   // Views that live under "More" on phones light up the More tab.
   $('#more-tab').classList.toggle('active', ['tags', 'tag', 'done', 'settings', 'search', 'review', 'nearby', 'places', 'alerts', 'perspective', 'perspectives', 'import', 'waiting', 'person', 'tickler', 'reference', 'weekly', 'someday', 'horizons', 'area', 'goal', 'now', 'checklists', 'checklist', 'settle'].includes(view));
   const nav = $('#nav-perspectives');
   if (nav) nav.innerHTML = ids ? withFocus(() => perspectiveNav(view === 'perspective' ? args[0] : null)) : perspectiveNav(view === 'perspective' ? args[0] : null);
+  applySidebar();
   renderInspector();
   if ('setAppBadge' in navigator) (inboxCount + dueCount ? navigator.setAppBadge(inboxCount + dueCount) : navigator.clearAppBadge()).catch(() => {});
 }
