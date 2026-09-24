@@ -1035,4 +1035,22 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   started = [{ id: 'x' }];
   assert(await sendDailyReminders(env, fake, thu730) === 0, 'not if the day was already started');
 }
+// ---------- quarterly and yearly horizon reviews ----------
+{
+  const { bigReviewsDue } = await import('../js/whatnow.js');
+  const now = new Date('2026-09-24T12:00:00Z');
+  const old = '2025-01-01T00:00:00Z'; const recent = '2026-09-01T00:00:00Z';
+  const b1 = bigReviewsDue({ settings: { purpose: 'Build things that last', purpose_read_at: old, vision: '', horizons_quarter_at: null }, areas: [{ id: 'a', created_at: old }], goals: [{ id: 'g', status: 'active', created_at: old, target_date: '2026-06-30', area_id: 'a' }], projects: [{ id: 'p', status: 'active' }], now });
+  assert(b1.yearly.join() === 'purpose' && b1.quarterly && b1.lateGoals.length === 1 && b1.areasNoGoal.length === 0 && b1.looseProjects.length === 1, 'bigReviewsDue: yearly read only for written text; quarterly a quarter after setup; late goals; loose projects');
+  const b2 = bigReviewsDue({ settings: { purpose: 'x', purpose_read_at: recent, horizons_quarter_at: recent }, areas: [{ id: 'a', created_at: old }], goals: [], projects: [], now });
+  assert(!b2.yearly.length && !b2.quarterly && b2.areasNoGoal.length === 1, 'not due right after doing them; areas with no goal noted');
+  const b3 = bigReviewsDue({ settings: {}, areas: [{ id: 'a', created_at: recent }], goals: [], projects: [], now });
+  assert(!b3.quarterly && !b3.yearly.length, 'not due right after setting up areas; nothing unwritten is due');
+  const h = await tool('list_horizons', {});
+  assert(h.reviews_due, 'list_horizons reports reviews due');
+  let bad = ''; try { await tool('save_horizon', { kind: 'quarterly' }); } catch (e) { bad = e.message; }
+  assert(/read: true/.test(bad), 'quarterly check-in needs read: true');
+  const q = await tool('save_horizon', { kind: 'quarterly', read: true });
+  assert(q.saved.includes('horizons_quarter_at') && db.user_settings.find((x) => x.user_id === UID).horizons_quarter_at, 'save_horizon quarterly records the check-in');
+}
 console.log('ALL PASSED');

@@ -1,6 +1,7 @@
 // The Weekly Review, mind sweep and Someday/Maybe for agents (same steps and prompts as the app:
 // js/weekly.js). An agent can walk the user through a review in conversation, step by step.
 import { STEPS, STAGES, STALE_DAYS, sweepPrompts, streak } from '../../js/weekly.js';
+import { bigReviewsDue } from '../../js/whatnow.js';
 
 export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
   const isSomedayTag = (tags) => { const root = tags.find((g) => !g.parent_id && /^someday/i.test(g.name)); return root ? new Set([root.id, ...tags.filter((g) => g.parent_id === root.id).map((g) => g.id)]) : new Set(); };
@@ -34,8 +35,11 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
     const due = projects.filter((p) => ['active', 'on_hold'].includes(p.status) && p.next_review_at && p.next_review_at <= now);
     // Stuck = active with no open action (the app also counts "nothing available").
     const stuck = projects.filter((p) => p.status === 'active' && !open.some((t) => t.project_id === p.id));
-    const [areas, goals] = await Promise.all([api.q(`areas?${api.u}&archived_at=is.null&select=id,name,review_every_days,last_reviewed_at`), api.q(`goals?${api.u}&status=eq.active&select=id,title,review_every_days,last_reviewed_at`)]);
+    const [areas, goals] = await Promise.all([api.q(`areas?${api.u}&archived_at=is.null&select=id,name,review_every_days,last_reviewed_at,created_at,archived_at`), api.q(`goals?${api.u}&status=eq.active&select=id,title,review_every_days,last_reviewed_at,created_at,target_date,area_id`)]);
     const dueHz = [...areas, ...goals].filter((x) => !x.last_reviewed_at || Date.parse(x.last_reviewed_at) + (x.review_every_days || 30) * 86400000 <= Date.now());
+    const big = bigReviewsDue({ settings: api.settings || {}, goals: goals.map((g) => ({ ...g, status: 'active' })), areas, projects });
+    if (big.quarterly) dueHz.push({ big: 'quarterly check-in (list_horizons)' });
+    big.yearly.forEach((k) => dueHz.push({ big: `yearly read of the ${k} (list_horizons include_text)` }));
     const count = { horizons: dueHz.length, inbox: inbox.length, stale: stale.length, waiting: waiting.length, projects: due.length + stuck.length, someday: sd.items.length + sd.onHold.length };
     const auto = { horizons: !dueHz.length, inbox: !inbox.length, stale: !stale.length, waiting: !waiting.some((t) => t.follow_up_at && t.follow_up_at < end), projects: !due.length && !stuck.length };
     const data = {
@@ -45,7 +49,7 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
       projects: { due_for_review: due.map((p) => p.name), stuck: stuck.map((p) => p.name), note: 'Use list_review and mark_reviewed; give stuck projects a next action.' },
       someday: { count: count.someday, note: 'Use list_someday; activate_someday or drop.' },
       sweep: { note: 'Use mind_sweep_prompts and capture what the user says.' },
-      horizons: { due: dueHz.map((x) => x.name ? `area: ${x.name}` : `goal: ${x.title}`), note: 'Use list_horizons; save_area / save_goal with reviewed: true.' },
+      horizons: { due: dueHz.map((x) => x.big || (x.name ? `area: ${x.name}` : `goal: ${x.title}`)), note: 'Use list_horizons; save_area / save_goal with reviewed: true.' },
     };
     const steps = STEPS.map((s) => {
       const done = !!(r && r.steps && r.steps[s.key]) || !!auto[s.key];

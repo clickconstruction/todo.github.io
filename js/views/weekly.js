@@ -14,7 +14,7 @@ import { waitingFor, followUpDue, isTickled, somedayItems, isSomeday, dayKey } f
 import { waitingRow } from './gtd.js';
 import { sweepHtml } from './sweep.js';
 import { somedayListHtml } from './someday.js';
-import { horizonsDue, liveAreas } from './horizons.js';
+import { horizonsDue, liveAreas, bigDue, quarterlyBody } from './horizons.js';
 
 // ---------- the review row ----------
 export const openReview = () => (db.weeklyReviews || []).find((r) => !r.completed_at && !r.abandoned_at) || null;
@@ -61,7 +61,8 @@ function ctx() {
   const projectsDue = db.projects.filter(isDueForReview).length;
   const stuck = stuckProjects().length;
   const some = somedayItems();
-  const hz = horizonsDue().length;
+  const big = bigDue();
+  const hz = horizonsDue().length + big.yearly.length + (big.quarterly ? 1 : 0);
   const count = { inbox, stale, waiting: waiting.length, projects: projectsDue + stuck, someday: some.tasks.length + some.projects.length, horizons: hz };
   // Nothing to do = done without a click.
   const auto = { inbox: inbox === 0, stale: stale === 0, waiting: dueFollow === 0, projects: projectsDue === 0 && stuck === 0, horizons: hz === 0 };
@@ -189,8 +190,12 @@ const STEP_BODY = {
   someday: () => somedayListHtml({ embedded: true }),
   horizons: () => {
     const due = horizonsDue();
+    const big = bigDue();
+    const extra = `${big.yearly.length ? `<h2 class="section-title">Yearly · read your ${big.yearly.join(' and ')}</h2><div class="group-list">${big.yearly.map((k) => `<a class="group-row" href="#horizons/${k}"><span>${k === 'purpose' ? '🧭 Purpose and principles' : '🔭 Vision'}</span><span class="hint">read it, then “Mark as read”</span></a>`).join('')}</div>` : ''}
+      ${big.quarterly ? `<h2 class="section-title">Quarterly check-in</h2>${quarterlyBody()}` : ''}`;
+    if (!due.length && extra.trim()) return extra;
     if (!due.length) return `<div class="wk-card"><p class="wk-big">✓</p><p>${liveAreas().length ? 'No areas or goals due for review.' : 'You haven’t set up areas or goals. <a href="#horizons">Horizons</a> when you’re ready.'}</p></div>`;
-    return `<p class="hint">Open each one, check it, and mark it reviewed.</p><div class="group-list">${due.map((x) => (x.name ? `<a class="group-row" href="#area/${x.id}"><span>⛰ ${esc(x.name)}</span><span class="hint">area</span></a>` : `<a class="group-row" href="#goal/${x.id}"><span>🎯 ${esc(x.title)}</span><span class="hint">goal</span></a>`)).join('')}</div>`;
+    return `${extra}<p class="hint">Open each one, check it, and mark it reviewed.</p><div class="group-list">${due.map((x) => (x.name ? `<a class="group-row" href="#area/${x.id}"><span>⛰ ${esc(x.name)}</span><span class="hint">area</span></a>` : `<a class="group-row" href="#goal/${x.id}"><span>🎯 ${esc(x.title)}</span><span class="hint">goal</span></a>`)).join('')}</div>`;
   },
   new: () => `${captureBox('An idea, a project, something you’d like to do…')}${taskList(capturedSince().filter((t) => { const r = openReview(); return r && (!r.steps.someday || t.created_at >= r.steps.someday.done_at); })) || '<p class="hint">Captures go to the Inbox; they’ll be there to clarify next time.</p>'}`,
 };

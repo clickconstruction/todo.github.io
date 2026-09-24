@@ -6,7 +6,7 @@ import { fmtDate } from '../dates.js';
 import { projectRow } from '../rows.js';
 import { saveSettings } from '../prefs.js';
 import { isAvailable } from '../availability.js';
-import { areaBalance, isDueForReview } from '../whatnow.js';
+import { areaBalance, isDueForReview, bigReviewsDue } from '../whatnow.js';
 
 export const liveAreas = () => (db.areas || []).filter((a) => !a.archived_at).sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
 export const activeGoals = () => (db.goals || []).filter((g) => g.status === 'active').sort((a, b) => String(a.target_date || '9').localeCompare(String(b.target_date || '9')) || a.title.localeCompare(b.title));
@@ -15,6 +15,8 @@ export function goalProgress(g) {
   const ps = db.projects.filter((p) => p.goal_id === g.id && p.status !== 'dropped');
   return { done: ps.filter((p) => p.status === 'completed').length, total: ps.length, projects: ps };
 }
+// Quarterly check-in and yearly read (Weekly Review step, ladder chips).
+export const bigDue = () => bigReviewsDue({ settings: app.settings || {}, goals: db.goals || [], areas: db.areas || [], projects: db.projects });
 // Areas and goals due for their review (monthly by default); for the Weekly Review.
 export const horizonsDue = () => [...liveAreas().filter((a) => isDueForReview(a)), ...activeGoals().filter((g) => isDueForReview(g))];
 
@@ -39,6 +41,7 @@ export function viewHorizons(sub) {
   if (sub === 'purpose' || sub === 'vision') return textPage(sub);
   if (sub === 'areas') return areasList();
   if (sub === 'goals') return goalsList();
+  if (sub === 'quarterly') return quarterlyHtml();
   const s = app.settings || {};
   const areas = liveAreas();
   const goals = activeGoals();
@@ -48,19 +51,21 @@ export function viewHorizons(sub) {
   const available = db.tasks.filter((t) => isOpen(t) && isAvailable(t)).length;
   const open = db.tasks.filter(isOpen).length;
   const due = horizonsDue().length;
+  const big = bigDue();
   const g0 = goals[0];
   const row = (href, alt, title, sub2) => `<a class="hz-level" href="${href}"><span class="hz-alt">${alt}</span><span class="hz-main"><b>${title}</b>${sub2 ? `<span class="hint">${sub2}</span>` : ''}</span><span class="hz-go">›</span></a>`;
   return `<div class="view-head"><h1 class="horizons">Horizons</h1></div>
     <p class="view-sub">From why you do it down to what’s next. The higher levels change slowly; look at them monthly and yearly.</p>
     <div class="hz-ladder">
-      ${row('#horizons/purpose', '50k', 'Purpose and principles', s.purpose ? `${esc(firstLine(s.purpose).slice(0, 80))} · ${readAgo(s.purpose_read_at)}` : 'Why you do what you do. Write it once.')}
-      ${row('#horizons/vision', '40k', `Vision${s.vision_year ? ` · ${s.vision_year}` : ''}`, s.vision ? `“${esc(firstLine(s.vision).slice(0, 80))}” · ${readAgo(s.vision_read_at)}` : 'What success looks like in 3 to 5 years.')}
-      ${row('#horizons/goals', '30k', `Goals · ${goals.length} active`, g0 ? `${esc(g0.title)} <span class="chip">${goalProgress(g0).done} of ${goalProgress(g0).total}</span>` : '1–2 year objectives your projects serve.')}
+      ${row('#horizons/purpose', '50k', 'Purpose and principles', s.purpose ? `${esc(firstLine(s.purpose).slice(0, 80))} · ${readAgo(s.purpose_read_at)}${big.yearly.includes('purpose') ? ' <span class="chip warn">yearly read due</span>' : ''}` : 'Why you do what you do. Write it once.')}
+      ${row('#horizons/vision', '40k', `Vision${s.vision_year ? ` · ${s.vision_year}` : ''}`, s.vision ? `“${esc(firstLine(s.vision).slice(0, 80))}” · ${readAgo(s.vision_read_at)}${big.yearly.includes('vision') ? ' <span class="chip warn">yearly read due</span>' : ''}` : 'What success looks like in 3 to 5 years.')}
+      ${row(big.quarterly ? '#horizons/quarterly' : '#horizons/goals', '30k', `Goals · ${goals.length} active${big.quarterly ? ' <span class="chip warn">quarterly check-in due</span>' : ''}`, g0 ? `${esc(g0.title)} <span class="chip">${goalProgress(g0).done} of ${goalProgress(g0).total}</span>` : '1–2 year objectives your projects serve.')}
       ${row('#horizons/areas', '20k', `Areas of focus · ${areas.length}`, quiet.length ? quiet.slice(0, 2).map((a) => `<span class="chip warn">${esc(a.name)}: ${esc(balanceOf(a).warnings[0])}</span>`).join(' ') : areas.length ? 'All in balance.' : 'Responsibilities you keep up: work, health, family, home.')}
       ${row('#projects', '10k', `Projects · ${live.length} active`, noOutcome ? `${noOutcome} without a “done looks like”` : 'Every project says what done looks like.')}
       ${row('#now', 'Runway', `Actions · ${open}`, `${available} available now · What now? →`)}
     </div>
-    ${due ? `<p class="view-sub">${due} area${due === 1 ? '' : 's'} or goal${due === 1 ? '' : 's'} due for review. They’re a step in the <a href="#weekly/horizons">Weekly Review</a>.</p>` : ''}`;
+    ${due ? `<p class="view-sub">${due} area${due === 1 ? '' : 's'} or goal${due === 1 ? '' : 's'} due for review. They’re a step in the <a href="#weekly/horizons">Weekly Review</a>.</p>` : ''}
+    <p class="view-sub">Every quarter: <a href="#horizons/quarterly">the quarterly check-in</a>${s.horizons_quarter_at ? ` (last ${esc(fmtDate(s.horizons_quarter_at))})` : ''}. Every year: read your purpose and vision.</p>`;
 }
 
 function textPage(kind) {
@@ -73,6 +78,26 @@ function textPage(kind) {
     <textarea class="hz-text" data-hz-field="${kind}" rows="14" placeholder="${isP ? 'I build things that last and treat people fairly…' : 'Two crews running without me on the phone at night…'}">${esc(s[kind] || '')}</textarea>
     <p class="hint">${readAgo(s[`${kind}_read_at`])} · saves as you type</p>
     <p><button class="btn" data-hz="read" data-kind="${kind}">Mark as read today</button></p>`;
+}
+
+// The quarterly check-in: goals and areas as a whole.
+export function quarterlyBody() {
+  const b = bigDue();
+  const goals = activeGoals();
+  const s = app.settings || {};
+  return `${goals.length ? `<h2 class="section-title">Goals · ${goals.length}</h2><div class="group-list">${goals.map((g) => { const pr = goalProgress(g); const late = b.lateGoals.includes(g); return `<a class="group-row" href="#goal/${g.id}"><span class="group-main"><span>${esc(g.title)}${late ? ' <span class="chip warn">past its date</span>' : ''}</span>
+      <span class="group-sub">${pr.done} of ${pr.total} projects${g.target_date ? ` · by ${esc(fmtDate(`${g.target_date}T12:00:00`))}` : ''}</span></span></a>`; }).join('')}</div>` : '<p class="hint">No active goals. Is there something worth aiming at this year? <button class="link-btn" data-hz="new-goal">+ Goal</button></p>'}
+    ${b.lateGoals.length ? `<p class="hint">Past its date: achieve it, give it a new date, or drop it.</p>` : ''}
+    ${b.areasNoGoal.length ? `<h2 class="section-title">Areas with no goal · ${b.areasNoGoal.length}</h2><p class="hint">Fine if they’re steady; worth a goal if you want them to change.</p><div class="group-list">${b.areasNoGoal.map((a) => `<a class="group-row" href="#area/${a.id}"><span>${esc(a.name)}</span></a>`).join('')}</div>` : ''}
+    ${b.looseProjects.length ? `<h2 class="section-title">Projects serving no area or goal · ${b.looseProjects.length}</h2><p class="hint">Still worth doing? Give each a home, or put it on hold.</p>${b.looseProjects.slice(0, 12).map(projectRow).join('')}${b.looseProjects.length > 12 ? `<p class="hint">${b.looseProjects.length - 12} more in Projects.</p>` : ''}` : ''}
+    <p class="hint">${s.horizons_quarter_at ? `Last check-in ${esc(fmtDate(s.horizons_quarter_at))}.` : 'Your first quarterly check-in.'}</p>
+    <div class="wk-finish"><button class="btn ${b.quarterly ? 'primary' : ''}" data-hz="quarter-done">Quarterly check-in done</button></div>`;
+}
+function quarterlyHtml() {
+  return `<a class="back" href="#horizons">‹ Horizons</a>
+    <div class="view-head"><h1 class="horizons">Quarterly check-in</h1></div>
+    <p class="view-sub">Every three months: are these still the right goals, and is every area getting what it needs?</p>
+    ${quarterlyBody()}`;
 }
 
 function areasList() {
@@ -226,6 +251,7 @@ export async function horizonsAction(el) {
   else if (a === 'reopen-goal' && goal) await saveGoal(goal, { status: 'active' });
   else if (a === 'areas-from-folders') { const n = await areasFromFolders(); toast(`Made ${n} area${n === 1 ? '' : 's'}`); }
   else if (a === 'read') { await saveSettings({ [`${el.dataset.kind}_read_at`]: now }); }
+  else if (a === 'quarter-done') { await saveSettings({ horizons_quarter_at: now }); toast('Quarterly check-in done · next in three months'); }
   app.render();
 }
 

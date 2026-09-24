@@ -66,3 +66,25 @@ export function areaBalance(area, { projects = [], tasks = [], completedSince = 
 }
 
 export const isDueForReview = (x, now = new Date()) => !x.last_reviewed_at || new Date(x.last_reviewed_at).getTime() + (x.review_every_days || 30) * DAY <= new Date(now).getTime();
+
+// The higher-horizon reviews. Yearly: read your purpose and vision (only what you've written).
+// Quarterly: a check-in on goals and areas as a whole, once you have some (the first one comes a
+// quarter after you set them up). → { yearly: ['purpose'|'vision'], quarterly, lateGoals, areasNoGoal, looseProjects }
+const QUARTER = 91 * DAY;
+const YEAR = 365 * DAY;
+export function bigReviewsDue({ settings = {}, goals = [], areas = [], projects = [], now = new Date() }) {
+  const t = new Date(now).getTime();
+  const yearly = ['purpose', 'vision'].filter((k) => String(settings[k] || '').trim() && (!settings[`${k}_read_at`] || Date.parse(settings[`${k}_read_at`]) + YEAR <= t));
+  const liveAreas = areas.filter((a) => !a.archived_at);
+  const active = goals.filter((g) => g.status === 'active');
+  const since = settings.horizons_quarter_at || [...liveAreas, ...active].map((x) => x.created_at).filter(Boolean).sort()[0];
+  const quarterly = !!since && Date.parse(since) + QUARTER <= t;
+  const today = new Date(t).toISOString().slice(0, 10);
+  return {
+    yearly,
+    quarterly,
+    lateGoals: active.filter((g) => g.target_date && g.target_date < today),
+    areasNoGoal: liveAreas.filter((a) => !active.some((g) => g.area_id === a.id)),
+    looseProjects: liveAreas.length || active.length ? projects.filter((p) => p.status === 'active' && !p.area_id && !p.goal_id) : [],
+  };
+}

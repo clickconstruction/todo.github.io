@@ -6,7 +6,7 @@ import { db, app, sb, run, byId, toast } from './state.js';
 import { setDefaultTimes } from './dates.js';
 import { localTz } from './repeat.js';
 
-export const DEFAULT_SETTINGS = { due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true };
+export const DEFAULT_SETTINGS = { due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true, horizons_quarter_at: null };
 
 export async function loadSettings() {
   let row = null;
@@ -20,15 +20,21 @@ export async function loadSettings() {
   return app.settings;
 }
 
-export async function saveSettings(fields, { quiet = false } = {}) {
-  const [row] = app.settingsSaved
-    ? await run(sb.from('user_settings').update(fields).eq('user_id', app.user.id).select())
-    : await run(sb.from('user_settings').insert({ ...fields }).select());
-  app.settingsSaved = true;
-  app.settings = { ...DEFAULT_SETTINGS, ...(row || { ...app.settings, ...fields }) };
-  setDefaultTimes(app.settings);
-  if (!quiet) toast('Saved');
-  return app.settings;
+// Saves run one at a time, so a first save (insert) can't race another into a second row.
+let saving = Promise.resolve();
+export function saveSettings(fields, { quiet = false } = {}) {
+  const next = saving.catch(() => {}).then(async () => {
+    const [row] = app.settingsSaved
+      ? await run(sb.from('user_settings').update(fields).eq('user_id', app.user.id).select())
+      : await run(sb.from('user_settings').insert({ ...fields }).select());
+    app.settingsSaved = true;
+    app.settings = { ...DEFAULT_SETTINGS, ...(row || { ...app.settings, ...fields }) };
+    setDefaultTimes(app.settings);
+    if (!quiet) toast('Saved');
+    return app.settings;
+  });
+  saving = next;
+  return next;
 }
 
 export const minutesToInput = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;

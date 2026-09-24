@@ -1,5 +1,5 @@
 // Horizons of Focus and "What now?" for agents (same rules as the app: js/whatnow.js).
-import { rankNow, areaBalance, isDueForReview } from '../../js/whatnow.js';
+import { rankNow, areaBalance, isDueForReview, bigReviewsDue } from '../../js/whatnow.js';
 
 export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, calendar }) {
   const findBy = (list, ref, key) => { const r = String(ref || '').trim().toLowerCase(); return list.find((x) => x.id === ref) || list.find((x) => String(x[key]).toLowerCase() === r); };
@@ -15,6 +15,7 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
           api.q(`projects?${api.u}&select=id,name,status,area_id,goal_id,outcome`), api.q(`tasks?${api.u}&${OPEN}&select=id,project_id,completed_at,dropped_at`),
         ]);
         const s = api.settings || {};
+        const big = bigReviewsDue({ settings: s, goals, areas, projects });
         const text = (v) => (include_text ? v || '' : String(v || '').split('\n')[0].slice(0, 200));
         return {
           purpose: { text: text(s.purpose) || null, last_read: localDate(s.purpose_read_at, api.tz) },
@@ -30,6 +31,10 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
           }),
           projects_without_outcome: projects.filter((p) => p.status === 'active' && !String(p.outcome || '').trim()).map((p) => p.name),
           projects_without_area: areas.length ? projects.filter((p) => p.status === 'active' && !p.area_id).map((p) => p.name) : undefined,
+          reviews_due: {
+            yearly_read: big.yearly.length ? big.yearly : undefined,
+            quarterly_check_in: big.quarterly ? { goals_past_their_date: big.lateGoals.map((g) => g.title), areas_with_no_goal: big.areasNoGoal.map((a) => a.name), projects_serving_no_area_or_goal: big.looseProjects.map((p) => p.name), last: localDate(s.horizons_quarter_at, api.tz), note: 'Go through these with the user, then save_horizon kind quarterly with read: true.' } : undefined,
+          },
         };
       },
     },
@@ -87,13 +92,14 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
     },
     {
       name: 'save_horizon',
-      description: 'Write the user\'s purpose and principles or their vision (3-5 years), in their words. read: true records that they read it today.',
-      inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['purpose', 'vision'] }, text: { type: 'string' }, year: { type: 'integer', description: 'vision: the year it looks ahead to' }, read: { type: 'boolean' } }, required: ['kind'] },
+      description: 'Write the user\'s purpose and principles or their vision (3-5 years), in their words. read: true records that they read it today (the yearly read). kind quarterly with read: true records the quarterly check-in on goals and areas as done.',
+      inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['purpose', 'vision', 'quarterly'] }, text: { type: 'string' }, year: { type: 'integer', description: 'vision: the year it looks ahead to' }, read: { type: 'boolean' } }, required: ['kind'] },
       async run(api, a) {
         const body = {};
-        if (a.text !== undefined) body[a.kind] = String(a.text);
+        if (a.kind === 'quarterly') { if (!a.read) throw new Error('For the quarterly check-in, pass read: true once it is done'); body.horizons_quarter_at = new Date().toISOString(); }
+        else if (a.text !== undefined) body[a.kind] = String(a.text);
         if (a.kind === 'vision' && a.year !== undefined) body.vision_year = a.year;
-        if (a.read) body[`${a.kind}_read_at`] = new Date().toISOString();
+        if (a.read && a.kind !== 'quarterly') body[`${a.kind}_read_at`] = new Date().toISOString();
         if (!Object.keys(body).length) throw new Error('Pass text, year or read');
         const had = (await api.q(`user_settings?${api.u}&select=user_id`)).length;
         if (had) await api.q(`user_settings?${api.u}`, { method: 'PATCH', body });

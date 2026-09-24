@@ -13,7 +13,7 @@ export const STEPS = [
   { key: 'stale', stage: 'current', title: 'Stale actions', hint: 'Actions not touched in 60+ days. Still true?', minutes: (n) => Math.round(n * 0.5) },
   { key: 'waiting', stage: 'current', title: 'Waiting For', hint: 'Anything to chase?', minutes: (n) => Math.round(n * 0.5) },
   { key: 'projects', stage: 'current', title: 'Projects', hint: 'Every project due for review has a next action; stuck projects get one.', minutes: (n) => n * 2 },
-  { key: 'horizons', stage: 'creative', title: 'Areas and goals', hint: 'The ones due for their monthly look: still in balance? Still the right goals?', minutes: (n) => n * 2 },
+  { key: 'horizons', stage: 'creative', title: 'Areas, goals and horizons', hint: 'Areas and goals due for their monthly look; the quarterly check-in and yearly read when they come round.', minutes: (n) => n * 3 },
   { key: 'someday', stage: 'creative', title: 'Someday/Maybe', hint: 'Anything to start now? Anything you no longer want?', minutes: (n) => Math.max(2, Math.round(n * 0.2)) },
   { key: 'new', stage: 'creative', title: 'Anything new?', hint: 'Ideas, projects, things you’d like to do. Capture them.', minutes: () => 3 },
 ];

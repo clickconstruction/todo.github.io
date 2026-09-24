@@ -40,7 +40,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -55,6 +55,31 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Quarterly check-in and yearly read of purpose and vision.
+async function horizonReviews(check) {
+  const old = new Date(Date.now() - 200 * 86400000).toISOString();
+  T().areas.push({ id: 'ar1', user_id: 'u1', name: 'Click Plumbing', standards: '', review_every_days: 30, last_reviewed_at: new Date().toISOString(), sort: 0, archived_at: null, created_at: old, updated_at: old });
+  T().areas.push({ id: 'ar2', user_id: 'u1', name: 'Health', standards: '', review_every_days: 30, last_reviewed_at: new Date().toISOString(), sort: 1, archived_at: null, created_at: old, updated_at: old });
+  T().goals.push({ id: 'go1', user_id: 'u1', title: 'Grow maintenance revenue', why: '', area_id: 'ar1', target_date: '2026-01-31', status: 'active', achieved_at: null, review_every_days: 30, last_reviewed_at: new Date().toISOString(), sort: 0, created_at: old, updated_at: old });
+  const { saveSettings } = await import('/js/prefs.js');
+  await saveSettings({ purpose: 'Build things that last.', purpose_read_at: new Date(Date.now() - 400 * 86400000).toISOString(), vision: '', horizons_quarter_at: null }, { quiet: true });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  await go('#horizons');
+  check('ladder: yearly read due (purpose only, vision unwritten), quarterly check-in due', has(undefined, 'yearly read due', 'quarterly check-in due') && (text().match(/yearly read due/g) || []).length === 1);
+  await go('#weekly');
+  check('Weekly Review: the horizons step isn’t done and says why', !$('a.wk-step[href="#weekly/horizons"]').classList.contains('done') && has('a.wk-step[href="#weekly/horizons"]', '2 due'));
+  await go('#weekly/horizons');
+  check('the step: yearly read of the purpose, and the quarterly check-in', has(undefined, 'yearly · read your purpose', 'quarterly check-in', 'grow maintenance revenue', 'past its date', 'areas with no goal', 'health', 'projects serving no area or goal'));
+  $('[data-hz="quarter-done"]').click(); await wait(300);
+  check('Quarterly check-in done: recorded, next in three months', !!T().user_settings[0].horizons_quarter_at && !has(undefined, 'quarterly check-in done'));
+  await go('#horizons/purpose');
+  $('[data-hz="read"]').click(); await wait(300);
+  await go('#weekly');
+  check('after both, the step is done on its own', $('a.wk-step[href="#weekly/horizons"]').classList.contains('done'));
+  await go('#horizons');
+  check('the ladder is clear, with the check-in always reachable', !has(undefined, 'yearly read due') && !has(undefined, 'quarterly check-in due') && !!$('a[href="#horizons/quarterly"]'));
+}
 
 // Daily review: start your day (calendar, must-dos, up to 3 focus), then shut down.
 async function dailyReview(check) {
