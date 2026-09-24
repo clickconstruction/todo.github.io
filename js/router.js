@@ -30,7 +30,7 @@ import { viewSettle } from './views/settle.js';
 import { viewSlipbox } from './views/slipbox.js';
 import { viewReading } from './views/reading.js';
 import { viewMatrix } from './views/matrix.js';
-import { viewFullReview, stopListening } from './views/fullreview.js';
+import { viewFullReview, stopListening, reviewNav } from './views/fullreview.js';
 import { withFocus, getFocus, focusLabel, focusedProjectIds } from './prefs.js';
 import { applySidebar } from './sidebar.js';
 import { somedayCount } from './views/someday.js';
@@ -88,6 +88,8 @@ export function render() {
   const fleeting = (db.slipbox || []).filter((n) => n.kind === 'fleeting' && !n.archived_at).length;
   if ($('#badge-reading')) $('#badge-reading').textContent = reading || '';
   if ($('#badge-slipbox')) $('#badge-slipbox').textContent = fleeting ? `${fleeting} new` : '';
+  const fr = reviewNav(); const frLink = $('a[data-nav="full"]');
+  if (frLink) { frLink.classList.toggle('nav-absent', !fr.show); frLink.setAttribute('href', fr.href); $('#badge-full').textContent = fr.badge; }
   const today = rowFor();
   $('#badge-daily').textContent = today && today.started_at ? '' : '•';
   const big = bigDue();

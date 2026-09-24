@@ -41,6 +41,7 @@ export async function startFullReview(scope, title) {
   }
   const [first] = await run(sb.from('review_items').select('id').eq('session_id', session.id).order('sort').limit(1));
   await run(sb.from('review_sessions').update({ current_item: first.id }).eq('id', session.id));
+  db.reviewSessions = [{ ...session, current_item: first.id }, ...(db.reviewSessions || []).filter((x) => x.id !== session.id)];
   location.hash = `#full/${session.id}`;
   return session.id;
 }
@@ -48,6 +49,21 @@ export async function startFullReview(scope, title) {
 export async function activeSession(scopeKey, scopeVal) {
   const rows = await run(sb.from('review_sessions').select('*').eq('status', 'active').order('created_at', { ascending: false }).limit(20));
   return rows.find((s) => s.scope && s.scope[scopeKey] === scopeVal) || null;
+}
+
+// The unfinished review to go back to: the one open in this tab if it's still active, else the newest.
+export function currentReview() {
+  const s = F().session;
+  const live = (db.reviewSessions || []).filter((x) => x.status === 'active' && !(s && s.id === x.id && s.status !== 'active'));
+  if (s && s.status === 'active') return s;
+  return live[0] || null;
+}
+// Sidebar: shown only while a review is unfinished; "N left" once this tab has loaded it.
+export function reviewNav() {
+  const cur = currentReview();
+  const f = F();
+  const left = cur && f.session && f.session.id === cur.id ? f.items.filter((x) => x.status === 'pending').length : null;
+  return { href: cur ? `#full/${cur.id}` : '#full', show: !!cur, badge: left ? `${left.toLocaleString()} left` : '' };
 }
 
 // ---------- load and stay live ----------
@@ -213,9 +229,14 @@ function groupCard(it) {
 
 export function viewFullReview(id) {
   const f = F();
-  if (!id) return '<p class="empty">Start a Full Review from Settle in or a project’s ⋯ menu.</p>';
+  if (!id) { // #full (the sidebar): back into the review you're in the middle of
+    const cur = currentReview();
+    if (cur) { location.replace(`#full/${cur.id}`); return '<p class="empty">Loading your review…</p>'; }
+    return '<p class="empty">No review in progress. Start a Full Review from Settle in or a project’s ⋯ menu.</p>';
+  }
   if (f.id !== id && !f.loading) { loadSession(id); return '<p class="empty">Loading your review…</p>'; }
   if (!f.session) return f.loading ? '<p class="empty">Loading your review…</p>' : '<p class="empty">That review isn’t here.</p>';
+  if (!L.poll) { listen(id); poll(); } // back from another screen: live again, and catch up on what changed meanwhile
   const s = f.session;
   const live = f.items.filter((x) => x.status !== 'void');
   const done = live.filter((x) => x.status === 'reviewed').length;

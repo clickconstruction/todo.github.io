@@ -236,6 +236,7 @@ async function fullReview(check) {
   const { loadAll } = await import('/js/data.js'); await loadAll();
   await go('#settle/imF');
   check('Settle in offers Full Review', !!$('[data-fr-start="import"]'));
+  check('sidebar: no Full Review entry while none is in progress', $('a[data-nav="full"]').classList.contains('nav-absent'));
   $('[data-fr-start="import"]').click();
   await until(() => location.hash.startsWith('#full/') && has(undefined, 'update my will'));
   const sid = location.hash.split('/')[1];
@@ -249,6 +250,13 @@ async function fullReview(check) {
   check('guide: Hide guide hides it and remembers', !$('.fr-guide') && !!$('[data-fr="guide-show"]') && saved === 'off');
   $('[data-fr="guide-show"]').click(); await wait(30);
   check('guide: “? Which one” brings it back', $$('.fr-guide .fr-g').length === 7);
+  // Sidebar: back into the review from anywhere.
+  await go('#inbox');
+  const frNav = $('a[data-nav="full"]');
+  check('sidebar: Full Review shows while one is in progress, with what’s left', !frNav.classList.contains('nav-absent') && frNav.getAttribute('href') === `#full/${sid}` && /\d+ left/.test($('#badge-full').textContent), `${frNav.className} ${frNav.getAttribute('href')} ${$('#badge-full').textContent}`);
+  await go('#full');
+  await until(() => location.hash === `#full/${sid}`);
+  check('#full goes straight back to the card you were on', location.hash === `#full/${sid}` && document.body.classList.contains('fr-mode'));
   check('before Claude joins: says so, with the prompt button', has('.fr-head', 'claude isn’t connected') && !!$('[data-fr="invite"]'));
   let clip = ''; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (x) => { clip = x; } } });
   $('[data-fr="invite"]').click(); await wait(50);

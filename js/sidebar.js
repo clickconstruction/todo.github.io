@@ -9,7 +9,7 @@ export const GROUPS = [
   ['do', 'Do', [['forecast', '📅', 'Forecast'], ['now', '▶️', 'What now?'], ['matrix', '🔲', 'Matrix'], ['flagged', '🚩', 'Flagged'], ['nearby', '📍', 'Nearby']]],
   ['organize', 'Organize', [['projects', '🗂️', 'Projects'], ['tags', '🏷️', 'Tags'], ['perspectives', '🔭', 'Perspectives'], ['checklists', '☑️', 'Checklists']]],
   ['lists', 'Lists', [['waiting', '⏳', 'Waiting For'], ['someday', '💭', 'Someday/Maybe'], ['tickler', '📆', 'Tickler'], ['reference', '🗄️', 'Reference'], ['reading', '📚', 'Reading'], ['slipbox', '🗃️', 'Slipbox']]],
-  ['reflect', 'Reflect', [['daily', '☀️', 'Daily review'], ['weekly', '🧭', 'Weekly Review'], ['horizons', '🏔️', 'Horizons']]],
+  ['reflect', 'Reflect', [['full', '🃏', 'Full Review'], ['daily', '☀️', 'Daily review'], ['weekly', '🧭', 'Weekly Review'], ['horizons', '🏔️', 'Horizons']]],
 ];
 // The phone tab bar and the places everything starts from can't be hidden.
 const FIXED = new Set(['forecast', 'projects']);
