@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      perspectives: [], imports: [], settle_ops: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -285,7 +285,7 @@
   }
 
   function builder(table) {
-    const st = { op: 'select', filters: [], payload: null, order: null, asc: true, limit: Infinity };
+    const st = { op: 'select', filters: [], payload: null, order: null, asc: true, limit: Infinity, offset: 0 };
     const match = (r) => st.filters.every((f) => f(r));
     const copy = (r) => JSON.parse(JSON.stringify(r));
     const exec = () => {
@@ -325,12 +325,13 @@
       }
       let out = rows.filter(match).map(copy);
       if (st.order) out.sort((a, b) => ((a[st.order] ?? '') < (b[st.order] ?? '') ? -1 : 1) * (st.asc ? 1 : -1));
-      return { data: out.slice(0, st.limit), error: null };
+      return { data: out.slice(st.offset, st.offset + Math.min(st.limit, 1000)), error: null }; // the server caps a request at 1,000 rows
     };
     const b = {
       select() { return b; },
       order(k, o) { st.order = k; st.asc = !(o && o.ascending === false); return b; },
       limit(x) { st.limit = x; return b; },
+      range(from, to) { st.offset = from; st.limit = to - from + 1; return b; },
       insert(p) { st.op = 'insert'; st.payload = p; return b; },
       update(p) { st.op = 'update'; st.payload = p; return b; },
       delete() { st.op = 'delete'; return b; },
@@ -441,7 +442,7 @@
           const snapshot = args.dry_run ? JSON.stringify(tables) : null;
           const imp = args.batch || id();
           if (args.batch && !tables.imports.some((i) => i.id === args.batch && !i.undone_at)) return { data: null, error: { message: 'Import not found (or it was undone).' } };
-          if (!args.batch) tables.imports.push({ id: imp, user_id: uid, source: P.source || 'omnifocus', counts: {}, created_at: now(), undone_at: null });
+          if (!args.batch) tables.imports.push({ id: imp, user_id: uid, source: P.source || 'omnifocus', counts: {}, settle: {}, created_at: now(), undone_at: null });
           const c = { folders: 0, folders_merged: 0, tags: 0, tags_merged: 0, projects: 0, projects_skipped: 0, tasks: 0, tasks_skipped: 0 };
           const byRef = (list, r) => list.find((x) => x.external_ref && x.external_ref === r);
           (P.folders || []).forEach((f) => {
@@ -502,6 +503,63 @@
             .forEach((f) => { f.archived_at = now(); f.external_ref = null; folders++; });
           rec.undone_at = now();
           return { data: { tasks_dropped: tasksDropped, projects_dropped: projectsDropped, folders_archived: folders }, error: null };
+        }
+        // Mirrors settle_apply() / settle_undo() (migration 20261012000001).
+        if (name === 'settle_apply') {
+          const { batch, op, args: a = {} } = args;
+          if (!tables.imports.some((i) => i.id === batch && !i.undone_at)) return { data: null, error: { message: 'Import not found.' } };
+          const openT = (t) => !t.completed_at && !t.dropped_at;
+          let ids = (a.ids || []).filter((x) => tables.tasks.some((t) => t.id === x && t.import_id === batch && openT(t)));
+          let before = []; let n = 0;
+          if (op === 'someday') {
+            let tag = tables.tags.find((g) => !g.parent_id && /^someday/i.test(g.name));
+            if (!tag) { tag = { ...DEFAULTS.tags(), id: id(), user_id: uid, name: 'Someday', status: 'on_hold', sort: 0, created_at: now() }; tables.tags.push(tag); } else tag.status = 'on_hold';
+            const parked = (x) => tables.task_tags.some((y) => y.task_id === x && y.tag_id === tag.id);
+            const groups = tables.tasks.filter((g) => g.import_id === batch && openT(g) && !ids.includes(g.id)
+              && tables.tasks.some((c) => c.parent_id === g.id && openT(c)) && tables.tasks.filter((c) => c.parent_id === g.id && openT(c)).every((c) => ids.includes(c.id) || parked(c.id)));
+            ids = ids.concat(groups.map((g) => g.id));
+            const add = ids.filter((x) => !parked(x));
+            add.forEach((x) => tables.task_tags.push({ task_id: x, tag_id: tag.id, user_id: uid, created_at: now() }));
+            n = add.length; before = [{ t: 'someday_tag', tag: tag.id, ids: add }];
+          } else if (['complete', 'drop', 'unflag', 'clear_due', 'plan'].includes(op)) {
+            const desc = (list) => { const out = []; const walk = (pid) => tables.tasks.filter((c) => c.parent_id === pid).forEach((c) => { out.push(c.id); walk(c.id); }); list.forEach(walk); return out; };
+            const touched = [...new Set([...ids, ...(['complete', 'drop'].includes(op) ? desc(ids) : [])])];
+            before = touched.map((x) => { const t = tables.tasks.find((y) => y.id === x); return { t: 'task', id: x, completed_at: t.completed_at, dropped_at: t.dropped_at, flagged: t.flagged, due_at: t.due_at, planned_at: t.planned_at, updated_at: t.updated_at }; });
+            const at = now();
+            ids.forEach((x) => { const t = tables.tasks.find((y) => y.id === x);
+              if (op === 'complete') t.completed_at = at; if (op === 'drop') t.dropped_at = at; if (op === 'unflag') t.flagged = false;
+              if (op === 'clear_due' || op === 'plan') t.due_at = null; if (op === 'plan') t.planned_at = a.at; t.updated_at = at; });
+            if (['complete', 'drop'].includes(op)) desc(ids).forEach((x) => { const t = tables.tasks.find((y) => y.id === x); if (openT(t)) { if (op === 'complete') t.completed_at = at; else t.dropped_at = at; } });
+            n = ids.length;
+          } else if (op === 'project_status') {
+            if (!['active', 'on_hold', 'completed', 'dropped'].includes(a.status)) return { data: null, error: { message: 'Unknown status.' } };
+            const ps = tables.projects.filter((p) => (a.ids || []).includes(p.id) && p.import_id === batch && p.status !== a.status);
+            before = ps.map((p) => ({ t: 'project', id: p.id, status: p.status })); ps.forEach((p) => { p.status = a.status; }); n = ps.length;
+          } else if (op === 'review_dates') {
+            (a.items || []).forEach((it) => { const p = tables.projects.find((x) => x.id === it.id && x.import_id === batch); if (p) { before.push({ t: 'review', id: p.id, next_review_at: p.next_review_at }); p.next_review_at = it.at; n++; } });
+          } else if (op === 'drop_tags') {
+            const gs = tables.tags.filter((g) => (a.ids || []).includes(g.id) && g.import_id === batch && g.status !== 'dropped');
+            before = gs.map((g) => ({ t: 'tag', id: g.id, status: g.status })); gs.forEach((g) => { g.status = 'dropped'; }); n = gs.length;
+          } else return { data: null, error: { message: 'Unknown settle op.' } };
+          const o = { id: id(), user_id: uid, import_id: batch, op, changed: n, before, undone_at: null, created_at: now() };
+          tables.settle_ops.push(o);
+          return { data: { op_id: o.id, changed: n }, error: null };
+        }
+        if (name === 'settle_undo') {
+          const o = tables.settle_ops.find((x) => x.id === args.op_id);
+          if (!o) return { data: null, error: { message: 'Nothing to undo.' } };
+          if (o.undone_at) return { data: null, error: { message: 'Already undone.' } };
+          let n = 0;
+          o.before.forEach((e) => {
+            if (e.t === 'someday_tag') { tables.task_tags = tables.task_tags.filter((x) => !(x.tag_id === e.tag && e.ids.includes(x.task_id))); n += e.ids.length; }
+            if (e.t === 'task') { Object.assign(tables.tasks.find((t) => t.id === e.id), { completed_at: e.completed_at, dropped_at: e.dropped_at, flagged: e.flagged, due_at: e.due_at, planned_at: e.planned_at, updated_at: e.updated_at }); n++; }
+            if (e.t === 'project') { tables.projects.find((p) => p.id === e.id).status = e.status; n++; }
+            if (e.t === 'review') { tables.projects.find((p) => p.id === e.id).next_review_at = e.next_review_at; n++; }
+            if (e.t === 'tag') { tables.tags.find((g) => g.id === e.id).status = e.status; n++; }
+          });
+          o.undone_at = now();
+          window.__mock.tables = tables;
+          return { data: { restored: n }, error: null };
         }
         // Mirrors create_from_template() (migration 20261001000001), in the device's zone.
         if (name === 'create_from_template') {

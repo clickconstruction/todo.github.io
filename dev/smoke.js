@@ -40,7 +40,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -55,6 +55,97 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Settle in: sorting what an import brought, in bulk, each choice with an Undo.
+async function settleIn(check) {
+  const { db, app } = await import('/js/state.js');
+  app.settleUi = null;
+  const ago = (d) => new Date(Date.now() - d * 86400000).toISOString();
+  const t = T();
+  t.imports.push({ id: 'im1', user_id: 'u1', source: 'omnifocus', counts: { tasks: 130, projects: 3 }, settle: {}, created_at: ago(0), undone_at: null });
+  t.folders.push({ id: 'fi1', user_id: 'u1', name: 'OF Work', parent_id: null, sort: 9, archived_at: null, import_id: 'im1', created_at: ago(0), updated_at: ago(0) });
+  const P = (id, name, extra = {}) => t.projects.push({ ...t.projects[0], id, name, folder_id: 'fi1', status: 'active', kind: 'parallel', import_id: 'im1', next_review_at: null, flagged: false, created_at: ago(900), updated_at: ago(900), ...extra });
+  P('pa', 'Big backlog'); P('pb', 'Kitchen remodel'); P('pc', 'Old idea list');
+  let n = 0;
+  const T1 = (title, age, extra = {}) => { const x = { ...t.tasks[0], id: `s${n++}`, title, notes: '', project_id: 'pb', parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, scheduled_at: null, repeat_rule: null, completed_at: null, dropped_at: null, import_id: 'im1', sort: n, created_at: ago(age), updated_at: ago(age), ...extra }; t.tasks.push(x); return x; };
+  for (let i = 0; i < 105; i++) T1(`Backlog ${i}`, i < 20 ? 10 : 200, { project_id: 'pa' });
+  T1('Ancient idea', 2000, { project_id: 'pc' }); T1('Old idea two', 1600, { project_id: 'pc' });
+  T1('Stale thing', 900); T1('Last year thing', 400);
+  const g = T1('Group of steps', 900); T1('Step one', 900, { parent_id: g.id }); T1('Step two', 900, { parent_id: g.id });
+  T1('Pay the permit', 5, { due_at: ago(30) }); T1('File taxes', 5, { due_at: ago(3) });
+  T1('Flag keep', 5, { flagged: true }); T1('Flag drop', 5, { flagged: true });
+  T1('Weekly report', 5, { repeat_rule: { freq: 'weekly', interval: 1 }, notes: '(OmniFocus repeat: FREQ=WEEKLY;BYDAY=MO,TU)' });
+  T1('Inbox leftover', 5, { in_inbox: true, project_id: null });
+  t.tags.push({ id: 'gi1', user_id: 'u1', name: 'Unused OF tag', parent_id: null, status: 'active', import_id: 'im1', sort: 50, created_at: ago(0) });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const someday = () => t.tags.find((x) => x.name === 'Someday');
+  const parked = (title) => { const x = byTitle(title); const s = someday(); return !!s && t.task_tags.some((l) => l.task_id === x.id && l.tag_id === s.id); };
+
+  await go('#settle/im1');
+  check('checklist with live counts', has(undefined, 'settle in', 'live actions', 'inbox', '1 to clarify', 'old and undated', 'big projects', '1 project', 'overdue', 'flagged', 'spread reviews', '3 due', 'tags', '1 unused', 'check these', '1 repeat') && $$('.wk-step').length === 10, text().slice(0, 400));
+  await go('#settle/im1/old');
+  check('old buckets: 4+, 2–4, 1–2 years, with where they are', has(undefined, '4+ years old', '1', 'old idea list', '2–4 years', '1–2 years') && !has(undefined, 'pay the permit', 'flag keep'), text());
+  const b2 = $('[data-settle="old-someday"][data-bucket="2y"]');
+  b2.click(); await until(() => !!$('.st-op'));
+  check('2–4 years → Someday, the group goes with its steps', parked('Stale thing') && parked('Step one') && parked('Group of steps') && !parked('Ancient idea') && someday().status === 'on_hold', text('.st-op'));
+  check('what happened, with Undo', has('.st-op', '2–4 years → someday', '4') && !!$('.st-op [data-settle="undo"]'));
+  $('.st-op [data-settle="undo"]').click(); await until(() => !parked('Stale thing') && !$('.st-op'));
+  check('Undo puts them all back', !parked('Stale thing') && !parked('Group of steps') && !$('.st-op'));
+  $('[data-settle="keep"][data-key="old:4y"]').click(); await until(() => has(undefined, 'kept'));
+  check('Keep a bucket: remembered on the import', t.imports[0].settle.kept.includes('old:4y') && !$('[data-settle="old-someday"][data-bucket="4y"]'));
+  // One by one
+  await go('#settle/im1/cards/old/1y');
+  check('card: one old action, with its project and age', has(undefined, 'one by one', 'last year thing', 'kitchen remodel', '1 left') && $$('[data-settle="card"]').length === 4);
+  key('4'); await until(() => has(undefined, 'all sorted'));
+  check('key 4 drops it (never deleted)', !!byTitle('Last year thing').dropped_at);
+  key('u'); await until(() => !byTitle('Last year thing').dropped_at && has(undefined, 'last year thing'));
+  check('u undoes the last card', !byTitle('Last year thing').dropped_at && has(undefined, 'last year thing'));
+  // Big projects
+  await go('#settle/im1/big');
+  check('big project card', has(undefined, 'big backlog', '105 open', 'keep 20 newest', 'park project', 'sort actions'));
+  $('[data-settle="big-newest"]').click(); await until(() => has(undefined, 'no project has 100+'));
+  check('keep 20 newest: the other 85 → Someday, and it’s no longer big', t.task_tags.filter((l) => l.tag_id === someday().id).length === 85 && !parked('Backlog 0') && parked('Backlog 50'));
+  // Projects cards
+  await go('#settle/im1/cards/projects/all');
+  check('project card: folder, count, next action, whole-folder buttons', has(undefined, 'of work', 'actions', 'next:') && !!$('[data-settle="folder"]'), text().slice(0, 300));
+  const first = $('[data-settle="card"]').dataset.item;
+  key('2'); await until(() => t.projects.find((p) => p.id === first).status === 'on_hold');
+  check('key 2: on hold', t.projects.find((p) => p.id === first).status === 'on_hold');
+  $('[data-settle="folder"][data-status="active"]').click(); await until(() => has(undefined, 'all sorted'));
+  check('whole folder: all Active, and every project decided', t.projects.filter((p) => p.import_id === 'im1').every((p) => p.status === 'active') && has(undefined, 'all sorted'));
+  // Overdue
+  await go('#settle/im1/overdue');
+  check('overdue: 2', has(undefined, '2', 'make them planned today'));
+  $('[data-settle="overdue-plan"]').click(); await until(() => !byTitle('Pay the permit').due_at);
+  const p = byTitle('Pay the permit');
+  check('planned today, due cleared', !p.due_at && new Date(p.planned_at).toDateString() === new Date().toDateString());
+  // Flagged
+  await go('#settle/im1/flagged');
+  $(`[data-flag-keep="${byTitle('Flag keep').id}"]`).click();
+  $('[data-settle="unflag-rest"]').click(); await until(() => !byTitle('Flag drop').flagged);
+  check('ticked flag kept, the rest unflagged', byTitle('Flag keep').flagged && !byTitle('Flag drop').flagged);
+  // Reviews
+  await go('#settle/im1/reviews');
+  $('[data-settle="spread"]').click(); await until(() => t.projects.filter((x) => x.import_id === 'im1').every((x) => x.next_review_at));
+  const days = new Set(t.projects.filter((x) => x.import_id === 'im1').map((x) => x.next_review_at.slice(0, 10)));
+  check('reviews spread over different days, all in the future', days.size === 3 && t.projects.filter((x) => x.import_id === 'im1').every((x) => Date.parse(x.next_review_at) > Date.now()));
+  // Tags
+  await go('#settle/im1/tags');
+  check('unused tag listed', has(undefined, 'unused of tag', 'retire them'));
+  $('[data-settle="drop-tags"]').click(); await until(() => t.tags.find((x) => x.id === 'gi1').status === 'dropped');
+  check('retired (dropped, never deleted)', t.tags.find((x) => x.id === 'gi1').status === 'dropped');
+  // Check these
+  await go('#settle/im1/check');
+  check('inexact repeats listed', has(undefined, 'weekly report', 'original rule'));
+  // Mark done → next step
+  $('[data-settle="step-done"]').click(); await until(() => !!t.imports[0].settle.steps && !!t.imports[0].settle.steps.check);
+  await go('#settle/im1');
+  check('progress kept on the import; steps tick off', !!t.imports[0].settle.steps.check && $$('.wk-step.done').length >= 5, $$('.wk-step.done').length);
+  check('live count drops as things are parked', (() => { const m = text('.st-live').match(/([\d,]+) → ([\d,]+)/); return m && Number(m[2].replace(/,/g, '')) < Number(m[1].replace(/,/g, '')); })(), text('.st-live'));
+  check('never touches rows from outside the import', t.projects.find((x) => x.id === 'p1').status === 'active' && !t.settle_ops.some((o) => o.before.some((e) => e.id === 'p1')));
+  check('db.imports loaded app-wide', db.imports.some((i) => i.id === 'im1'));
+}
 
 // Quarterly check-in and yearly read of purpose and vision.
 async function horizonReviews(check) {
@@ -1292,7 +1383,7 @@ async function omnifocusImport(check) {
       && db.folders.some((f) => f.name === 'Click Construction › Clients') && db.tasks.some((t) => t.title === 'Measure' && t.parent_id)
       && db.taskTags.some((l) => l.tag_id === 'g2' && db.tasks.find((t) => t.id === l.task_id && t.title === 'Call GVEC about utilities' && t.import_id)));
     check('Inbox item lands in the Inbox', db.tasks.some((t) => t.title === 'Frog Pond EIN' && t.in_inbox && t.source === 'omnifocus'));
-    check('next steps offered', has(undefined, 'open projects', 'open the inbox') && !!$('[data-of-undo]'));
+    check('next step: Settle in, for this import', has(undefined, 'settle in', 'open projects') && !!$('[data-of-undo]') && $('[data-of-settle]').getAttribute('href') === `#settle/${T().imports[0].id}`);
     // Import the same thing again: nothing new.
     $('[data-of-cancel]').click();
     await wait(50);
@@ -1301,7 +1392,7 @@ async function omnifocusImport(check) {
     check('importing again: nothing new, clearly said', has(undefined, 'nothing new to import', 'imported before and are skipped') && !$('[data-of-import]'));
     $('[data-of-cancel]').click();
     await until(() => has(undefined, 'past imports'));
-    check('past imports listed', has('.import-list', '3 projects', '9 actions'));
+    check('past imports listed, each with Settle in', has('.import-list', '3 projects', '9 actions', 'settle in'));
     $('.import-list [data-of-undo]').click();
     await until(() => has('.import-list', 'undone'));
     check('undo drops what it added (nothing deleted)', T().projects.find((p) => p.name === 'Click Plumbing' && p.import_id).status === 'dropped' && T().projects.find((p) => p.id === 'p1').status === 'active' && T().tasks.some((t) => t.title === 'Measure' && t.dropped_at));

@@ -1129,3 +1129,23 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .dv-foot { margin-top: 16px; text-align: center; }
 .chip.red { background: color-mix(in srgb, var(--due) 16%, transparent); color: var(--due); }
 .chip.acc { background: var(--accent-soft); color: var(--accent); }
+
+/* Settle in (#settle): sorting an import */
+.view-head h1.settle { color: var(--accent); }
+.st-live { display: flex; justify-content: space-between; align-items: baseline; margin: 8px 0 4px; font-size: 1.05rem; }
+.st-live .ok { color: var(--ok); }
+.st-op { background: color-mix(in srgb, var(--ok) 12%, transparent); border-radius: 8px; padding: 8px 12px; margin: 8px 0; font-size: .9rem; }
+.st-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.st-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.st-btns { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.st-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 10px 0; }
+.st-card .st-btns { margin-top: 8px; }
+.st-cardbig { border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin: 12px 0; }
+.st-cardbig h2 { margin: 6px 0; font-size: 1.25rem; overflow-wrap: anywhere; }
+.st-notes { white-space: pre-wrap; max-height: 8em; overflow: hidden; }
+.st-four { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.st-four kbd { opacity: .6; font-size: .75rem; margin-right: 2px; }
+@media (max-width: 520px) { .st-four { grid-template-columns: repeat(2, 1fr); } .st-four kbd { display: none; } }
+.st-folder { margin-top: 10px; }
+.import-row .st-btns { flex-shrink: 0; }
+a.btn { text-decoration: none; }

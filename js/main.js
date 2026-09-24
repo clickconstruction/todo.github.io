@@ -26,6 +26,7 @@ import { newCaptureKey, captureGuide } from './views/settings.js';
 import { noticeEmailPeople } from './views/capture.js';
 import { checklistAction, checklistChange } from './views/checklists.js';
 import { dailyAction, dailySubmit } from './views/daily.js';
+import { settleAction, settleKey } from './views/settle.js';
 import { newFeedLink } from './views/settings.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
@@ -159,6 +160,8 @@ const CLICKS = [
   ['[data-plan]', (el, e) => { e.stopPropagation(); planAction(el); }],
   ['[data-ck]', (el, e) => { e.stopPropagation(); checklistAction(el); }],
   ['[data-daily]', (el, e) => { e.stopPropagation(); dailyAction(el); }],
+  ['[data-settle]', (el, e) => { e.stopPropagation(); if (!el.disabled) settleAction(el); }],
+  ['[data-flag-keep]', () => {}], // a Settle in flag tick is just a checkbox
   ['[data-cl-tick]', () => {}], // a checklist tick is handled on change
   ['[data-now], [data-now-set]', (el, e) => { e.stopPropagation(); nowAction(el); }],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
@@ -255,7 +258,7 @@ $('#more-tab').onclick = () => {
 };
 window.addEventListener('hashchange', render);
 document.addEventListener('keydown', (e) => {
-  if (clarifyKey(e) || sweepKey(e)) return;
+  if (clarifyKey(e) || sweepKey(e) || (!$('#sheet').open && settleKey(e))) return;
   if (!e.metaKey && !e.ctrlKey && !$('#sheet').open && !typing() && location.hash.startsWith('#review') && ['j', 'k', 'm'].includes(e.key)) {
     const btn = e.key === 'm' ? $('[data-mark-reviewed]') : $$review(e.key === 'j' ? 1 : 0);
     if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }

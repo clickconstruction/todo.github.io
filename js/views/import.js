@@ -122,7 +122,7 @@ function pastImportsHtml() {
   return `<h2 class="section-title">Past imports</h2><ul class="list import-list">${list.map((i) => `<li class="import-row">
       <span><b>${esc(new Date(i.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }))}</b>
         <span class="hint">${plural(i.counts.projects, 'project')} · ${plural(i.counts.tasks, 'action')} · ${esc(i.source)}${i.undone_at ? ' · undone' : ''}</span></span>
-      ${i.undone_at ? '' : `<button class="btn small" data-of-undo="${i.id}">Undo</button>`}</li>`).join('')}</ul>`;
+      ${i.undone_at ? '' : `<span class="st-btns"><a class="btn small primary" href="#settle/${i.id}">Settle in</a><button class="btn small" data-of-undo="${i.id}">Undo</button></span>`}</li>`).join('')}</ul>`;
 }
 
 function previewHtml() {
@@ -166,7 +166,8 @@ function doneHtml() {
         <div class="stat"><b>${n(r.inbox)}</b><span>in the Inbox</span></div>
         <div class="stat"><b>${n(r.review_due)}</b><span>due for review</span></div>
       </div>
-      <div class="import-next"><a class="btn primary" href="#projects">Open Projects</a>${r.review_due ? '<a class="btn" href="#review">Start a review</a>' : ''}${r.inbox ? '<a class="btn" href="#inbox">Open the Inbox</a>' : ''}</div>
+      <p>Next, sort what came over: old actions, big projects, overdue dates, flags. Mostly in bulk, and every choice can be undone.</p>
+      <div class="import-next"><a class="btn primary" href="#settle/${r.import_id}" data-of-settle>Settle in →</a><a class="btn" href="#projects">Open Projects</a></div>
       <p class="hint">Not what you expected? <button class="link-btn" data-of-undo="${r.import_id}">Undo this import</button>: it drops everything it added; nothing is deleted.</p>
       <button class="link-btn muted" data-of-cancel>Import something else</button>
     </section>`;

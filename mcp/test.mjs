@@ -82,7 +82,7 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (String(url).includes('/rest/v1/rpc/')) { rpcCalls.push({ fn: String(url).split('/rpc/')[1], body: JSON.parse(init.body) }); return new Response('{}', { status: 200 }); }
   const u = new URL(url); const table = u.pathname.split('/').pop();
-  const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','or'].includes(k));
+  const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','offset','or'].includes(k));
   const ors = [...u.searchParams].filter(([k]) => k === 'or').map(([, v]) => v.slice(1, -1).match(/[a-z_]+\.(?:ilike\.\*[^*]*\*|in\.\([^)]*\)|not\.is\.null|is\.null|is\.(?:true|false)|(?:lt|lte|gte|gt|eq)\.[^,)]+)/g) || []);
   const orMatch = (r) => ors.every((conds) => conds.some((c) => {
     const [k, op, ...rest] = c.split('.'); const v = rest.join('.');
@@ -111,7 +111,7 @@ globalThis.fetch = async (url, init = {}) => {
   const m = init.method || 'GET'; const rows = db[table];
   const body = init.body ? JSON.parse(init.body) : null;
   const res = (d, s = 200) => new Response(d === null ? null : JSON.stringify(d), { status: s });
-  if (m === 'GET') return res(rows.filter((r) => match(r) && orMatch(r)));
+  if (m === 'GET') { const off = +(u.searchParams.get('offset') || 0); const lim = Math.min(+(u.searchParams.get('limit') || 1000), 1000); return res(rows.filter((r) => match(r) && orMatch(r)).slice(off, off + lim)); } // the server caps a request at 1,000 rows
   // Mirror of tasks_tree_guard / tasks_tree_follow: loops, 4 levels, steps live in their parent's project.
   const depth = (tid) => { let d = 0; for (let p = tid; p && d < 12; d++) p = db.tasks.find((x) => x.id === p)?.parent_id; return d; };
   const height = (tid) => { const k = db.tasks.filter((x) => x.parent_id === tid); return k.length ? 1 + Math.max(...k.map((x) => height(x.id))) : 0; };
@@ -146,7 +146,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 67 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 67 tools, no internals leaked');
+assert(list.body.result.tools.length === 68 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 68 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -1052,5 +1052,38 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(/read: true/.test(bad), 'quarterly check-in needs read: true');
   const q = await tool('save_horizon', { kind: 'quarterly', read: true });
   assert(q.saved.includes('horizons_quarter_at') && db.user_settings.find((x) => x.user_id === UID).horizons_quarter_at, 'save_horizon quarterly records the check-in');
+}
+// ---------- Settle in (settle_import) and paged reads ----------
+{
+  const ago = (d) => new Date(Date.now() - d * 86400000).toISOString();
+  db.imports.push({ id: 'imS', user_id: UID, source: 'omnifocus', counts: { tasks: 1210, projects: 2 }, settle: {}, created_at: ago(0), undone_at: null });
+  db.projects.push({ id: 'pS1', user_id: UID, name: 'Huge list', status: 'active', folder_id: null, import_id: 'imS', next_review_at: null, sort: 1, created_at: ago(900) });
+  db.projects.push({ id: 'pS2', user_id: UID, name: 'Small one', status: 'on_hold', folder_id: null, import_id: 'imS', next_review_at: ago(-30), sort: 2, created_at: ago(900) });
+  const T0 = { user_id: UID, notes: '', parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, scheduled_at: null, repeat_rule: null, completed_at: null, dropped_at: null, import_id: 'imS' };
+  for (let i = 0; i < 1200; i++) db.tasks.push({ ...T0, id: `stk${i}`, title: `Backlog ${i}`, project_id: 'pS1', sort: i, created_at: ago(i < 30 ? 5 : 800), updated_at: ago(i < 30 ? 5 : 800) });
+  db.tasks.push({ ...T0, id: 'stOld', title: 'Ancient', project_id: 'pS2', created_at: ago(2000), updated_at: ago(2000) });
+  db.tasks.push({ ...T0, id: 'stDue', title: 'Overdue bill', project_id: 'pS2', due_at: ago(10), created_at: ago(5), updated_at: ago(5) });
+  db.tasks.push({ ...T0, id: 'stFlag', title: 'Flag me', project_id: 'pS2', flagged: true, created_at: ago(5), updated_at: ago(5) });
+  const st = await tool('settle_import', { import_id: 'imS' });
+  assert(st.import_id === 'imS' && st.total_open === 1203, `settle status reads past the 1,000-row page (${st.total_open})`);
+  assert(st.old.find((b) => b.bucket === '4y').count === 1 && st.old.find((b) => b.bucket === '2y').count === 1170 && st.big_projects.length === 1 && st.big_projects[0].open === 1200, 'settle status: age buckets and big projects');
+  assert(st.overdue.count === 1 && st.flagged.length === 1 && st.reviews_due === 1 && st.projects_to_decide.length === 2 && st.steps.length === 10, 'settle status: overdue, flagged, reviews due (the on-hold one isn’t due yet), projects');
+  const before = rpcCalls.length;
+  await tool('settle_import', { import_id: 'imS', action: 'apply', choice: 'keep_newest', project: 'pS1', keep: 20 });
+  const kc = rpcCalls[before];
+  assert(kc.fn === 'settle_apply' && kc.body.batch === 'imS' && kc.body.op === 'someday' && kc.body.args.ids.length === 1180 && !kc.body.args.ids.includes('stk0') && kc.body.owner === UID, 'keep_newest: the 20 most recent stay, the rest → Someday');
+  await tool('settle_import', { import_id: 'imS', action: 'apply', choice: 'plan_overdue' });
+  const pc = rpcCalls[rpcCalls.length - 1];
+  assert(pc.body.op === 'plan' && pc.body.args.ids.join() === 'stDue' && /T\d\d:00:00/.test(pc.body.args.at), 'plan_overdue: planned today at the planned hour');
+  await tool('settle_import', { import_id: 'imS', action: 'apply', choice: 'spread_reviews' });
+  assert(rpcCalls[rpcCalls.length - 1].body.args.items.length === 1, 'spread_reviews: the due ones');
+  await tool('settle_import', { import_id: 'imS', action: 'undo', op_id: 'op1' });
+  assert(rpcCalls[rpcCalls.length - 1].fn === 'settle_undo' && rpcCalls[rpcCalls.length - 1].body.op_id === 'op1', 'undo calls settle_undo');
+  await tool('settle_import', { import_id: 'imS', action: 'apply', choice: 'mark_step_done', step: 'big' });
+  assert(db.imports.find((x) => x.id === 'imS').settle.steps.big, 'mark_step_done keeps progress on the import');
+  let e = ''; try { await tool('settle_import', { import_id: 'imS', action: 'apply', choice: 'old_to_someday', bucket: '9y' }); } catch (x) { e = x.message; }
+  assert(/bucket/.test(e), 'bad bucket refused');
+  const lt = await tool('list_tasks', { project: 'Huge list', limit: 500 });
+  assert(lt.count === 500 && lt.items.length === 500, 'explicit limits still apply');
 }
 console.log('ALL PASSED');

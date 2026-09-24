@@ -21,6 +21,7 @@ import { planTools } from './plan.js';
 import { handleCapture, followTag, nameFor } from './capture.js';
 import { checklistTools } from './checklists.js';
 import { dailyTools } from './daily.js';
+import { settleTools } from './settle.js';
 import { eventOf, icsCalendar } from '../../js/schedule.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
@@ -40,7 +41,7 @@ Time blocks: update_task schedule ("YYYY-MM-DDTHH:MM") puts an action on their c
 Horizons of Focus: list_horizons shows purpose, vision, goals and areas (with balance warnings); save_area, save_goal, save_horizon edit them; projects take outcome ("done looks like"), area and goal. To plan a project with the user (Natural Planning Model), use plan_project: why, done looks like, brainstorm, organize, next actions; show the preview, then create. For "what should I do now?", call what_now (where, minutes, energy) and explain its reasons.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
 Templates: for repeated projects (a new job, a trip), list_templates then create_from_template with the blanks' values; save_as_template turns a project into one.
-Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); undo_import takes an import back.
+Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); then settle_import walks the sort (status → recommend → apply, each with an Undo); undo_import takes a whole import back.
 Perspectives are the user's saved views (e.g. Calls, Today): list_perspectives, then run_perspective to see what's in one; to answer "what should I do now" questions, prefer the user's own perspectives. create_perspective/update_perspective build them (preview rules with run_perspective first).
 Big tasks: break_down splits a task into steps (in_order for one at a time); steps can have steps, up to 4 levels. get_task shows the steps tree and progress. Move a task under another with update_task parent. If a task grows into a real project, offer convert_to_project.
 Tags can be put on hold (update_tag status on_hold): their actions are parked, not available, until the tag is active again. A task's on_hold field says why it isn't available.
@@ -338,7 +339,22 @@ async function authenticate(request, env, ctx) {
 }
 
 // ---------- Supabase REST ----------
-async function rest(env, path, { method = 'GET', body, prefer } = {}) {
+// The API returns at most 1,000 rows a request, so a read without its own limit is fetched a page at a
+// time, in a stable order (the table's key breaks ties), until a short page.
+const PAGE = 1000;
+const TIE = { task_tags: 'task_id.asc,tag_id.asc', project_tags: 'project_id.asc,tag_id.asc', user_settings: 'user_id.asc' };
+async function rest(env, path, opts = {}) {
+  if ((opts.method || 'GET') !== 'GET' || path.startsWith('rpc/') || /[?&]limit=/.test(path)) return rest1(env, path, opts);
+  const tie = TIE[path.split('?')[0]] || 'id.asc';
+  const ordered = /[?&]order=/.test(path) ? path.replace(/([?&]order=[^&]*)/, `$1,${tie}`) : `${path}${path.includes('?') ? '&' : '?'}order=${tie}`;
+  const out = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const rows = await rest1(env, `${ordered}&limit=${PAGE}&offset=${offset}`, opts);
+    out.push(...rows);
+    if (rows.length < PAGE) return out;
+  }
+}
+async function rest1(env, path, { method = 'GET', body, prefer } = {}) {
   const key = env.SUPABASE_SECRET_KEY;
   const headers = { apikey: key, 'Content-Type': 'application/json' };
   if (key.startsWith('ey')) headers.Authorization = `Bearer ${key}`; // legacy service_role JWT
@@ -1475,7 +1491,7 @@ const TOOLS = [
         format: parsed.format, saved: !!confirm, import_id: confirm ? counts.import_id : undefined,
         counts, summary: prepared.summary, warnings: prepared.warnings,
         sample: OF.sampleTree(prepared.payload).map((l) => `${'  '.repeat(l.depth)}${l.text}${l.meta ? ` (${l.meta})` : ''}`),
-        next: confirm ? 'Imported. The user can undo it with undo_import.' : 'Nothing saved yet. Show this preview; call again with confirm: true to import.',
+        next: confirm ? 'Imported. Next, offer Settle in (settle_import): sort old actions, big projects, overdue dates and flags in bulk, each with an Undo. The whole import can be undone with undo_import.' : 'Nothing saved yet. Show this preview; call again with confirm: true to import.',
       };
     },
   },
@@ -2085,6 +2101,7 @@ async function availableTasks(api) {
 }
 TOOLS.push(...planTools({ projectOut }));
 TOOLS.push(...checklistTools({ localDate }));
+TOOLS.push(...settleTools({ OPEN, zonedToIso, localDate }));
 TOOLS.push(...dailyTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));

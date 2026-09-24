@@ -8,15 +8,28 @@ import { ancestors, descendants, stepsOf } from './tree.js';
 
 const OUTBOX_KEY = 'todo.outbox';
 
+// The API returns at most 1,000 rows a request: big tables are read a page at a time, in key order.
+const PAGE = 1000;
+async function every(query, ...keys) {
+  const out = [];
+  for (let from = 0; ; from += PAGE) {
+    let q = query();
+    keys.forEach((k) => { q = q.order(k); });
+    const rows = await run(q.range(from, from + PAGE - 1));
+    out.push(...rows);
+    if (rows.length < PAGE) return out;
+  }
+}
+
 export async function loadAll() {
   const since = new Date(Date.now() - 86400000).toISOString();
-  const [tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews] = await Promise.all([
-    run(sb.from('tasks').select('*').or(`and(completed_at.is.null,dropped_at.is.null),completed_at.gte.${since}`)),
-    run(sb.from('projects').select('*')),
-    run(sb.from('folders').select('*')),
-    run(sb.from('tags').select('*')),
-    run(sb.from('task_tags').select('*')),
-    run(sb.from('project_tags').select('*')),
+  const [tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports] = await Promise.all([
+    every(() => sb.from('tasks').select('*').or(`and(completed_at.is.null,dropped_at.is.null),completed_at.gte.${since}`), 'id'),
+    every(() => sb.from('projects').select('*'), 'id'),
+    every(() => sb.from('folders').select('*'), 'id'),
+    every(() => sb.from('tags').select('*'), 'id'),
+    every(() => sb.from('task_tags').select('*'), 'task_id', 'tag_id'),
+    every(() => sb.from('project_tags').select('*'), 'project_id', 'tag_id'),
     run(sb.from('places').select('*')),
     run(sb.from('notifications').select('*')),
     run(sb.from('attachments').select('*').is('archived_at', null)),
@@ -31,8 +44,9 @@ export async function loadAll() {
     run(sb.from('checklists').select('*').order('sort')),
     run(sb.from('checklist_runs').select('*').order('started_at', { ascending: false }).limit(300)),
     run(sb.from('daily_reviews').select('*').order('day', { ascending: false }).limit(60)),
+    run(sb.from('imports').select('*').order('created_at', { ascending: false }).limit(20)),
   ]);
-  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews });
+  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports });
   await loadSettings();
 }
 
