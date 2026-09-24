@@ -2,7 +2,7 @@
 // Claude in another window; it reads the same current card over the MCP (full_review), annotates it and
 // decides it with you, and the card here updates live (Realtime, with a polling fallback). Keys 1–4
 // decide, s skips, u undoes. Every decision can be undone; nothing is deleted.
-import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen } from '../state.js';
+import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen, openSheet } from '../state.js';
 import { loadAll, refreshTasks } from '../data.js';
 import { fmtDate } from '../dates.js';
 import { buildQueue, priorityReason, proposalText } from '../review.js';
@@ -106,6 +106,14 @@ async function refreshCard(it) {
 // Re-render unless you're typing somewhere.
 function redraw() { if (!/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) app.render(); }
 
+// The prompt that starts (or, after a break, resumes) this review with Claude in any chat that has the
+// Todo Tooling tools: the session, the link, and how you work together.
+export const resumePrompt = (s) => `Let's continue my Full Review in Todo Tooling (session ${s.id}, app: ${location.origin}/#full/${s.id}).
+
+Use the full_review tool (Todo Tooling MCP). Start with action "status" and tell me the current card.
+
+How we work: I tell you what to do with each card in a few words. You turn it into a suggestion (action "suggest") on the current card, and I press Submit in the app. Only apply changes directly if I say "just do it". Name the card in every reply, because I may have moved on in the app. Draft ahead with "upcoming" and "suggest" when I ask. Nothing gets deleted; drop means drop.`;
+
 // ---------- view ----------
 const claudeHere = (s) => s && s.agent_seen_at && Date.now() - Date.parse(s.agent_seen_at) < 90000;
 const fresh = (it, field) => it.changed && it.changed[field] && Date.now() - Date.parse(it.changed[field]) < RECENT;
@@ -197,7 +205,8 @@ export function viewFullReview(id) {
   const pos = cur ? live.filter((x) => x.sort <= cur.sort).length : live.length;
   const here = claudeHere(s);
   const head = `<div class="fr-head"><div><b>${esc(s.title)}</b> <span class="hint">· ${n(pos)} of ${n(live.length)} · ${n(done)} reviewed${skipped ? ` · ${n(skipped)} skipped` : ''}</span></div>
-      <span class="fr-pres ${here ? 'on' : ''}">${here ? `<i></i>Claude is here${s.agent_status ? ` · ${esc(s.agent_status)}` : ''}` : `<button class="link-btn" data-fr="invite">Review with Claude</button>`}</span>
+      <span class="fr-pres ${here ? 'on' : ''}">${here ? `<i></i>Claude is here${s.agent_status ? ` · ${esc(s.agent_status)}` : ''}` : 'Claude isn’t connected'}</span>
+      <button class="btn small fr-copy" data-fr="invite" title="Copy the prompt that starts or resumes this review with Claude">⧉ Prompt for Claude</button>
       <a class="icon-btn fr-close" href="#${esc((s.scope && s.scope.import_id) ? `settle/${s.scope.import_id}` : s.scope && s.scope.project_id ? `project/${s.scope.project_id}` : 'inbox')}" aria-label="Close" title="Close (Esc)">✕</a></div>
     <div class="cl-progress"><i style="width:${live.length ? Math.round((done / live.length) * 100) : 0}%"></i></div>`;
   if (!cur) {
@@ -216,8 +225,12 @@ export async function fullReviewAction(el) {
   const a = el.dataset.fr;
   const s = f.session;
   if (a === 'invite') {
-    const text = `Let's do my Full Review together in Todo Tooling. Use the full_review tool with session ${s.id}: read the current card, ask me what I gain from it and where it belongs, annotate it (gain, project, dates, tags, a one-line note), and decide it with me. Pull anything important forward.`;
-    try { await navigator.clipboard.writeText(text); toast('Copied: paste it to Claude to start'); } catch { toast(text); }
+    const text = resumePrompt(s);
+    try { await navigator.clipboard.writeText(text); toast('Copied: paste it into Claude to start or resume'); return; } catch { /* no clipboard: show it to copy by hand */ }
+    const sheet = openSheet(`<form method="dialog" class="fr-prompt"><h2>Prompt for Claude</h2><p class="hint">Paste this into Claude to start or resume this review.</p>
+      <textarea readonly rows="9">${esc(text)}</textarea><div class="actions"><div class="right"><button class="btn primary">Done</button></div></div></form>`);
+    sheet.showModal();
+    const ta = sheet.querySelector('textarea'); ta.focus(); ta.select();
     return;
   }
   if (a === 'reopen-skipped') {

@@ -1320,3 +1320,5 @@ body.fr-mode .view { margin-left: auto !important; margin-right: auto !important
 .sg-btns kbd { opacity: .7; font-size: .75rem; margin-left: 4px; }
 .fr-btns-quiet { opacity: .55; }
 .fr-btns-quiet:hover, .fr-btns-quiet:focus-within { opacity: 1; }
+.fr-copy { white-space: nowrap; }
+.fr-prompt textarea { width: 100%; font-size: 14px; }

@@ -79,10 +79,11 @@ async function fullReview(check) {
   const sid = location.hash.split('/')[1];
   check('starts: full screen, important first with why, progress', document.body.classList.contains('fr-mode') && has(undefined, 'update my will', 'mentions “my will”', '1 of 4') && t.review_items.filter((x) => x.session_id === sid).length === 4);
   check('queue: 1 important, 14 movies as one group, 2 singles', t.review_items.filter((x) => x.session_id === sid && x.kind === 'group').length === 1 && t.review_items.find((x) => x.kind === 'group' && x.session_id === sid).grp.task_ids.length === 14);
-  check('before Claude joins: “Review with Claude” to invite', !!$('[data-fr="invite"]'));
+  check('before Claude joins: says so, with the prompt button', has('.fr-head', 'claude isn’t connected') && !!$('[data-fr="invite"]'));
   let clip = ''; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (x) => { clip = x; } } });
   $('[data-fr="invite"]').click(); await wait(50);
-  check('invite copies a prompt for Claude with the session', clip.includes(sid) && clip.includes('full_review'));
+  check('“Prompt for Claude” copies the resume prompt: session, link, how we work', clip.includes(sid) && clip.includes(`#full/${sid}`) && clip.includes('full_review') && clip.includes('"suggest"') && clip.includes('just do it'));
+  await until(() => has(undefined, 'claude is here') || true);
   // Claude annotates over the MCP: the card updates live, with the change highlighted and a note.
   const ses = t.review_sessions.find((x) => x.id === sid);
   const cur = t.review_items.find((x) => x.id === ses.current_item);
@@ -91,6 +92,7 @@ async function fullReview(check) {
   Object.assign(cur, { changed: { gain: stamp }, note: 'You said this matters more now.', updated_at: stamp });
   Object.assign(ses, { agent_seen_at: stamp, agent_status: 'editing', updated_at: stamp });
   await until(() => has(undefined, 'family is not left guessing') && has(undefined, 'claude is here'));
+  check('the prompt button stays while Claude is here (to resume later)', !!$('[data-fr="invite"]'));
   check('live: Claude’s gain appears, highlighted, with its note and presence', has(undefined, 'family is not left guessing', 'you said this matters more now', 'claude is here · editing') && !!$('.fr-new'));
   // Claude suggests; nothing changes until Submit.
   const sug = { decision: 'keep', title: 'Update my will and trust', gain: 'Nobody is left guessing', project_id: 'pfE', project_name: 'Estate and legacy', planned: new Date(Date.now() + 3 * 86400000).toISOString(), flagged: true, add_tag_names: ['Paperwork'], add_tag_labels: ['Paperwork (new)'], note: 'You said this one matters most', at: new Date().toISOString() };
