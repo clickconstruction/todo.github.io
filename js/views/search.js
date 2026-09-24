@@ -5,7 +5,7 @@ import { taskList } from '../rows.js';
 let searchSeq = 0;
 const searchTerms = (q) => q.toLowerCase().split(/\s+/).filter(Boolean);
 const matchesAll = (hay, terms) => { const h = hay.toLowerCase(); return terms.every((w) => h.includes(w)); };
-const taskHaystack = (t) => [t.title, t.notes, t.completion_note, (byId(db.projects, t.project_id) || {}).name,
+const taskHaystack = (t) => [t.title, t.notes, t.gain, t.gain_cost, t.completion_note, (byId(db.projects, t.project_id) || {}).name,
   ...[...effectiveTagIds(t)].map((id) => byId(db.tags, id)).filter(Boolean).map(tagLabel)].join(' ');
 
 function searchResultsHtml(q) {
@@ -37,7 +37,7 @@ async function searchServer(q) {
   let query = sb.from('tasks').select('*').or('completed_at.not.is.null,dropped_at.not.is.null').order('updated_at', { ascending: false }).limit(100);
   // Each word must match the title, notes, completion note, project name or a tag (a parent tag covers its children).
   terms.forEach((w) => {
-    const conds = [`title.ilike.*${w}*`, `notes.ilike.*${w}*`, `completion_note.ilike.*${w}*`];
+    const conds = [`title.ilike.*${w}*`, `notes.ilike.*${w}*`, `gain.ilike.*${w}*`, `completion_note.ilike.*${w}*`];
     const projectIds = db.projects.filter((p) => p.name.toLowerCase().includes(w)).map((p) => p.id);
     const tagIds = db.tags.filter((tg) => tagLabel(tg).toLowerCase().includes(w)).map((tg) => tg.id);
     const taggedIds = [...new Set(db.taskTags.filter((x) => tagIds.includes(x.tag_id)).map((x) => x.task_id))];

@@ -19,6 +19,8 @@ import { ENERGY, ENERGY_ICON, livePeople } from '../gtd.js';
 import { checklistFieldHtml, wireChecklistField } from '../views/checklists.js';
 import { openSchedule, addToGoogle, addToApple, scheduledLabel } from './schedule.js';
 import { openDelegate, openTickle } from './gtd.js';
+import { gainFieldHtml, wireGainField, offerPlacement } from './gainField.js';
+import { splitGain } from '../gain.js';
 
 // Waiting on someone (with a follow-up day), or something to discuss with them (Agenda).
 function waitingFieldHtml(t, task) {
@@ -47,6 +49,7 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
       <input type="text" name="title" value="${esc(t.title)}" placeholder="What is it?" required autocomplete="off" aria-label="Title">
       <label class="flag-pill" title="Flag"><input type="checkbox" name="flagged" ${t.flagged ? 'checked' : ''}><span aria-hidden="true">⚑</span><span class="sr-only">Flagged</span></label>
     </div>
+    ${gainFieldHtml(t)}
     ${task && isOpen(task) && onHoldTagFor(task) ? `<p class="hold-note">⏸ Not available: tag <a href="#tag/${onHoldTagFor(task).id}">“${esc(tagLabel(onHoldTagFor(task)))}”</a> is on hold.</p>` : ''}
     <label class="notes-field"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes" rows="2">${esc(t.notes)}</textarea></label>
     ${stepsFieldHtml(task)}
@@ -97,6 +100,7 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
   const collectLocation = wireLocationField(form, onTagsChange);
   const collectRepeat = wireRepeatField(form, t, onTagsChange);
   const collectReminders = wireNotifyField(form, remindersFor('task_id', task && task.id), onTagsChange);
+  const collectGain = wireGainField(form, t, 'task', onTagsChange);
   const collectFiles = wireAttachField(form, 'task_id', task && task.id);
   wireHistoryField(form, 'task_id', task && task.id);
   wireChecklistField(form, task);
@@ -128,6 +132,7 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
     const fields = {
       title: (f.get('title') || '').trim(),
       notes: f.get('notes'),
+      ...collectGain(),
       project_id: form.elements.project_id.value || null, // read directly: it's disabled while it's a step
       ...collectSteps(),
       flagged: f.get('flagged') === 'on',
@@ -244,7 +249,9 @@ export function renderTaskInspector(container, task) {
 export function openQuickEntry() {
   const sheet = openSheet(`<form method="dialog" id="quick">
     <h2>Capture to Inbox</h2>
-    <input type="text" name="title" placeholder="What's on your mind?" autocomplete="off" enterkeyhint="done">
+    <input type="text" name="title" placeholder="What's on your mind?" autocomplete="off" enterkeyhint="next">
+    <label class="gain-quick"><span class="gain-label"><span aria-hidden="true">✦</span> What do I gain?</span>
+      <input type="text" name="gain" maxlength="500" placeholder="Optional · say why it’s worth doing" autocomplete="off" enterkeyhint="done"></label>
     <div class="actions quick-media"><label class="btn" title="Take or choose a photo">📷 Photo<input type="file" accept="image/*" capture="environment" data-quick-file hidden></label>
       <label class="btn" title="Attach a file">📎 File<input type="file" multiple data-quick-file hidden></label>
       <div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div></div>
@@ -253,11 +260,15 @@ export function openQuickEntry() {
   $('[data-cancel]', sheet).onclick = () => sheet.close();
   form.onsubmit = async (e) => {
     e.preventDefault();
-    const title = new FormData(e.target).get('title');
-    if (!String(title || '').trim()) { form.elements.title.focus(); return; }
+    const f = new FormData(e.target);
+    // "Idea → gain" in the title works too.
+    const split = splitGain(f.get('title'));
+    const gain = String(f.get('gain') || '').trim() || split.gain;
+    if (!split.title) { form.elements.title.focus(); return; }
     sheet.close();
-    await capture(title);
-    if (location.hash !== '#inbox') toast('Captured to Inbox');
+    const row = await capture(split.title, gain ? { gain } : {});
+    if (row) offerPlacement(row, location.hash === '#inbox' ? '' : 'Captured to Inbox'); // in the Inbox, only when it fits somewhere
+    else if (location.hash !== '#inbox') toast('Captured to Inbox');
   };
   // A photo or file: an Inbox item with it attached (titled "Photo · 3:42 PM" unless you typed one).
   form.querySelectorAll('[data-quick-file]').forEach((input) => input.addEventListener('change', async () => {

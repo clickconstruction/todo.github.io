@@ -64,16 +64,16 @@ export async function refreshProject(id) {
 }
 
 // Captures made offline wait in localStorage and are sent on the next load.
-function queueCapture(title) {
+function queueCapture(title, gain = '') {
   const box = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]');
-  box.push({ title, created_at: new Date().toISOString() });
+  box.push({ title, gain: gain || '', created_at: new Date().toISOString() });
   localStorage.setItem(OUTBOX_KEY, JSON.stringify(box));
 }
 export async function flushOutbox() {
   let box;
   try { box = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]'); } catch { box = []; }
   if (!box.length || !navigator.onLine) return;
-  const { data, error } = await sb.from('tasks').insert(box.map((b) => ({ title: b.title, created_at: b.created_at }))).select();
+  const { data, error } = await sb.from('tasks').insert(box.map((b) => ({ title: b.title, gain: b.gain || '', created_at: b.created_at }))).select();
   if (error) return;
   localStorage.removeItem(OUTBOX_KEY);
   db.tasks.push(...data);
@@ -82,11 +82,11 @@ export async function flushOutbox() {
 
 export async function capture(title, extra = {}) {
   title = title.trim();
-  if (!title) return;
+  if (!title) return null;
   if (!navigator.onLine) {
-    queueCapture(title);
+    queueCapture(title, extra.gain);
     toast('Saved offline; will sync when back online');
-    return;
+    return null;
   }
   // New project actions go to the end (order matters in sequential projects).
   if (extra.project_id && extra.sort === undefined) {
@@ -95,6 +95,7 @@ export async function capture(title, extra = {}) {
   const [row] = await run(sb.from('tasks').insert({ title, ...extra }).select());
   db.tasks.push(row);
   app.render();
+  return row;
 }
 
 // Rows the database created on its own since `since` (the next occurrence of a repeating
@@ -140,7 +141,7 @@ export async function setCompleted(task, done) {
   const finished = done ? ancestors(task).filter((a) => a.completed_at && openBefore.includes(a.id)) : [];
   const elephant = finished[finished.length - 1];
   const msg = elephant ? `🎉 Last step done · “${elephant.title}” is complete` : projectDone ? `Completed · “${project.name}” is done too` : next ? `Completed · next one ${nextAt ? fmtNext(nextAt) : 'is ready'}` : 'Completed';
-  toast(msg, [{ label: 'Add note', run: () => openCompletionNote(task) },
+  toast(msg, [{ label: task.gain ? 'Did you gain it?' : 'Add note', run: () => openCompletionNote(task) },
     { label: 'Undo', run: () => undoComplete(task, projectDone && project, next, repeating) }]);
 }
 

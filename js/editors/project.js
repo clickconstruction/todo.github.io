@@ -1,6 +1,7 @@
 // Project and folder editor sheets. Nothing is deleted: projects are completed/dropped,
 // folders archived (only once they hold no active or on-hold projects; the database enforces this too).
 import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, bySort, PROJECT_STATUSES } from '../state.js';
+import { gainFieldHtml, wireGainField } from './gainField.js';
 import { insertFolder, updateProject, setLinks } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { locationFieldHtml, wireLocationField } from './place.js';
@@ -31,6 +32,7 @@ function projectFieldsHtml(p, project) {
       <input type="text" name="name" value="${esc(p.name)}" placeholder="Outcome, e.g. Launch todotooling.com" required autocomplete="off" aria-label="Project name">
       <label class="flag-pill" title="Flag (its actions show in Flagged)"><input type="checkbox" name="flagged" ${p.flagged ? 'checked' : ''}><span aria-hidden="true">⚑</span><span class="sr-only">Flagged</span></label>
     </div>
+    ${gainFieldHtml(p, 'project')}
     <label class="outcome-field"><span class="field-label">Done looks like</span><input type="text" name="outcome" value="${esc(p.outcome || '')}" maxlength="1000" placeholder="Final inspection passed, paid in full" autocomplete="off"></label>
     <label class="notes-field"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes: purpose, ideas, details…" rows="2">${esc(p.notes)}</textarea></label>
     ${section('organize', 'Organize', `
@@ -76,6 +78,7 @@ function wireProjectForm(form, project, onTagsChange) {
   });
   const selectedTags = wireTagPicker(form, project ? db.projectTags.filter((x) => x.project_id === project.id).map((x) => x.tag_id) : [], onTagsChange);
   const collectLocation = wireLocationField(form, onTagsChange);
+  const collectGain = wireGainField(form, project || {}, 'project', onTagsChange);
   wireQuickButtons(form);
   wireProps(form);
   const collectRepeat = wireRepeatField(form, project || {}, onTagsChange);
@@ -95,7 +98,7 @@ function wireProjectForm(form, project, onTagsChange) {
     }
     const fields = { name: (f.get('name') || '').trim(), folder_id, notes: f.get('notes'), kind: f.get('kind') || 'parallel',
       complete_with_last: f.get('complete_with_last') === 'on', flagged: f.get('flagged') === 'on', ...collectLocation(),
-      outcome: String(f.get('outcome') || '').trim() };
+      outcome: String(f.get('outcome') || '').trim(), ...collectGain() };
     if (form.elements.area_id) fields.area_id = f.get('area_id') || null;
     if (form.elements.goal_id) fields.goal_id = f.get('goal_id') || null;
     Object.assign(fields, {

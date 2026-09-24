@@ -9,6 +9,7 @@ import { attachmentsFor, signedUrl } from '../editors/attachField.js';
 import { ENERGY, isTickled, returnedFromTickler, suggestFor, makeSomeday, fileToReference, topics, saveReference, dayKey, somedayCategories } from '../gtd.js';
 import { openDelegate, openTickle } from '../editors/gtd.js';
 import { openReview } from './weekly.js';
+import { isWeak } from '../gain.js';
 
 export const CHOICES = [
   ['next', 'Next action', 'I’ll do it'],
@@ -85,7 +86,12 @@ function itemCard(t) {
   return `<div class="cl-item"><b>${esc(t.title)}</b><span class="cl-meta">${meta}</span>
     ${pics.length ? `<div class="cl-pics">${pics.map((a) => `<img class="cl-thumb" data-cl-thumb="${esc(a.path)}" alt="${esc(a.name)}">`).join('')}</div>` : ''}
     ${t.notes ? `<p class="cl-notes">${esc(t.notes.slice(0, 400))}${t.notes.length > 400 ? '…' : ''}</p>` : ''}
-    <button class="link-btn" data-task="${t.id}">Edit details</button></div>`;
+    <label class="gain-card"><span class="gain-label"><span aria-hidden="true">✦</span> What do I gain?</span>
+      <input type="text" data-cl-gain="${t.id}" value="${esc(t.gain || '')}" maxlength="500" placeholder="Say it in one line, or skip" autocomplete="off"></label>
+    ${t.gain_by === 'agent' ? '<span class="chip sug">Claude suggested</span>' : ''}
+    <button class="link-btn" data-task="${t.id}">Edit details</button></div>
+    ${isWeak(t) ? `<div class="gain-weak cl-gain"><p>No gain written, and you’ve skipped this ${t.clarify_skips} times.</p>
+      <div class="st-btns"><button class="btn small" data-cl-gain-focus>Add a gain</button><button class="btn small" data-clarify="someday">Someday</button><button class="btn small" data-clarify="trash">Drop</button></div></div>` : ''}`;
 }
 
 function nextForm(t) {
@@ -260,7 +266,11 @@ export async function clarifyAction(action) {
     case 'reference': s.mode = 'reference'; break;
     case 'now': s.mode = 'now'; s.timerStart = Date.now(); stopTimer(); break;
     case 'back': s.mode = null; stopTimer(); break;
-    case 'skip': s.skipped.add(t.id); s.mode = null; stopTimer(); break;
+    case 'skip': {
+      s.skipped.add(t.id); s.mode = null; stopTimer();
+      run(sb.from('tasks').update({ clarify_skips: (t.clarify_skips || 0) + 1 }).eq('id', t.id).select()).then(([row]) => syncRow('tasks', t, row)).catch(() => {});
+      break;
+    }
     case 'longer': s.mode = 'next'; stopTimer(); break;
     case 'did-it': {
       const [row] = await run(sb.from('tasks').update({ completed_at: new Date().toISOString() }).eq('id', t.id).select());
@@ -307,3 +317,23 @@ export function clarifyKey(e) {
   if (e.key === 'z' || e.key === 'u') { e.preventDefault(); clarifyAction('undo'); return true; }
   return false;
 }
+
+// The gain on the item card saves as you leave the field (Enter too); a suggestion you touch becomes yours.
+document.addEventListener('change', async (e) => {
+  const el = e.target.closest && e.target.closest('[data-cl-gain]');
+  if (!el) return;
+  const t = byId(db.tasks, el.dataset.clGain);
+  if (!t) return;
+  const gain = el.value.trim().slice(0, 500);
+  if (gain === (t.gain || '') && t.gain_by !== 'agent') return;
+  const [row] = await run(sb.from('tasks').update({ gain, gain_by: null }).eq('id', t.id).select());
+  syncRow('tasks', t, row);
+  app.render();
+});
+document.addEventListener('keydown', (e) => {
+  const el = e.target.closest && e.target.closest('[data-cl-gain]');
+  if (el && e.key === 'Enter') { e.preventDefault(); el.blur(); }
+});
+document.addEventListener('click', (e) => {
+  if (e.target.closest && e.target.closest('[data-cl-gain-focus]')) { const i = document.querySelector('[data-cl-gain]'); if (i) i.focus(); }
+});

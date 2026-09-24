@@ -60,7 +60,7 @@ export function viewPlan(pid) {
 const BODY = {
   why: (p) => {
     const lines = String(p.principles || '').split('\n').filter((l) => l.trim());
-    return `<h2 class="plan-q">Why are you doing this?</h2>
+    return `<h2 class="plan-q">Why are you doing this?</h2><p class="hint">What do you gain? It shows as the project’s gain, and its actions inherit it.</p>
       <textarea class="plan-text" data-plan-field="purpose" rows="3" placeholder="So the Smiths can use the bathroom before the holidays…">${esc(p.purpose || '')}</textarea>
       <h2 class="plan-q">Principles and boundaries</h2><p class="hint">What must be true, whatever happens?</p>
       ${lines.map((l, i) => `<div class="plan-idea"><span>${esc(l)}</span><button class="icon-btn" data-plan="rm-principle" data-i="${i}" aria-label="Remove">✕</button></div>`).join('')}
@@ -194,7 +194,7 @@ export function planInput(e) {
   const [p] = current();
   if (!p) return true;
   clearTimeout(fieldTimer);
-  fieldTimer = setTimeout(() => saveField(p, { [el.dataset.planField]: el.value.trim() }).catch(() => {}), 500);
+  fieldTimer = setTimeout(() => saveField(p, { [el.dataset.planField]: el.value.trim(), ...(el.dataset.planField === 'purpose' ? { purpose_by: null } : {}) }).catch(() => {}), 500);
   return true;
 }
 export function planChange(e) {

@@ -3,6 +3,7 @@
 import { app, esc, toast } from '../state.js';
 import { sweepPrompts, TRIGGERS } from '../weekly.js';
 import { capture } from '../data.js';
+import { splitGain } from '../gain.js';
 import { saveSettings } from '../prefs.js';
 
 const state = () => (app.sweep ||= { i: 0, captured: {} });
@@ -22,6 +23,7 @@ export function sweepHtml({ embedded = false } = {}) {
     <div class="cl-item sweep-card"><b>${esc(p.text)}</b>${p.hint ? `<span class="cl-meta">${esc(p.hint)}…</span>` : ''}</div>
     ${mine.length ? `<ul class="sweep-caps">${mine.map((t) => `<li>📥 ${esc(t)}</li>`).join('')}</ul>` : ''}
     <form class="capture" data-sweep-capture><input type="text" name="title" id="sweep-input" placeholder="${mine.length ? 'Anything else?' : 'What comes to mind?'} ⏎ to capture" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
+    <p class="hint">Add why it’s worth doing after an arrow: <span class="gain-text">Get a trailer quote → two crews on Fridays</span></p>
     <div class="sweep-foot"><button class="btn small" data-sweep="prev" ${s.i ? '' : 'disabled'}>‹</button>
       <button class="btn small" data-sweep="hide" data-id="${p.id}">Hide this prompt</button>
       <button class="btn primary" data-sweep="next">${s.i === list.length - 1 ? 'Finish' : 'Next prompt'} →</button></div>
@@ -80,8 +82,9 @@ export function sweepSubmit(e) {
   cap.elements.title.value = '';
   const s = state();
   const p = prompts()[s.i];
-  (s.captured[p.id] ||= []).push(title);
-  capture(title).then(focusInput);
+  const { title: t, gain } = splitGain(title); // "Idea → gain" keeps both
+  (s.captured[p.id] ||= []).push(t);
+  capture(t, gain ? { gain } : {}).then(focusInput);
   return true;
 }
 

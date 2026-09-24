@@ -9,6 +9,7 @@ import { calendarEvents, liveCalendars, fmtEventTime } from '../calendars.js';
 import { dayKey, followUpDue, isWaiting, waitingPerson, messageLink, returnedFromTickler, isTickled } from '../gtd.js';
 import { openLink } from '../editors/gtd.js';
 import { openSchedule, slotsFor } from '../editors/schedule.js';
+import { splitGain } from '../gain.js';
 import { capture } from '../data.js';
 
 export const MAX_FOCUS = 3;
@@ -152,7 +153,8 @@ export function dailySubmit(e) {
   const title = form.elements.title.value.trim();
   if (!title) return true;
   form.elements.title.value = '';
-  capture(title).then(() => { toast('Captured to the Inbox'); const i = document.querySelector('[data-daily-capture] input'); if (i) i.focus(); });
+  const sg = splitGain(title);
+  capture(sg.title, sg.gain ? { gain: sg.gain } : {}).then(() => { toast('Captured to the Inbox'); const i = document.querySelector('[data-daily-capture] input'); if (i) i.focus(); });
   return true;
 }
 

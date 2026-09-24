@@ -1,9 +1,12 @@
 // Capture from anywhere: POST /capture with a capture key (scope 'capture', made in Settings) adds one
 // Inbox item, with any files attached. Used by the iPhone Shortcut (Siri, lock screen, Share sheet).
 // The key can only add; it can't read, change or delete anything.
-//   JSON: { title?, text?, notes?, url?, files?: [{ name, base64, mime }] }
+//   JSON: { title?, text?, notes?, gain?, url?, files?: [{ name, base64, mime }] }
+//   The gain can also ride in the title ("Idea → gain") or a "Gain:" line in the text.
 //   or multipart/form-data: title / text / url fields, and file fields.
 // And for email: [3d] / [1w] / [fri] follow-up tags in a subject.
+
+import { splitGain, gainFromText } from '../../js/gain.js';
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
@@ -49,8 +52,12 @@ export async function readCapture(request) {
   let link = url;
   if (!link && /^https?:\/\/\S+$/i.test(title)) { link = title; title = ''; }
   if (!title) title = link ? link.replace(/^https?:\/\/(www\.)?/i, '').slice(0, 120) : files[0] ? (files[0].mime.startsWith('image/') ? 'Photo' : files[0].name) : 'Captured item';
-  const notes = [String(fields.notes || '').trim(), rest, link && link !== title ? link : ''].filter(Boolean).join('\n\n');
-  return { title: title.slice(0, 300), notes: notes.slice(0, 6000), files, test: fields.test === true || fields.test === 'true' };
+  const split = splitGain(title);
+  const fromText = gainFromText(rest);
+  const gain = (String(fields.gain || '').trim() || split.gain || fromText.gain).slice(0, 500);
+  title = split.title || title;
+  const notes = [String(fields.notes || '').trim(), fromText.rest, link && link !== title ? link : ''].filter(Boolean).join('\n\n');
+  return { title: title.slice(0, 300), notes: notes.slice(0, 6000), gain, files, test: fields.test === true || fields.test === 'true' };
 }
 
 export async function handleCapture(request, env, ctx, { rest, sha256Hex, json, cors, makeApi }) {
@@ -68,7 +75,7 @@ export async function handleCapture(request, env, ctx, { rest, sha256Hex, json, 
     await api.loadSettings();
     item.title = `Photo · ${new Date().toLocaleTimeString('en-US', { timeZone: api.tz, hour: 'numeric', minute: '2-digit' })}`;
   }
-  const [row] = await rest('tasks', { method: 'POST', prefer: 'return=representation', body: { user_id: who.userId, title: item.title, notes: item.notes, in_inbox: true, source: 'capture' } });
+  const [row] = await rest('tasks', { method: 'POST', prefer: 'return=representation', body: { user_id: who.userId, title: item.title, notes: item.notes, gain: item.gain, in_inbox: true, source: 'capture' } });
   let attached = 0;
   for (const f of item.files) { await api.upload('task_id', row.id, f.name, f.bytes, f.mime); attached += 1; }
   return json({ ok: true, id: row.id, title: row.title, attachments: attached, message: `Captured ✓ ${row.title}` });

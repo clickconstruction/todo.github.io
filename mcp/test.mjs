@@ -146,7 +146,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 68 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 68 tools, no internals leaked');
+assert(list.body.result.tools.length === 69 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 69 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -907,6 +907,11 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const c1 = await cap({ text: 'Order two more cases of PEX elbows' });
   const t = db.tasks.find((x) => x.id === c1.body.id);
   assert(c1.status === 200 && /Captured ✓/.test(c1.body.message) && t.in_inbox && t.title === 'Order two more cases of PEX elbows' && t.source === 'capture', '/capture: text → Inbox item');
+  const cg = await cap({ title: 'Price a second trailer', gain: 'Two crews on Fridays' });
+  const cgt = await cap({ text: 'Price a van rack → no more ladder runs\nGain: ignored when the title has one' });
+  const cgl = await cap({ text: 'Call the bank\nGain: lower rate on the truck loan\nask for Sam' });
+  assert(db.tasks.find((x) => x.id === cg.body.id).gain === 'Two crews on Fridays' && db.tasks.find((x) => x.id === cgt.body.id).gain === 'no more ladder runs' && db.tasks.find((x) => x.id === cgt.body.id).title === 'Price a van rack'
+    && db.tasks.find((x) => x.id === cgl.body.id).gain === 'lower rate on the truck loan' && db.tasks.find((x) => x.id === cgl.body.id).notes === 'ask for Sam' && !cg.body.fits, '/capture: gain field, "Idea → gain", or a Gain: line (and a capture key reads nothing back)');
   const c2 = await cap({ text: 'https://www.rheem.com/tankless-spec' });
   assert(db.tasks.find((x) => x.id === c2.body.id).title === 'rheem.com/tankless-spec' && db.tasks.find((x) => x.id === c2.body.id).notes.includes('https://www.rheem.com/tankless-spec'), '/capture: a shared link becomes a readable title, link in notes');
   const c3 = await cap({ text: 'Receipt: Home Depot $214', files: [{ name: 'receipt.jpg', mime: 'image/jpeg', base64: btoa('jpegbytes') }] });
@@ -1060,7 +1065,7 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   db.projects.push({ id: 'pS1', user_id: UID, name: 'Huge list', status: 'active', folder_id: null, import_id: 'imS', next_review_at: null, sort: 1, created_at: ago(900) });
   db.projects.push({ id: 'pS2', user_id: UID, name: 'Small one', status: 'on_hold', folder_id: null, import_id: 'imS', next_review_at: ago(-30), sort: 2, created_at: ago(900) });
   const T0 = { user_id: UID, notes: '', parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, scheduled_at: null, repeat_rule: null, completed_at: null, dropped_at: null, import_id: 'imS' };
-  for (let i = 0; i < 1200; i++) db.tasks.push({ ...T0, id: `stk${i}`, title: `Backlog ${i}`, project_id: 'pS1', sort: i, created_at: ago(i < 30 ? 5 : 800), updated_at: ago(i < 30 ? 5 : 800) });
+  for (let i = 0; i < 1200; i++) db.tasks.push({ ...T0, id: `stk${i}`, title: `Backlog ${i}`, project_id: 'pS1', sort: i, created_at: ago(i < 30 ? 5 + i / 1000 : 800), updated_at: ago(i < 30 ? 5 + i / 1000 : 800) }); // stk0 is the newest
   db.tasks.push({ ...T0, id: 'stOld', title: 'Ancient', project_id: 'pS2', created_at: ago(2000), updated_at: ago(2000) });
   db.tasks.push({ ...T0, id: 'stDue', title: 'Overdue bill', project_id: 'pS2', due_at: ago(10), created_at: ago(5), updated_at: ago(5) });
   db.tasks.push({ ...T0, id: 'stFlag', title: 'Flag me', project_id: 'pS2', flagged: true, created_at: ago(5), updated_at: ago(5) });
@@ -1085,5 +1090,38 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(/bucket/.test(e), 'bad bucket refused');
   const lt = await tool('list_tasks', { project: 'Huge list', limit: 500 });
   assert(lt.count === 500 && lt.items.length === 500, 'explicit limits still apply');
+}
+// ---------- What do I gain? ----------
+{
+  const { rankNow } = await import('../js/whatnow.js');
+  const base = { completed_at: null, dropped_at: null, created_at: new Date().toISOString(), project_id: 'pw' };
+  const rk = rankNow([{ ...base, id: 'a', title: 'No gain' }, { ...base, id: 'b', title: 'With gain', gain: 'Crews never wait' }], { projects: [{ id: 'pw', status: 'active', purpose: 'Project reason' }], goals: [], endOfToday: new Date(Date.now() + 3600e3) });
+  assert(rk.items[0].t.id === 'b' && rk.items[0].gain === 'Crews never wait' && rk.items[1].gain === 'Project reason', 'what_now: a stated gain ranks higher and is returned (else the project\'s)');
+  const eg = emailToTask({ subject: 'Fwd: Trailer quote → two crews on Fridays', text: 'From the dealer\nGain: run two crews without renting\nThanks' }, 'a@b.c');
+  assert(eg.title === 'Trailer quote' && eg.gain === 'run two crews without renting' && !eg.notes.includes('Gain:'), 'email: a Gain: line (over the subject arrow) is the gain, and leaves the notes');
+  assert(emailToTask({ subject: 'Trailer quote -> two crews' }, 'a@b.c').gain === 'two crews', 'email: "Idea -> gain" in the subject');
+  db.projects.push({ id: 'pG1', user_id: UID, name: 'Fleet and equipment', status: 'active', purpose: 'Trailers and trucks ready so crews never wait', purpose_by: null, folder_id: null, sort: 50, created_at: new Date().toISOString() });
+  const c = await tool('capture', { title: 'Get a quote on a second trailer', gain: 'Run two crews on Fridays without renting' });
+  const row = db.tasks.find((t) => t.id === c.id);
+  assert(row.gain === 'Run two crews on Fridays without renting' && row.gain_by === null && c.gain === row.gain, 'capture saves the user\'s gain as theirs');
+  assert(c.fits && c.fits[0].project === 'Fleet and equipment' && c.next, 'capture says which project the gain fits');
+  const c2 = await tool('capture', { title: 'Try drone mapping', gain: 'Faster site surveys', gain_suggested: true });
+  assert(db.tasks.find((t) => t.id === c2.id).gain_by === 'agent' && c2.gain_suggested, 'a drafted gain is marked as a suggestion');
+  const miss = await tool('gains', {});
+  assert(miss.actions.every((x) => x.id !== c.id && x.id !== c2.id) && typeof miss.actions_without_gain === 'number' && miss.projects.every((p) => p.id !== 'pG1'), 'gains missing: only items with no gain');
+  const plain = await tool('capture', { title: 'Order fittings for Frog Pond' });
+  const sug = await tool('gains', { action: 'suggest', items: [{ id: plain.id, kind: 'task', gain: 'Rough-in passes on time' }, { id: c.id, kind: 'task', gain: 'Overwrite attempt' }, { id: c2.id, kind: 'task', gain: 'Better drafted gain' }] });
+  assert(sug.saved === 2 && sug.skipped.length === 1 && sug.skipped[0].id === c.id && db.tasks.find((t) => t.id === c.id).gain === 'Run two crews on Fridays without renting', 'suggest never overwrites the user\'s words (replaces its own earlier draft)');
+  assert(db.tasks.find((t) => t.id === plain.id).gain_by === 'agent' && db.tasks.find((t) => t.id === c2.id).gain === 'Better drafted gain', 'suggestions saved as Claude suggested');
+  await tool('update_task', { id: plain.id, gain: 'Rough-in inspection passes Friday' });
+  assert(db.tasks.find((t) => t.id === plain.id).gain_by === null, 'update_task gain without gain_suggested: now the user\'s');
+  const pl = await tool('gains', { action: 'place', id: c.id });
+  assert(pl.fits.length && pl.fits[0].project_id === 'pG1', 'gains place');
+  await tool('update_task', { id: c.id, status: 'completed', gain_met: 'yes' });
+  const rep = await tool('gains', { action: 'report' });
+  assert(rep.got_it.yes >= 1 && rep.examples.some((x) => x.title === 'Get a quote on a second trailer'), 'gains report: did completed work pay off');
+  await tool('update_project', { project: 'pG1', gain: 'Crews never wait for equipment', gain_suggested: true });
+  const pg = db.projects.find((p) => p.id === 'pG1');
+  assert(pg.purpose === 'Crews never wait for equipment' && pg.purpose_by === 'agent', 'update_project gain = purpose, marked suggested');
 }
 console.log('ALL PASSED');

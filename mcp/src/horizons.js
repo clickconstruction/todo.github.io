@@ -135,7 +135,7 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
         const r = rankNow(tasks, { tz: api.tz, endOfToday: end, minutes: minutes || 0, energy: a.energy || '', inContext, projects, goals, limit: Math.min(20, a.limit || 5) });
         const shaped = new Map((await api.shape(r.items.map((x) => x.t))).map((x) => [x.id, x]));
         return { where: a.where || 'anywhere', minutes: minutes || null, time_from_calendar: gap || undefined, energy: a.energy || null, fits: r.total,
-          items: r.items.map(({ t, reasons }) => ({ ...shaped.get(t.id), why: reasons.map((x) => x.text) })) };
+          items: r.items.map(({ t, reasons, gain }) => ({ ...shaped.get(t.id), why: reasons.map((x) => x.text), ...(gain ? { gain } : {}) })) };
       },
     },
   ];

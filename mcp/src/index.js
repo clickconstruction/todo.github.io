@@ -14,6 +14,7 @@ import { handleCalendarFetch, calendarEvents } from './calendar.js';
 import * as P from '../../js/perspective-engine.js';
 import * as OF from '../../js/omnifocus-import.js';
 import * as TPL from '../../js/templates.js';
+import { splitGain, gainFromText, placeFor } from '../../js/gain.js';
 import { gtdTools } from './gtd.js';
 import { weeklyTools } from './weekly.js';
 import { horizonsTools } from './horizons.js';
@@ -22,11 +23,13 @@ import { handleCapture, followTag, nameFor } from './capture.js';
 import { checklistTools } from './checklists.js';
 import { dailyTools } from './daily.js';
 import { settleTools } from './settle.js';
+import { gainsTools } from './gains.js';
 import { eventOf, icsCalendar } from '../../js/schedule.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = `Todo Tooling is the user's GTD system. Capture anything new with capture (it lands in the Inbox).
+What do I gain?: every action can carry the user's gain (why it's worth doing; a project's gain is its purpose). When capturing, ask what they gain if it isn't obvious and pass it as gain; capture then says which project it fits. Never present your own wording as theirs: drafts go in with gain_suggested (or gains action suggest) and show as "Claude suggested" until kept. Use gains to explain priorities, and gains missing / report to help them drop ideas with no clear payoff.
 Clarify inbox items one at a time with clarify_item (next_action, done, delegate, project, someday, tickler, trash, reference), or with update_task: an item leaves the Inbox once it has a project, a tag or a person (waiting_on / agenda_for).
 Delegation: delegate (or update_task waiting_on + follow_up) makes an item wait on a person; it is then not a next action. You never send anything: delegate and draft_nudge return a drafted message and mailto/sms link for the user to send. list_waiting shows follow-ups due; add_agenda_item/list_agenda keep what to discuss with someone. People: list_people, save_person.
 Tickler: tickle puts an item (or a new reminder) out of sight until a day, then it is back in the Inbox. Reference: search_reference / save_reference hold non-actionable information (codes, warranties); reveal hidden values only when the user asks. Energy (low/medium/high) is set with update_task and filtered with list_tasks max_energy.
@@ -242,13 +245,13 @@ export async function emailToWaiting(api, parsed, from, recipients) {
   const days = tagged.days || api.settings.waiting_followup_days || 7;
   const day = localDate(new Date(Date.now() + days * 86400000).toISOString(), api.tz);
   const others = recipients.slice(1).map((a) => nameFor(a));
-  const body = (parsed.text || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const body = gainFromText((parsed.text || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()).rest;
   const when = parsed.date ? new Date(parsed.date).toUTCString() : new Date().toUTCString();
   let notes = `Emailed ${person.name} <${addr}> · ${when}${others.length ? `\nAlso to: ${others.join(', ')}` : ''}`;
   if (body) notes += `\n\n${body}`;
   if (notes.length > MAX_NOTES) notes = `${notes.slice(0, MAX_NOTES)}\n…(truncated)`;
   const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body: {
-    user_id: api.userId, title: (tagged.subject || base.title).slice(0, 300), notes, source: 'email', in_inbox: false,
+    user_id: api.userId, title: (tagged.subject || base.title).slice(0, 300), notes, gain: base.gain || '', source: 'email', in_inbox: false,
     waiting_on: person.id, delegated_at: new Date().toISOString(), follow_up_at: zonedToIso(day, 9, api.tz) } });
   return row;
 }
@@ -263,8 +266,12 @@ export function isAuthenticated(results, domain) {
 }
 
 export function emailToTask(parsed, from) {
-  const body = (parsed.text || htmlToText(parsed.html || '')).replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-  const subject = (parsed.subject || '').replace(/^(\s*(fwd?|fw|re|aw)\s*:\s*)+/i, '').trim();
+  // "Gain: …" on its own line in the body (or "Idea → gain" in the subject) is the item's gain.
+  const raw = (parsed.text || htmlToText(parsed.html || '')).replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const { gain: bodyGain, rest: body } = gainFromText(raw);
+  const split = splitGain((parsed.subject || '').replace(/^(\s*(fwd?|fw|re|aw)\s*:\s*)+/i, '').trim());
+  const subject = split.title;
+  const gain = bodyGain || split.gain;
   const firstLine = body.split('\n').find((l) => l.trim()) || '';
   const title = (subject || firstLine || 'Emailed item').slice(0, 300);
   const when = parsed.date ? new Date(parsed.date).toUTCString() : new Date().toUTCString();
@@ -273,7 +280,7 @@ export function emailToTask(parsed, from) {
   if (attachments.length) notes += `\nAttachments: ${attachments.join(', ')}`;
   if (body) notes += `\n\n${body}`;
   if (notes.length > MAX_NOTES) notes = `${notes.slice(0, MAX_NOTES)}\n…(truncated)`;
-  return { title, notes };
+  return { title, notes, ...(gain ? { gain } : {}) };
 }
 
 function htmlToText(html) {
@@ -460,6 +467,7 @@ class Api {
   async horizonsPatch(a) {
     const patch = {};
     if (a.outcome !== undefined) patch.outcome = String(a.outcome || '').trim();
+    if (a.gain !== undefined) { patch.purpose = String(a.gain || '').trim().slice(0, 2000); patch.purpose_by = a.gain_suggested ? 'agent' : null; }
     const pick = async (table, key, ref) => {
       if (ref === null || ref === '') return null;
       const rows = await this.q(`${table}?${this.u}&select=id,${key}`);
@@ -527,6 +535,10 @@ class Api {
       defer: localDate(t.defer_at, this.tz),
       completed_at: t.completed_at,
       completion_note: t.completion_note || undefined,
+      gain: t.gain || undefined,
+      gain_cost: t.gain_cost || undefined,
+      gain_suggested: t.gain_by === 'agent' || undefined,
+      gain_met: t.gain_met || undefined,
       parent_id: t.parent_id || undefined,
       steps_in_order: t.steps_in_order || undefined,
       dropped_at: t.dropped_at || undefined,
@@ -754,7 +766,7 @@ async function stepsTree(api, rootId) {
 
 
 // ---------- perspectives (shared engine: js/perspective-engine.js) ----------
-const RULES_DOC = 'Rules: {"match":"all"|"any"|"none","rules":[...]} where each rule is a group of the same shape or one of: {"type":"flagged"|"inbox"|"available"|"overdue"|"repeating"|"has_notes"|"has_steps"|"is_step"|"untagged"|"no_project"|"has_place"|"has_estimate"}, {"type":"tag","tags":["Phone","Waiting : Hiro"],"sub":true}, {"type":"project","projects":["Click Plumbing"]}, {"type":"folder","folders":["Work"]}, {"type":"date","field":"due"|"planned"|"defer"|"completed"|"added"|"changed","when":"overdue"|"today"|"next"|"past"|"before"|"after"|"any"|"none","days":7,"date":"YYYY-MM-DD"}, {"type":"duration","op":"max"|"min","minutes":15}, {"type":"text","contains":"words"}. Tags, projects and folders may be given by name or id.';
+const RULES_DOC = 'Rules: {"match":"all"|"any"|"none","rules":[...]} where each rule is a group of the same shape or one of: {"type":"flagged"|"inbox"|"available"|"overdue"|"repeating"|"has_notes"|"has_gain"|"has_steps"|"is_step"|"untagged"|"no_project"|"has_place"|"has_estimate"}, {"type":"tag","tags":["Phone","Waiting : Hiro"],"sub":true}, {"type":"project","projects":["Click Plumbing"]}, {"type":"folder","folders":["Work"]}, {"type":"date","field":"due"|"planned"|"defer"|"completed"|"added"|"changed","when":"overdue"|"today"|"next"|"past"|"before"|"after"|"any"|"none","days":7,"date":"YYYY-MM-DD"}, {"type":"duration","op":"max"|"min","minutes":15}, {"type":"text","contains":"words"}. Tags, projects and folders may be given by name or id.';
 const OPTIONS_DOC = 'Display: {"show":"available"|"remaining"|"completed"|"dropped"|"all","group_by":"project"|"folder"|"tag"|"due"|"flagged"|"none","sort_by":"project"|"due"|"planned"|"defer"|"added"|"changed"|"completed"|"duration"|"title","layout":"tree"|"flat"}';
 
 async function perspectiveData(api, needClosed) {
@@ -835,6 +847,9 @@ const TOOLS = [
       properties: {
         title: { type: 'string', description: "What it is, in the user's words" },
         notes: { type: 'string' },
+        gain: { type: 'string', description: 'What doing it gains the user, in their words (one or two sentences). Ask for it; never invent it as theirs — use gain_suggested for your own draft' },
+        gain_suggested: { type: 'boolean', description: 'true when the gain is your suggestion (the app shows "Claude suggested" until the user keeps or edits it)' },
+        gain_cost: { type: 'string', description: 'Optional: what it costs the user not to do it' },
         project: { type: 'string', description: 'Project name or id' },
         parent: { type: 'string', description: 'Id of an open task to make this a step of (it joins that task\'s project; steps go 4 levels deep)' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Labels like "Laptop" or "Waiting : Hiro"; missing tags are created' },
@@ -870,6 +885,8 @@ const TOOLS = [
       if (!title || !String(title).trim()) throw new Error('title is required');
       // Into a project: append at the end (order matters in sequential projects).
       const body = { user_id: api.userId, title: String(title).trim(), notes, source: 'mcp' };
+      if (rest.gain) { body.gain = String(rest.gain).trim().slice(0, 500); body.gain_by = rest.gain_suggested ? 'agent' : null; }
+      if (rest.gain_cost) body.gain_cost = String(rest.gain_cost).trim().slice(0, 500);
       if (rest.project) {
         body.project_id = await api.resolveProject(rest.project);
         const sib = await api.q(`tasks?${api.u}&project_id=eq.${body.project_id}&parent_id=is.null&select=sort&order=sort.desc&limit=1`);
@@ -877,7 +894,12 @@ const TOOLS = [
       }
       const [row] = await api.q('tasks', { method: 'POST', prefer: 'return=representation', body });
       const fields = Object.fromEntries(Object.entries(rest).filter(([k, v]) => ['project', 'parent', 'steps_in_order', 'tags', 'flagged', 'due', 'planned', 'defer', 'estimate_minutes', 'place', 'location_alert', 'location_radius_m', 'repeat', 'notifications', 'energy', 'waiting_on', 'follow_up', 'agenda_for', 'schedule', 'schedule_minutes', 'checklist'].includes(k) && v !== undefined));
-      if (!Object.keys(fields).length) return (await api.shape([row]))[0];
+      if (!Object.keys(fields).length) {
+        // An Inbox capture: where its gain (or title) points, for the user to decide.
+        const [projects, goals, areas] = await Promise.all([api.q(`projects?${api.u}&status=eq.active&select=id,name,status,purpose,outcome,goal_id,area_id`), api.q(`goals?${api.u}&status=eq.active&select=id,title,why,status`), api.q(`areas?${api.u}&archived_at=is.null&select=id,name,standards,archived_at`)]);
+        const fits = placeFor(row, { projects, goals, areas });
+        return { ...(await api.shape([row]))[0], ...(fits.length ? { fits: fits.map((f) => ({ project: f.project.name, project_id: f.project.id, via: f.via === 'project' ? undefined : `${f.via}: ${f.viaName}`, matched: f.word })), next: 'Offer to move it to the project that fits (update_task project), or leave it in the Inbox.' } : {}) };
+      }
       return TOOLS.find((t) => t.name === 'update_task').run(api, { id: row.id, ...fields });
     },
   },
@@ -952,7 +974,7 @@ const TOOLS = [
           const links = await api.q(`task_tags?${api.u}&select=task_id,tag_id`);
           for (const w of words) {
             const e = encodeURIComponent(w);
-            const conds = [`title.ilike.*${e}*`, `notes.ilike.*${e}*`, `completion_note.ilike.*${e}*`];
+            const conds = [`title.ilike.*${e}*`, `notes.ilike.*${e}*`, `gain.ilike.*${e}*`, `completion_note.ilike.*${e}*`];
             const pids = projects.filter((p) => p.name.toLowerCase().includes(w)).map((p) => p.id);
             const tids = new Set(tags.filter((t) => tagLabel(t).toLowerCase().includes(w)).map((t) => t.id));
             const taskIds = [...new Set(links.filter((l) => tids.has(l.tag_id)).map((l) => l.task_id))].slice(0, 300);
@@ -1155,6 +1177,10 @@ const TOOLS = [
         defer: { type: ['string', 'null'], description: 'YYYY-MM-DD (hidden until then) or null' },
         status: { type: 'string', enum: ['open', 'completed', 'dropped'], description: 'Only change when the user says so' },
         completion_note: { type: 'string' },
+        gain: { type: 'string', description: 'What doing it gains the user, in their words (one or two sentences). Ask for it; never invent it as theirs — use gain_suggested for your own draft' },
+        gain_suggested: { type: 'boolean', description: 'true when the gain is your suggestion (the app shows "Claude suggested" until the user keeps or edits it)' },
+        gain_cost: { type: 'string', description: 'What it costs the user not to do it' },
+        gain_met: { type: ['string', 'null'], enum: ['yes', 'partly', 'no', null], description: 'After completing: did the user get the gain?' },
         completed_at: { type: 'string', description: 'When it was completed (ISO time or YYYY-MM-DD), to backdate; implies status completed' },
         dropped_at: { type: 'string', description: 'When it was dropped (ISO time or YYYY-MM-DD), to backdate; implies status dropped' },
         estimate_minutes: { type: ['integer', 'null'], description: 'How long it takes, in minutes; null to clear' },
@@ -1196,6 +1222,9 @@ const TOOLS = [
       if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, api.hours.defer, api.tz);
       if (a.project !== undefined) patch.project_id = await api.resolveProject(a.project);
       if (a.completion_note !== undefined) patch.completion_note = String(a.completion_note).trim();
+      if (a.gain !== undefined) { patch.gain = String(a.gain || '').trim().slice(0, 500); patch.gain_by = a.gain_suggested ? 'agent' : null; }
+      if (a.gain_cost !== undefined) patch.gain_cost = String(a.gain_cost || '').trim().slice(0, 500);
+      if (a.gain_met !== undefined) patch.gain_met = a.gain_met || null;
       if (a.estimate_minutes !== undefined) patch.estimate_minutes = a.estimate_minutes === null ? null : Math.max(0, Math.round(Number(a.estimate_minutes)));
       Object.assign(patch, await api.locationPatch(a));
       if (a.repeat !== undefined) patch.repeat_rule = repeatRule(a.repeat, api.tz, task.repeat_rule);
@@ -1691,6 +1720,8 @@ const TOOLS = [
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
         outcome: { type: 'string', description: 'What done looks like, e.g. "Final inspection passed, paid in full"' },
+        gain: { type: 'string', description: 'What doing it gains the user, in their words (one or two sentences). Ask for it; never invent it as theirs — use gain_suggested for your own draft' },
+        gain_suggested: { type: 'boolean', description: 'true when the gain is your suggestion (the app shows "Claude suggested" until the user keeps or edits it)' },
         area: { type: ['string', 'null'], description: 'Area of focus (name or id); null to remove' },
         goal: { type: ['string', 'null'], description: 'Goal it serves (title or id); null to remove' },
       },
@@ -1742,6 +1773,8 @@ const TOOLS = [
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
         outcome: { type: 'string', description: 'What done looks like, e.g. "Final inspection passed, paid in full"' },
+        gain: { type: 'string', description: 'What doing it gains the user, in their words (one or two sentences). Ask for it; never invent it as theirs — use gain_suggested for your own draft' },
+        gain_suggested: { type: 'boolean', description: 'true when the gain is your suggestion (the app shows "Claude suggested" until the user keeps or edits it)' },
         area: { type: ['string', 'null'], description: 'Area of focus (name or id); null to remove' },
         goal: { type: ['string', 'null'], description: 'Goal it serves (title or id); null to remove' },
       },
@@ -2102,6 +2135,7 @@ async function availableTasks(api) {
 TOOLS.push(...planTools({ projectOut }));
 TOOLS.push(...checklistTools({ localDate }));
 TOOLS.push(...settleTools({ OPEN, zonedToIso, localDate }));
+TOOLS.push(...gainsTools({ OPEN, localDate }));
 TOOLS.push(...dailyTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
@@ -2158,7 +2192,7 @@ function projectOut(api, p, folders = []) {
   return {
     id: p.id, name: p.name, status: p.status, kind: p.kind, complete_with_last: p.complete_with_last, flagged: p.flagged,
     notes: p.notes || undefined,
-    outcome: p.outcome || undefined, purpose: p.purpose || undefined, principles: p.principles ? p.principles.split('\n').filter(Boolean) : undefined, area_id: p.area_id || undefined, goal_id: p.goal_id || undefined,
+    outcome: p.outcome || undefined, gain: p.purpose || undefined, gain_suggested: p.purpose_by === 'agent' || undefined, principles: p.principles ? p.principles.split('\n').filter(Boolean) : undefined, area_id: p.area_id || undefined, goal_id: p.goal_id || undefined,
     folder: (folders.find((f) => f.id === p.folder_id) || {}).name || null,
     defer: localDate(p.defer_at, api.tz), planned: localDate(p.planned_at, api.tz), due: localDate(p.due_at, api.tz),
     estimate_minutes: p.estimate_minutes ?? undefined,

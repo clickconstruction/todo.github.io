@@ -4,7 +4,7 @@
 //
 // rules   = { v: 1, match: 'all' | 'any' | 'none', rules: [rule | group, …] }
 // group   = { match: 'all' | 'any' | 'none', rules: [...] }
-// rule    = { type: 'flagged' | 'inbox' | 'available' | 'overdue' | 'repeating' | 'has_notes'
+// rule    = { type: 'flagged' | 'inbox' | 'available' | 'overdue' | 'repeating' | 'has_notes' | 'has_gain'
 //                  | 'has_steps' | 'is_step' | 'untagged' | 'no_project' | 'has_place' | 'has_estimate'
 //                  | 'on_hold' (parked by an on-hold tag: its own, its project's or a parent task's) }
 //         | { type: 'tag', tags: [id], sub: true }            any of these tags (sub-tags and project tags count)
@@ -25,7 +25,7 @@ export const DEFAULT_OPTIONS = { show: 'available', group_by: 'project', sort_by
 
 export const FLAG_RULES = [
   ['flagged', 'Flagged'], ['available', 'Available now'], ['overdue', 'Overdue'], ['inbox', 'In the Inbox'],
-  ['repeating', 'Repeating'], ['has_notes', 'Has notes'], ['has_steps', 'Has steps'], ['is_step', 'Is a step'],
+  ['repeating', 'Repeating'], ['has_notes', 'Has notes'], ['has_gain', 'Has a gain'], ['has_steps', 'Has steps'], ['is_step', 'Is a step'],
   ['untagged', 'Has no tags'], ['no_project', 'Not in a project'], ['has_place', 'Has a place'], ['has_estimate', 'Has a duration'],
   ['on_hold', 'On hold (tag)'], ['waiting', 'Waiting on someone'],
 ];
@@ -146,6 +146,7 @@ function matchRule(rule, t, c) {
     case 'overdue': return isOpen(t) && !!t.due_at && dayKey(t.due_at, c.tz) < c.today;
     case 'repeating': return !!t.repeat_rule;
     case 'has_notes': return !!(t.notes && t.notes.trim());
+    case 'has_gain': return !!(t.gain && t.gain.trim());
     case 'has_steps': return c.hasKids.has(t.id);
     case 'is_step': return !!t.parent_id;
     case 'untagged': return !(c.tagsOfTask.get(t.id) || []).length;
@@ -173,7 +174,7 @@ function matchRule(rule, t, c) {
       return rule.op === 'min' ? t.estimate_minutes >= m : t.estimate_minutes <= m;
     }
     case 'text': {
-      const hay = `${t.title || ''} ${t.notes || ''}`.toLowerCase();
+      const hay = `${t.title || ''} ${t.notes || ''} ${t.gain || ''}`.toLowerCase();
       return String(rule.contains || '').toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
     }
     default:

@@ -1,0 +1,23 @@
+-- What do I gain? (migration 20261013000001). One rolled-back transaction; every row should be ok = true.
+begin;
+insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000f4','00000000-0000-0000-0000-000000000000','authenticated','authenticated','gain@test.invalid');
+create temp table r (n int generated always as identity, test text, ok boolean, detail text); grant all on r to authenticated;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000f4","role":"authenticated"}', true);
+insert into public.tasks (id, title, gain, gain_cost, gain_by, due_at, repeat_rule) values ('00000000-0000-0000-0000-00000000e001', 'Weekly truck check', 'No roadside breakdowns', 'A tow and a lost day', 'agent', '2026-10-01T22:00:00Z', '{"every":1,"unit":"week","from":"assigned","n":1,"tz":"America/Chicago"}');
+insert into public.tasks (id, title) values ('00000000-0000-0000-0000-00000000e002', 'Plain');
+insert into r (test, ok, detail) select 'defaults: gain empty, 0 skips, nothing met', gain = '' and gain_cost = '' and clarify_skips = 0 and gain_met is null and gain_by is null, '' from public.tasks where id = '00000000-0000-0000-0000-00000000e002';
+update public.tasks set completed_at = now(), gain_met = 'yes' where id = '00000000-0000-0000-0000-00000000e001';
+insert into r (test, ok, detail) select 'repeat: the next occurrence keeps the gain', gain = 'No roadside breakdowns' and gain_cost = 'A tow and a lost day' and gain_by = 'agent' and gain_met is null, coalesce(gain, '∅') from public.tasks where title = 'Weekly truck check' and completed_at is null;
+update public.tasks set gain = 'Two crews on Fridays' where id = '00000000-0000-0000-0000-00000000e002';
+insert into r (test, ok, detail) select 'history records a gain change', exists (select 1 from public.item_history where task_id = '00000000-0000-0000-0000-00000000e002' and field = 'gain'), '';
+do $$ begin update public.tasks set gain_met = 'maybe' where id = '00000000-0000-0000-0000-00000000e002'; insert into r (test, ok) values ('gain_met only yes/partly/no', false);
+exception when others then insert into r (test, ok, detail) values ('gain_met only yes/partly/no', true, sqlerrm); end $$;
+do $$ begin update public.tasks set gain = repeat('x', 501) where id = '00000000-0000-0000-0000-00000000e002'; insert into r (test, ok) values ('gain at most 500 characters', false);
+exception when others then insert into r (test, ok, detail) values ('gain at most 500 characters', true, sqlerrm); end $$;
+insert into public.projects (id, name, purpose, purpose_by) values ('00000000-0000-0000-0000-00000000e101', 'Fleet', 'Crews never wait', 'agent');
+update public.projects set purpose = 'Crews never wait for a trailer', purpose_by = null where id = '00000000-0000-0000-0000-00000000e101';
+insert into r (test, ok, detail) select 'project gain (purpose) history, suggestion kept', exists (select 1 from public.item_history where project_id = '00000000-0000-0000-0000-00000000e101' and field = 'purpose') and (select purpose_by is null from public.projects where id = '00000000-0000-0000-0000-00000000e101'), '';
+reset role;
+select count(*) filter (where ok) as passed, count(*) as total, string_agg(case when not ok then test || ': ' || coalesce(detail, '') end, '; ') as failed from r;
+rollback;

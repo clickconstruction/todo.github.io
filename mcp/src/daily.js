@@ -58,7 +58,7 @@ export function dailyTools({ OPEN, localDate, zonedToIso, availableTasks, calend
         scheduled: (await api.shape(open.filter((t) => t.scheduled_at && localDate(t.scheduled_at, api.tz) === today))).map((t) => ({ id: t.id, title: t.title, at: t.scheduled.at, minutes: t.scheduled.minutes })),
         must_dos: { due: await api.shape(due), follow_ups: await api.shape(follow), from_tickler: await api.shape(tickler), inbox_count: inbox },
         focus: focus.map((t) => ({ id: t.id, title: t.title, status: t.status })),
-        suggestions: sugg.map(({ t, reasons }) => ({ ...shapedS.get(t.id), why: reasons.map((x) => x.text) })),
+        suggestions: sugg.map(({ t, reasons, gain }) => ({ ...shapedS.get(t.id), why: reasons.map((x) => x.text), ...(gain ? { gain } : {}) })),
         note: 'Up to 3 focus items (action focus with ids).',
       };
     },

@@ -76,11 +76,14 @@ export function healthHints(p) {
 // "Done looks like…", or a nudge to write it (the Natural Planning Model's outcome).
 export const outcomeLine = (p) => (String(p.outcome || '').trim() ? `<p class="outcome-line">🎯 <span class="hint">Done looks like</span> ${esc(p.outcome)}</p>` : p.status === 'active' ? `<p class="outcome-line missing"><button class="link-btn" data-edit-project="${p.id}">🎯 What does done look like?</button></p>` : '');
 
-// Why (purpose) and principles, from Plan it.
-export const whyBox = (p) => {
+// What I gain (the purpose, from Plan it or the editor) and principles. In the review, an active
+// project with no stated gain gets a nudge to write one.
+export const whyBox = (p, { nudge = false } = {}) => {
   const lines = String(p.principles || '').split('\n').filter((l) => l.trim());
-  if (!String(p.purpose || '').trim() && !lines.length) return '';
-  return `<div class="plan-why">${p.purpose ? `<p><span class="hint">Why</span> ${esc(p.purpose)}</p>` : ''}${lines.length ? `<p class="plan-principles">${lines.map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</p>` : ''}</div>`;
+  if (!String(p.purpose || '').trim() && !lines.length) {
+    return nudge && p.status === 'active' ? `<p class="outcome-line missing"><button class="link-btn" data-edit-project="${p.id}">✦ What do I gain from this?</button></p>` : '';
+  }
+  return `<div class="plan-why">${p.purpose ? `<p><span class="hint">✦ What I gain</span> <span class="gain-text">${esc(p.purpose)}</span>${p.purpose_by === 'agent' ? ' <span class="chip sug">Claude suggested</span>' : ''}</p>` : ''}${lines.length ? `<p class="plan-principles">${lines.map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</p>` : ''}</div>`;
 };
 
 // Back to the Weekly Review when this is its Projects step.
@@ -120,7 +123,7 @@ export function viewReview(which) {
     <div class="view-head"><h2 class="review-title"><a href="#project/${p.id}">${p.flagged ? '<span class="meta-flag">⚑</span> ' : ''}${esc(p.name)}</a></h2>
       <button class="btn small" data-edit-project="${p.id}">Edit</button></div>
     ${outcomeLine(p)}
-    ${whyBox(p)}
+    ${whyBox(p, { nudge: true })}
     ${hints.length ? `<ul class="hints">${hints.map((h) => `<li class="hint-${h.level}"><span>${esc(h.text)}</span>
       <span class="hint-fixes">${h.fixes.map(([act, label]) => `<button class="btn small" data-review-fix="${act}" data-project="${p.id}">${label}</button>`).join('')}</span></li>`).join('')}</ul>` : '<p class="hints-ok">✓ Looks healthy: it has a next action and nothing is overdue.</p>'}
     <div class="review-props">

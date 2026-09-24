@@ -1149,3 +1149,24 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .st-folder { margin-top: 10px; }
 .import-row .st-btns { flex-shrink: 0; }
 a.btn { text-decoration: none; }
+
+/* What do I gain? */
+.gain-field { margin: 4px 0 8px; }
+.gain-field label { display: grid; gap: 2px; }
+.gain-label { font-size: 13px; color: var(--muted); }
+.gain-field textarea, .gain-quick input, .gain-card input { font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif; font-size: 16px; font-weight: 400; resize: none; overflow: hidden; }
+.gain-quick { display: grid; gap: 2px; margin-top: 8px; }
+.gain-inherit, .gain-sug { margin: 4px 0 0; font-size: 13px; }
+.gain-text, .row-gain, .cl-gain, .st-gain { font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif; }
+.gain-cost { margin-top: 4px; font-size: 13px; }
+.gain-cost summary { color: var(--muted); cursor: pointer; }
+.gain-cost textarea { width: 100%; margin-top: 4px; }
+.row-gain { font-size: 13px; color: var(--muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.sug { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-family: inherit; }
+.gain-card { display: grid; gap: 2px; margin: 8px 0 0; }
+.gain-card input { width: 100%; }
+.gain-weak { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.gain-met { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.chip-radio { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 14px; cursor: pointer; }
+.chip-radio:has(input:checked) { border-color: var(--accent); color: var(--accent); }
+.gain-field textarea, .gain-quick input, .gain-card input, .gain-cost textarea { color: var(--text); min-height: 44px; }

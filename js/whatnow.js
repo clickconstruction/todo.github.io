@@ -33,12 +33,15 @@ export function rankNow(tasks, { now = new Date(), endOfToday, minutes = 0, ener
     if (t.planned_at && new Date(t.planned_at) <= end && !t.scheduled_at) { score += 300; reasons.push({ kind: 'planned', text: 'planned today' }); }
     const goal = liveGoals.get((projectById.get(t.project_id) || {}).goal_id);
     if (goal) { score += 150; reasons.push({ kind: 'goal', text: `serves: ${goal.title}` }); }
+    // A stated gain: you've said why it's worth doing (your own counts more than the project's).
+    const gain = t.gain || (projectById.get(t.project_id) || {}).purpose || '';
+    if (t.gain) score += 120; else if (gain) score += 40;
     const age = Math.floor((new Date(now) - new Date(t.created_at || now)) / DAY);
     score += Math.min(age, 100);
     if (age >= 14) reasons.push({ kind: 'age', text: age >= 60 ? `waiting ${Math.round(age / 30)} months` : `waiting ${Math.round(age / 7)} weeks` });
     if (due && due > end && due - end < 3 * DAY) reasons.push({ kind: 'soon', text: 'due soon' });
     if (t.estimate_minutes) reasons.push({ kind: 'time', text: t.estimate_minutes >= 60 ? `${Math.round(t.estimate_minutes / 6) / 10} h` : `${t.estimate_minutes} min` });
-    return { t, score, reasons };
+    return { t, score, reasons, gain };
   });
   // Ties: shorter first (more likely to fit), then older.
   scored.sort((a, b) => (b.score - a.score) || ((a.t.estimate_minutes || 999) - (b.t.estimate_minutes || 999)) || String(a.t.created_at).localeCompare(String(b.t.created_at)));

@@ -4,6 +4,7 @@
 import { db, app, sb, run, byId, syncRow, toast, isOpen, tagsFor } from './state.js';
 import { waitingRule } from './availability.js';
 import { startOfToday, addDays, isDeferred } from './dates.js';
+import { placeFor } from './gain.js';
 import { saveTask } from './data.js';
 
 export const ENERGY = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
@@ -166,7 +167,7 @@ const STOP = new Set(['the', 'a', 'an', 'and', 'or', 'for', 'to', 'of', 'on', 'i
 const words = (s) => String(s || '').toLowerCase().match(/[a-z0-9]{3,}/g)?.filter((w) => !STOP.has(w)) || [];
 export function suggestFor(t) {
   const mine = new Set(words(t.title));
-  if (!mine.size) return null;
+  if (!mine.size && !t.gain) return null;
   const votes = new Map(); const tagVotes = new Map();
   db.tasks.forEach((x) => {
     if (x.id === t.id || x.in_inbox || !x.project_id) return;
@@ -176,7 +177,10 @@ export function suggestFor(t) {
     tagsFor(x.id).forEach((g) => tagVotes.set(g.id, (tagVotes.get(g.id) || 0) + overlap));
   });
   const best = [...votes.entries()].sort((a, b) => b[1] - a[1])[0];
-  if (!best) return null;
+  if (!best) { // nothing similar yet: where its gain (or title) points
+    const [p] = placeFor(t, { projects: db.projects, goals: db.goals || [], areas: db.areas || [] }, { limit: 1 });
+    return p ? { project: byId(db.projects, p.project.id), tags: [], via: p } : null;
+  }
   const project = byId(db.projects, best[0]);
   if (!project || !['active', 'on_hold'].includes(project.status)) return null;
   const tags = [...tagVotes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id]) => byId(db.tags, id)).filter(Boolean);

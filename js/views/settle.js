@@ -177,13 +177,18 @@ function cardsHtml(id, kind, arg) {
     const next = openA.filter((t) => !t.parent_id).sort((a, b) => (a.sort - b.sort))[0];
     card = `<div class="st-cardbig"><span class="hint">${f ? `📁 ${esc(f.name)}` : 'No folder'}</span><h2>${esc(p.name)}</h2>
       <p class="hint">${openA.length} action${openA.length === 1 ? '' : 's'}${last ? ` · last activity ${esc(fmtDate(new Date(last).toISOString()))}` : ''} · ${p.status === 'on_hold' ? 'on hold now' : 'active now'}</p>
-      ${next ? `<p>Next: <b>${esc(next.title)}</b></p>` : ''}</div>
+      ${next ? `<p>Next: <b>${esc(next.title)}</b></p>` : ''}
+      <label class="gain-card"><span class="gain-label"><span aria-hidden="true">✦</span> What do I gain from this project?</span>
+        <input type="text" data-st-gain="${p.id}" data-kind="project" value="${esc(p.purpose || '')}" maxlength="500" placeholder="Say it in one line, or skip" autocomplete="off"></label></div>
       ${f ? `<p class="hint st-folder">Whole folder “${esc(f.name)}”: <button class="link-btn" data-settle="folder" data-id="${id}" data-folder="${f.id}" data-status="active">all Active</button> · <button class="link-btn" data-settle="folder" data-id="${id}" data-folder="${f.id}" data-status="on_hold">all On hold</button></p>` : ''}`;
   } else {
     const t = byId(db.tasks, cur);
     const p = t.project_id && byId(db.projects, t.project_id);
     card = `<div class="st-cardbig"><span class="hint">${p ? `🗂 ${esc(p.name)}` : 'No project'} · ${esc(age(t))} old${t.due_at ? ` · due ${esc(fmtDate(t.due_at))}` : ''}</span><h2>${esc(t.title)}</h2>
-      ${t.notes ? `<p class="hint st-notes">${esc(t.notes.slice(0, 280))}${t.notes.length > 280 ? '…' : ''}</p>` : ''}</div>`;
+      ${t.notes ? `<p class="hint st-notes">${esc(t.notes.slice(0, 280))}${t.notes.length > 280 ? '…' : ''}</p>` : ''}
+      <label class="gain-card"><span class="gain-label"><span aria-hidden="true">✦</span> What do I gain if I do it?</span>
+        <input type="text" data-st-gain="${t.id}" data-kind="task" value="${esc(t.gain || '')}" maxlength="500" placeholder="Say it in one line, or skip" autocomplete="off"></label>
+      ${t.gain ? '' : '<p class="hint">Can’t say what you gain? That’s usually a Someday.</p>'}</div>`;
   }
   return `<a class="back" href="#settle/${id}/${back}">‹ Back</a>
     <div class="view-head"><h1 class="settle">One by one</h1><span class="cl-count">${n(q.length)} left${done ? ` · ${done} sorted` : ''}</span></div>
@@ -257,3 +262,20 @@ export function settleKey(e) {
   if (e.key === 'u') { e.preventDefault(); cardUndo(); return true; }
   return false;
 }
+
+// The gain on a card saves as you leave the field (Enter too). Keys 1–4 don't fire while typing.
+document.addEventListener('change', async (e) => {
+  const el = e.target.closest && e.target.closest('[data-st-gain]');
+  if (!el) return;
+  const isTask = el.dataset.kind === 'task';
+  const row = byId(isTask ? db.tasks : db.projects, el.dataset.stGain);
+  if (!row) return;
+  const text = el.value.trim().slice(0, 500);
+  if (text === ((isTask ? row.gain : row.purpose) || '')) return;
+  const [saved] = await run(sb.from(isTask ? 'tasks' : 'projects').update(isTask ? { gain: text, gain_by: null } : { purpose: text, purpose_by: null }).eq('id', row.id).select());
+  syncRow(isTask ? 'tasks' : 'projects', row, saved);
+});
+document.addEventListener('keydown', (e) => {
+  const el = e.target.closest && e.target.closest('[data-st-gain]');
+  if (el && e.key === 'Enter') { e.preventDefault(); el.blur(); }
+});

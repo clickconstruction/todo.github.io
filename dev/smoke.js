@@ -40,7 +40,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -55,6 +55,85 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// What do I gain?: asked at capture, placed by it, shown and used everywhere, checked after completing.
+async function gains(check) {
+  const { db, app } = await import('/js/state.js');
+  const now = new Date().toISOString();
+  T().projects.push({ ...T().projects[0], id: 'pgF', name: 'Fleet and equipment', purpose: 'Trailers and trucks ready so crews never wait', purpose_by: null, status: 'active', folder_id: null, sort: 40, created_at: now, updated_at: now });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  // Quick entry: a gain line, then the offer to move it where it fits.
+  const { openQuickEntry } = await import('/js/editors/task.js');
+  openQuickEntry(); await wait(80);
+  check('quick entry asks what you gain (optional)', !!$('#sheet [name=gain]') && has('#sheet', 'what do i gain?'));
+  $('#sheet [name=title]').value = 'Get a quote on a second trailer';
+  $('#sheet [name=gain]').value = 'Run two crews on Fridays without renting';
+  $('#quick').requestSubmit(); await until(() => byTitle('Get a quote on a second trailer'));
+  const q = byTitle('Get a quote on a second trailer');
+  check('saved with its gain, in the Inbox', q && q.gain === 'Run two crews on Fridays without renting' && q.in_inbox && !q.gain_by);
+  await until(() => has('#toast', 'fits'));
+  check('the gain points to a project: “it fits”, one tap to move', has('#toast', 'it fits', 'fleet and equipment') && $$('#toast button').some((b) => b.textContent === '→ Fleet and equipment'), text('#toast'));
+  $$('#toast button').find((b) => b.textContent === '→ Fleet and equipment').click();
+  await until(() => byTitle('Get a quote on a second trailer').project_id === 'pgF');
+  check('Move puts it in the project, out of the Inbox', byTitle('Get a quote on a second trailer').project_id === 'pgF' && !byTitle('Get a quote on a second trailer').in_inbox);
+  openQuickEntry(); await wait(80);
+  $('#sheet [name=title]').value = 'Price a van rack → no more ladder runs';
+  $('#quick').requestSubmit(); await until(() => byTitle('Price a van rack'));
+  check('“Idea → gain” in the title works too', byTitle('Price a van rack').gain === 'no more ladder runs');
+  // Rows and the editor.
+  await go('#project/pgF');
+  check('rows show the gain under the title', has('.row-gain', 'run two crews on fridays'));
+  const qa = byTitle('Get a quote on a second trailer');
+  $(`[data-task="${qa.id}"] .row-title`).click(); await wait(150);
+  check('editor: the gain sits under the title, with “…and if I don’t?”', $('#sheet [name=gain]').value === 'Run two crews on Fridays without renting' && !!$('#sheet .gain-cost'));
+  $('#sheet [name=gain_cost]').value = 'Rent a trailer every Friday';
+  $('#editor').requestSubmit(); await until(() => byTitle('Get a quote on a second trailer').gain_cost);
+  check('the cost of not doing it saves', byTitle('Get a quote on a second trailer').gain_cost === 'Rent a trailer every Friday');
+  // Inherited, and Claude's suggestion kept.
+  T().tasks.push({ ...T().tasks[0], id: 'tgI', title: 'Grease the trailer hitch', project_id: 'pgF', parent_id: null, in_inbox: false, gain: '', gain_by: null, completed_at: null, dropped_at: null, sort: 9, created_at: now, updated_at: now });
+  T().tasks.push({ ...T().tasks[0], id: 'tgS', title: 'Order ratchet straps', project_id: 'pgF', parent_id: null, in_inbox: false, gain: 'Loads stay put on the highway', gain_by: 'agent', completed_at: null, dropped_at: null, sort: 10, created_at: now, updated_at: now });
+  await loadAll(); await go('#inbox'); await go('#project/pgF');
+  check('Claude’s suggestion is marked in the row', has(`[data-task="tgS"]`, 'claude suggested'));
+  $('[data-task="tgI"] .row-title').click(); await wait(150);
+  check('no gain of its own: shows the project’s', has('#sheet .gain-inherit', 'trailers and trucks ready'));
+  $('#sheet [data-cancel]').click(); await wait(50);
+  $('[data-task="tgS"] .row-title').click(); await wait(150);
+  $('#sheet [data-gain-keep]').click(); $('#editor').requestSubmit(); await until(() => T().tasks.find((t) => t.id === 'tgS').gain_by === null);
+  check('Keep makes the suggestion yours', T().tasks.find((t) => t.id === 'tgS').gain_by === null && T().tasks.find((t) => t.id === 'tgS').gain === 'Loads stay put on the highway');
+  // Completing asks whether you got it.
+  $(`[data-check="tgS"]`).click(); await until(() => has('#toast', 'did you gain it?'));
+  check('completing an item with a gain asks “Did you gain it?”', has('#toast', 'did you gain it?'), text('#toast'));
+  $$('#toast button').find((b) => b.textContent === 'Did you gain it?').click(); await wait(100);
+  $('#sheet [name=gain_met][value=partly]').click();
+  $('#done-note').requestSubmit(); await until(() => T().tasks.find((t) => t.id === 'tgS').gain_met);
+  check('the answer is kept (partly)', T().tasks.find((t) => t.id === 'tgS').gain_met === 'partly');
+  // Clarify: add a gain; a gainless item skipped 3 times is offered Someday or Drop.
+  T().tasks.push({ ...T().tasks[0], id: 'tgW', title: 'Research drone mapping', project_id: null, parent_id: null, in_inbox: true, gain: '', clarify_skips: 3, completed_at: null, dropped_at: null, sort: -99, created_at: '2020-01-01T00:00:00Z', updated_at: now });
+  await loadAll(); app.clarify = null;
+  await go('#clarify');
+  while ($('.cl-item b') && $('.cl-item b').textContent !== 'Research drone mapping') { $('[data-clarify="skip"]').click(); await wait(80); }
+  check('weak idea: no gain, skipped 3 times → Someday or Drop', has('.gain-weak', 'skipped this 3 times') && !!$('.gain-weak [data-clarify="someday"]') && !!$('.gain-weak [data-clarify="trash"]'));
+  const gi = $('[data-cl-gain]'); gi.value = 'Faster site surveys'; gi.dispatchEvent(new Event('change', { bubbles: true }));
+  await until(() => T().tasks.find((t) => t.id === 'tgW').gain);
+  check('a gain written in Clarify saves', T().tasks.find((t) => t.id === 'tgW').gain === 'Faster site surveys' && !$('.gain-weak'));
+  const before = T().tasks.find((t) => t.id === 'tgW').clarify_skips;
+  $('[data-clarify="skip"]').click(); await until(() => T().tasks.find((t) => t.id === 'tgW').clarify_skips > before);
+  check('Skip is counted on the item', T().tasks.find((t) => t.id === 'tgW').clarify_skips === before + 1);
+  // Perspectives and search.
+  const { evaluate } = await import('/js/perspective-engine.js');
+  const { perspectiveData } = await import('/js/perspectives.js');
+  const withGain = evaluate({ rules: { match: 'all', rules: [{ type: 'has_gain' }] }, options: { show: 'remaining' } }, perspectiveData(), { available: () => true }).tasks.map((t) => t.id);
+  check('perspective rule: has a gain', withGain.includes('tgW') && !withGain.includes('tgI'), withGain.join());
+  await go('#search'); const si = $('#view input[type=search], #view input'); si.value = 'site surveys'; si.dispatchEvent(new Event('input', { bubbles: true }));
+  await until(() => has(undefined, 'research drone mapping'));
+  check('search finds words in a gain', has(undefined, 'research drone mapping'));
+  // Project editor: the gain is the purpose.
+  const { openProjectEditor } = await import('/js/editors/project.js');
+  openProjectEditor(db.projects.find((p) => p.id === 'pgF')); await wait(120);
+  check('project editor: “What do I gain?” is the purpose', $('#sheet [name=purpose]') && $('#sheet [name=purpose]').value === 'Trailers and trucks ready so crews never wait');
+  $('#sheet [data-cancel]') && $('#sheet [data-cancel]').click();
+}
 
 // Settle in: sorting what an import brought, in bulk, each choice with an Undo.
 async function settleIn(check) {
@@ -97,10 +176,14 @@ async function settleIn(check) {
   // One by one
   await go('#settle/im1/cards/old/1y');
   check('card: one old action, with its project and age', has(undefined, 'one by one', 'last year thing', 'kitchen remodel', '1 left') && $$('[data-settle="card"]').length === 4);
+  check('card asks what you gain, with the Someday hint', !!$('[data-st-gain]') && has(undefined, 'usually a someday'));
   key('4'); await until(() => has(undefined, 'all sorted'));
   check('key 4 drops it (never deleted)', !!byTitle('Last year thing').dropped_at);
   key('u'); await until(() => !byTitle('Last year thing').dropped_at && has(undefined, 'last year thing'));
   check('u undoes the last card', !byTitle('Last year thing').dropped_at && has(undefined, 'last year thing'));
+  const sg = $('[data-st-gain]'); sg.value = 'Room for the new trailer'; sg.dispatchEvent(new Event('change', { bubbles: true }));
+  await until(() => byTitle('Last year thing').gain);
+  check('a gain written on the card saves', byTitle('Last year thing').gain === 'Room for the new trailer');
   // Big projects
   await go('#settle/im1/big');
   check('big project card', has(undefined, 'big backlog', '105 open', 'keep 20 newest', 'park project', 'sort actions'));

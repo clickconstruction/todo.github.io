@@ -80,7 +80,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   const addSub = kids.length && isOpen(t) ? `<button class="icon-btn add-sub" data-add-sub="${t.id}" aria-label="Add a step to ${esc(t.title)}" title="Add a step">＋</button>` : '';
   return `<li class="row ${cls} ${kids.length ? 'group' : ''}" data-task="${t.id}" style="--depth:${hierarchy ? depth : 0}">
     ${toggle}<button class="${checkCls}" data-check="${t.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>
-    <div class="row-main"><div class="row-title">${esc(t.title)}</div>${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}${prog}</div>
+    <div class="row-main"><div class="row-title">${esc(t.title)}</div>${t.gain && !done ? `<div class="row-gain">→ ${esc(t.gain)}${t.gain_by === 'agent' ? ' <span class="chip sug">Claude suggested</span>' : ''}</div>` : ''}${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}${prog}</div>
     <span class="row-signals">${t.notes ? '<span class="sig-note" title="Has notes" aria-label="Has notes">📝</span>' : ''}
       ${isOpen(t) ? `<button class="flag-btn ${t.flagged ? 'on' : ''}" data-flag="${t.id}" aria-pressed="${!!t.flagged}" aria-label="${t.flagged ? 'Unflag' : 'Flag'}" title="${t.flagged ? 'Unflag' : 'Flag'}">⚑</button>` : ''}</span>
     ${handles}${reorder ? '' : addSub}${extra}
