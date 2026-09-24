@@ -1284,15 +1284,12 @@ body.update-ready #more-tab::after { content: ''; position: absolute; top: 8px; 
 /* Full Review: one card at a time, full screen */
 body.fr-mode .tabs, body.fr-mode .fab, body.fr-mode .search-fab, body.fr-mode .inspector { display: none !important; }
 body.fr-mode .view { margin-left: auto !important; margin-right: auto !important; max-width: 640px; }
-.fr-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.fr-head > div { flex: 1; min-width: 0; }
-@media (max-width: 520px) {
-  .fr-head { flex-wrap: wrap; }
-  .fr-head > div { flex: 1 1 calc(100% - 48px); }
-  .fr-close { order: 1; }
-  .fr-pres { order: 2; }
-  .fr-copy { order: 3; margin-left: auto; }
-}
+/* Two lines at every width: title and progress (with ✕), then Claude's status and the prompt button. */
+.fr-head { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 6px; margin-bottom: 8px; }
+.fr-head > div { flex: 1 1 calc(100% - 48px); min-width: 0; }
+.fr-close { order: 1; }
+.fr-pres { order: 2; flex: 1 1 auto; min-width: 0; }
+.fr-copy { order: 3; margin-left: auto; }
 .fr-pres { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
 .fr-pres i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
 .fr-pres.on { color: var(--text); }
@@ -1429,3 +1426,4 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .fr-steps, .sg-steps { margin: 4px 0 0; padding-left: 20px; font-size: .88rem; }
 .fr-steps li, .sg-steps li { margin: 1px 0; }
 .fr-edit kbd { opacity: .6; font-size: .72rem; }
+@media (max-width: 520px) { .fr-btns2 kbd, .fr-edit kbd { display: none; } }
