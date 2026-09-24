@@ -28,6 +28,8 @@ import { checklistAction, checklistChange } from './views/checklists.js';
 import { dailyAction, dailySubmit } from './views/daily.js';
 import { settleAction, settleKey } from './views/settle.js';
 import { moreSheetHtml, openCustomize } from './sidebar.js';
+import { initUpdates, resumeAfterUpdate, tryApply } from './updates.js';
+import { importBusy } from './views/import.js';
 import { newFeedLink } from './views/settings.js';
 import { createToken, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
@@ -254,7 +256,8 @@ $('#more-tab').onclick = () => {
   const badges = { waiting: waiting ? ` <b class="badge due inline">${waiting}</b>` : '', someday: some ? ` <span class="hint">${some}</span>` : '', weekly: due ? ` <b class="badge review inline">${due}</b>` : '', nearby: here ? ` <b class="badge here inline">${here}</b>` : '' };
   const perspectives = livePerspectives().filter((p) => p.pinned !== false).map((p) => { const n = badgeCount(p); return [`#perspective/${p.id}`, esc(p.icon), `${esc(p.name)}${n ? ` <b class="badge persp inline">${n}</b>` : ''}`]; });
   const focusLine = `<button type="button" class="btn focus-more" data-act="focus">🎯 ${getFocus() ? `Focused on ${esc(focusLabel())} · change` : 'Focus'}</button>`;
-  const sheet = openSheet(moreSheetHtml({ badges, perspectives, focusLine }));
+  const sheet = openSheet(moreSheetHtml({ badges, perspectives, focusLine: `${document.body.classList.contains('update-ready') ? '<button type="button" class="btn primary update-more" data-update-now>Update ready · Reload</button>' : ''}${focusLine}` }));
+  const up = sheet.querySelector('[data-update-now]'); if (up) up.onclick = () => { sheet.close(); tryApply('manual'); };
   sheet.querySelectorAll('[data-more-link]').forEach((a) => { a.onclick = () => sheet.close(); });
   sheet.showModal();
 };
@@ -320,6 +323,7 @@ async function showApp(session) {
   await loadAll();
   await flushOutbox();
   render();
+  resumeAfterUpdate(); // back where you were if an update just reloaded the page
   noticeEmailPeople();
   startWatching(); // only if location was already allowed; never prompts on launch
   primeAlerts();
@@ -352,21 +356,8 @@ if (!sb) {
 }
 
 // The shell is served cache-first, so skip the worker on localhost to keep edits visible while developing.
-// When a new version activates, reload (or offer to, if the user is mid-edit) so nobody runs a stale app.
-const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-if ('serviceWorker' in navigator && !isLocal) {
-  const hadController = !!navigator.serviceWorker.controller;
-  navigator.serviceWorker.register('sw.js').then((reg) => {
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
-  }).catch(() => {});
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadController) return; // first install, nothing stale to replace
-    const inspector = $('#inspector');
-    const busy = $('#sheet').open || typing() || (inspector && inspector.contains(document.activeElement));
-    if (busy) toast('Todo Tooling updated', { label: 'Reload', run: () => location.reload() });
-    else location.reload();
-  });
-}
+// New versions: downloaded in the background, switched to at a safe moment (js/updates.js).
+initUpdates({ importBusy });
 
 // ⋯ menus close after a choice, or when you click elsewhere.
 document.addEventListener('click', (e) => {

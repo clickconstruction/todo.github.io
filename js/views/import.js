@@ -202,3 +202,5 @@ document.addEventListener('change', (e) => {
 });
 
 export const resetImport = () => { reset(); S.imports = null; };
+// Checking or importing: work in memory that a reload would cut off (a preview is cheap to redo).
+export const importBusy = () => ['checking', 'importing'].includes(S.step);

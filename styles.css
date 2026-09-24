@@ -1274,3 +1274,9 @@ select.status-chip { width: auto; padding: 3px 26px 3px 10px; border-radius: 999
 h2.section-title { scroll-margin-top: 16px; }
 .fc-notes .fc-banner { gap: 4px; white-space: pre-wrap; }
 .fc-notes .fc-now { color: var(--accent); font-weight: 600; }
+/* Update ready (only if it was never safe to switch on its own) */
+.nav-update { display: none; }
+@media (min-width: 900px) { .nav-foot .nav-update:not([hidden]) { display: block; margin-top: 6px; padding: 7px 10px; border: none; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; } }
+body.update-ready #more-tab { position: relative; }
+body.update-ready #more-tab::after { content: ''; position: absolute; top: 8px; left: calc(50% + 8px); width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.more-sheet .update-more { width: 100%; margin-bottom: 8px; justify-content: center; }

@@ -1,7 +1,11 @@
 // App-shell service worker: precache the shell, serve it cache-first, and
 // leave Supabase API traffic to the network. Bump VERSION on every deploy
 // that changes a shell file so clients pick up the new copy.
-const VERSION = 'v54';
+// A new version installs in the background and waits; the page switches to it at a safe moment
+// (js/updates.js sends SKIP_WAITING). MIN_VERSION: pages older than this switch at the next safe moment
+// even mid-screen (raise it only when old code can't work with the data or has a security problem).
+const VERSION = 'v55';
+const MIN_VERSION = 'v1';
 const SHELL = [
   './',
   'index.html',
@@ -29,7 +33,7 @@ const SHELL = [
   'js/editors/attachField.js',
   'js/editors/historyField.js',
   'js/pushResult.js',
-  'js/tree.js', 'js/perspective-engine.js', 'js/perspectives.js', 'js/views/perspective.js', 'js/editors/perspective.js', 'js/editors/props.js', 'js/omnifocus-import.js', 'js/views/import.js', 'js/templates.js', 'js/views/templates.js', 'js/prefs.js', 'js/shortcuts.js', 'js/editors/focus.js', 'js/ics.js', 'js/calendars.js', 'js/gtd.js', 'js/views/gtd.js', 'js/views/clarify.js', 'js/editors/gtd.js', 'js/weekly.js', 'js/views/weekly.js', 'js/views/sweep.js', 'js/views/someday.js', 'js/whatnow.js', 'js/views/horizons.js', 'js/views/now.js', 'js/views/plan.js', 'js/views/capture.js', 'js/schedule.js', 'js/checklists.js', 'js/editors/schedule.js', 'js/views/checklists.js', 'js/views/daily.js', 'js/settle.js', 'js/views/settle.js', 'js/gain.js', 'js/editors/gainField.js', 'js/sidebar.js',
+  'js/tree.js', 'js/perspective-engine.js', 'js/perspectives.js', 'js/views/perspective.js', 'js/editors/perspective.js', 'js/editors/props.js', 'js/omnifocus-import.js', 'js/views/import.js', 'js/templates.js', 'js/views/templates.js', 'js/prefs.js', 'js/shortcuts.js', 'js/editors/focus.js', 'js/ics.js', 'js/calendars.js', 'js/gtd.js', 'js/views/gtd.js', 'js/views/clarify.js', 'js/editors/gtd.js', 'js/weekly.js', 'js/views/weekly.js', 'js/views/sweep.js', 'js/views/someday.js', 'js/whatnow.js', 'js/views/horizons.js', 'js/views/now.js', 'js/views/plan.js', 'js/views/capture.js', 'js/schedule.js', 'js/checklists.js', 'js/editors/schedule.js', 'js/views/checklists.js', 'js/views/daily.js', 'js/settle.js', 'js/views/settle.js', 'js/gain.js', 'js/editors/gainField.js', 'js/sidebar.js', 'js/updates.js',
   'js/editors/breakdown.js',
   'js/editors/steps.js',
   'js/editors/place.js',
@@ -58,7 +62,15 @@ self.addEventListener('install', (e) => {
   // version never gets stored with stale copies of files from the previous deploy.
   e.waitUntil(caches.open(VERSION)
     .then((c) => c.addAll(SHELL.map((url) => new Request(url, { cache: 'reload' }))))
-    .then(() => self.skipWaiting()));
+    // Pages from before v55 don't know how to ask for the switch; for them, switch as before.
+    .then(() => caches.keys())
+    .then((keys) => { if (keys.some((k) => /^v\d+$/.test(k) && Number(k.slice(1)) < 55)) return self.skipWaiting(); return null; }));
+});
+
+self.addEventListener('message', (e) => {
+  const m = e.data || {};
+  if (m.type === 'SKIP_WAITING') self.skipWaiting();
+  if (m.type === 'INFO' && e.ports[0]) e.ports[0].postMessage({ version: VERSION, min: MIN_VERSION });
 });
 
 self.addEventListener('activate', (e) => {

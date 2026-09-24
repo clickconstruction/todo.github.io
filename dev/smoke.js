@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -56,6 +56,69 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// New versions: switch at a safe moment, keep your place, never lose unsaved work.
+async function updates(check) {
+  const U = await import('/js/updates.js');
+  const { app, inflight } = await import('/js/state.js');
+  U.__resetUpdates();
+  const posted = [];
+  const fake = { postMessage: (m, ports) => { posted.push(m.type); if (m.type === 'INFO' && ports && ports[0]) ports[0].postMessage({ version: 'v99', min: 'v1' }); } };
+  let reloads = 0; window.__reload = () => { reloads++; };
+  await go('#inbox');
+  check('at rest on a list: safe', U.busyReason() === '', U.busyReason());
+  const cap = $('[data-capture] input'); cap.focus();
+  check('typing: not safe', U.busyReason() === 'typing'); cap.blur();
+  inflight.n += 1; check('a save in flight: not safe', U.busyReason() === 'saving'); inflight.n -= 1;
+  const { openQuickEntry } = await import('/js/editors/task.js'); openQuickEntry(); await wait(50); document.activeElement.blur();
+  check('a sheet open: not safe (but a forced update may go)', U.busyReason() === 'sheet' && U.busyReason({ forced: true }) === '');
+  $('#sheet').close();
+  app.clarify = { history: [{ id: 'x' }], skipped: new Set(), counts: {}, done: 1 }; location.hash = '#clarify'; await wait(80);
+  check('mid-Clarify with Undo history: not safe', U.busyReason() === 'clarify'); app.clarify = null;
+  await go('#inbox');
+  // A new version arrives while you're busy: it waits, and says so.
+  openQuickEntry(); await wait(50);
+  U.onWaiting(fake); await wait(50);
+  check('ready: “Update ready” shows (sidebar button, More dot)', document.body.classList.contains('update-ready') && !$('#nav-update').hidden && posted.includes('INFO'));
+  check('not switched while a sheet is open', !U.tryApply('navigate') && reloads === 0);
+  $('#sheet').close();
+  (await import('/js/inspector.js')).select('task', 't10'); await wait(50);
+  window.scrollTo(0, 0);
+  check('switches on the next screen change once safe', U.tryApply('navigate') && posted.includes('SKIP_WAITING') && reloads === 1);
+  const saved = JSON.parse(sessionStorage.getItem('todo.resume'));
+  check('your place is saved: screen, scroll, selection', saved && saved.hash === location.hash && saved.selected && saved.selected.id === 't10');
+  // After the reload: back where you were.
+  location.hash = '#forecast'; await wait(80);
+  check('after the update: same screen, “Updated ✓”', U.resumeAfterUpdate() && location.hash === saved.hash && has('#toast', 'updated'));
+  await wait(80);
+  check('…and the same selection', app.selected && app.selected.id === 't10');
+  (await import('/js/inspector.js')).clearSelection();
+  // A tap on Update ready while typing: it waits and says why.
+  U.__resetUpdates(); U.onWaiting(fake); await wait(30);
+  $('[data-capture] input').focus();
+  $('#nav-update').click(); await wait(30);
+  check('Update ready while typing: waits, and says so', reloads === 1 && has('#toast', 'as soon as this is saved'));
+  $('[data-capture] input').blur();
+  openQuickEntry(); await wait(50); document.activeElement.blur();
+  $('#nav-update').click(); await wait(30);
+  check('Update ready with a sheet open (not typing): your tap wins', reloads === 2);
+  $('#sheet').close();
+  // A required update (below the minimum) goes even with a sheet open, never mid-typing.
+  U.__resetUpdates();
+  const strict = { postMessage: (m, ports) => { posted.push(m.type); if (m.type === 'INFO' && ports && ports[0]) ports[0].postMessage({ version: 'v99', min: 'v999' }); } };
+  Object.defineProperty(navigator.serviceWorker, 'controller', { configurable: true, get: () => ({ postMessage: (m, ports) => { if (ports && ports[0]) ports[0].postMessage({ version: 'v54', min: 'v1' }); } }) });
+  openQuickEntry(); await wait(50); document.activeElement.blur();
+  U.onWaiting(strict); await wait(80);
+  check('a required update: heads-up, then it goes even with a sheet open', U.updateState().force && has('#toast', 'important update') && reloads === 3);
+  delete navigator.serviceWorker.controller;
+  $('#sheet').close();
+  // Phones: the More sheet offers it.
+  U.__resetUpdates(); U.onWaiting(fake); await wait(30);
+  $('#more-tab').click(); await wait(80);
+  check('More sheet: “Update ready · Reload” at the top', !!$('#sheet [data-update-now]'));
+  $('#sheet').close();
+  U.__resetUpdates(); window.__reload = undefined; try { sessionStorage.removeItem('todo.resume'); } catch { /* ignore */ }
+}
 
 // Visual pass: room for the list, one View control, ⋯ menus, chip nudges, sidebar capture, fixes.
 async function visualPass(check) {

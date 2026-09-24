@@ -92,8 +92,13 @@ export function toast(msg, actions) {
   toast.t = setTimeout(() => { el.hidden = true; }, list.length ? 6000 : 2500);
 }
 
+// Database calls still on their way (an update never reloads the page under one).
+export const inflight = { n: 0 };
 export async function run(promise) {
-  const { data, error } = await promise;
+  inflight.n += 1;
+  let res;
+  try { res = await promise; } finally { inflight.n -= 1; }
+  const { data, error } = res;
   if (error) { toast(error.message); throw error; }
   return data;
 }
