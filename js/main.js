@@ -18,6 +18,7 @@ import { setTagStatus } from './data.js';
 import { openNewProject, openNewTemplate, openSaveAsTemplate } from './views/templates.js';
 import { openFocusPicker, unfocus, focusOn } from './editors/focus.js';
 import { handleKey, H } from './shortcuts.js';
+import './select-search.js';
 import { openSheet, esc } from './state.js';
 import { openNewPerspective, openPerspectiveEditor, openPerspectiveMenu, saveCurrentViewAsPerspective } from './editors/perspective.js';
 import { livePerspectives, movePerspective, archivePerspective, badgeCount } from './perspectives.js';
