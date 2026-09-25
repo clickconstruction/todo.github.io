@@ -53,6 +53,7 @@ Matrix (Eisenhower): the matrix tool sorts available actions into do / schedule 
 Full Review (full_review): when the user wants to go through things together, start or resume a session, give them the app link, and work card by card while they watch it in the app. Turn what they tell you into a suggestion (full_review suggest) that they Submit in the app; draft suggestions ahead for the next cards (upcoming + suggest items) so they can approve quickly. Apply directly (annotate/decide) only when they say to just do it. Important items come first; group cards need their agreement on the proposal.
 Perspectives are the user's saved views (e.g. Calls, Today): list_perspectives, then run_perspective to see what's in one; to answer "what should I do now" questions, prefer the user's own perspectives. create_perspective/update_perspective build them (preview rules with run_perspective first).
 Big tasks: break_down splits a task into steps (in_order for one at a time); steps can have steps, up to 4 levels. get_task shows the steps tree and progress. Move a task under another with update_task parent. If a task grows into a real project, offer convert_to_project.
+Waits for: update_task waits_for / add_waits_for links a card to cards in any project it can't start until they're done (e.g. "offer kava" waits for "move Dad"); it stays out of available lists until then and, by default, lands in Forecast today when unblocked. get_task shows waits_for and unblocks. steps_type gives a card with steps a project-style type: parallel, sequential or single_actions (a bucket); complete_with_last false keeps it open after its last step.
 Tags can be put on hold (update_tag status on_hold): their actions are parked, not available, until the tag is active again. A task's on_hold field says why it isn't available.
 Places: an action, tag or project can have a place (a saved location) plus an optional location_alert (arrive, leave or nearby) and radius. Actions inherit a place from their tags, group, project or project tags. Pass place as a saved place's name or id, or as an address/business to look up (it is saved as a new place). Use list_nearby with the user's coordinates to find what can be done nearby. Places are archived, never deleted.`;
 
@@ -509,11 +510,14 @@ class Api {
     const placeOf = makePlaceResolver(placeData);
     // The place data already holds every tag, project and tag link: reuse them (a Worker gets 50 requests a call).
     const ids = tasks.map((t) => t.id);
-    const [reminders, files, people] = await Promise.all([
+    const [reminders, files, people, waits] = await Promise.all([
       this.notificationsFor('task_id', ids),
       byIds(ids, (part) => this.q(`attachments?${this.u}&task_id=${inList(part)}&archived_at=is.null&order=created_at.asc&select=id,task_id,name,size,mime`)),
       this.q(`people?${this.u}&select=id,name`),
+      this.q(`task_waits?${this.u}&select=task_id,waits_for`),
     ]);
+    const card = new Map(placeData.tasks.map((x) => [x.id, x]));
+    const openCard = (x) => x && !x.completed_at && !x.dropped_at;
     const { projects, tags } = placeData;
     const tagLabel = (t) => { const p = t.parent_id && tags.find((x) => x.id === t.parent_id); return p ? `${p.name} : ${t.name}` : t.name; };
     const wanted = new Set(ids);
@@ -559,6 +563,11 @@ class Api {
       gain_met: t.gain_met || undefined,
       parent_id: t.parent_id || undefined,
       steps_in_order: t.steps_in_order || undefined,
+      steps_type: t.steps_single ? 'single_actions' : t.steps_in_order ? 'sequential' : undefined,
+      complete_with_last: t.complete_with_last === false ? false : undefined,
+      waits_for: (() => { const w = waits.filter((x) => x.task_id === t.id); return w.length ? w.map((x) => { const c = card.get(x.waits_for); return { id: x.waits_for, title: c ? c.title : undefined, done: !openCard(c) }; }) : undefined; })(),
+      on_unblock: waits.some((x) => x.task_id === t.id) && t.on_unblock === 'none' ? 'none' : undefined,
+      unblocks: (() => { const u = waits.filter((x) => x.waits_for === t.id).map((x) => card.get(x.task_id)).filter(openCard); return u.length ? u.map((c) => ({ id: c.id, title: c.title })) : undefined; })(),
       dropped_at: t.dropped_at || undefined,
       created_at: t.created_at,
       changed_at: t.updated_at,
@@ -754,15 +763,29 @@ function availabilityOf(tasks, projects, nowIso = new Date().toISOString(), onHo
 
 // Not the user's to do now: parked by an on-hold tag, or waiting on someone / on an agenda.
 // (shared rules: js/perspective-engine.js makeOnHold and makeWaiting)
-const parkedOf = (data) => { const hold = P.makeOnHold(data); const wait = P.makeWaiting(data); return (t) => hold(t) || wait(t); };
+// Waits for another card that's still open (its own links, or those of a card it's a step of; a card not
+// in the data counts as done), and "single actions" buckets, which are lists, never actions.
+const cardWaitsOf = (data) => {
+  const w = new Map(); (data.taskWaits || []).forEach((x) => { if (!w.has(x.task_id)) w.set(x.task_id, []); w.get(x.task_id).push(x.waits_for); });
+  if (!w.size) return () => false;
+  const byId = new Map(data.tasks.map((t) => [t.id, t]));
+  const open = (id) => { const t = byId.get(id); return !!t && !t.completed_at && !t.dropped_at; };
+  return (t) => { for (let n = t, i = 0; n && i < 8; i++) { if ((w.get(n.id) || []).some(open)) return true; n = n.parent_id && byId.get(n.parent_id); } return false; };
+};
+const parkedOf = (data) => {
+  const hold = P.makeOnHold(data); const wait = P.makeWaiting(data); const cards = cardWaitsOf(data);
+  return (t) => hold(t) || wait(t) || cards(t) || (data.buckets ? data.buckets.has(t.id) : !!t.steps_single);
+};
 async function holdFor(api, tasks) {
-  const [tags, taskTags, projectTags, people] = await Promise.all([
+  const [tags, taskTags, projectTags, people, taskWaits, buckets] = await Promise.all([
     api.q(`tags?${api.u}&select=id,name,parent_id,status`),
     api.q(`task_tags?${api.u}&select=task_id,tag_id`),
     api.q(`project_tags?${api.u}&select=project_id,tag_id`),
     api.q(`people?${api.u}&archived_at=is.null&select=id,name,tag_id,archived_at`),
+    api.q(`task_waits?${api.u}&select=task_id,waits_for`),
+    api.q(`tasks?${api.u}&${OPEN}&steps_single=is.true&select=id`),
   ]);
-  return parkedOf({ tasks, tags, taskTags, projectTags, people });
+  return parkedOf({ tasks, tags, taskTags, projectTags, people, taskWaits, buckets: new Set(buckets.map((b) => b.id)) });
 }
 
 // A task with its steps as a nested tree (progress counted over the smallest steps, the leaves) and the
@@ -798,7 +821,7 @@ const RULES_DOC = 'Rules: {"match":"all"|"any"|"none","rules":[...]} where each 
 const OPTIONS_DOC = 'Display: {"show":"available"|"remaining"|"completed"|"dropped"|"all","group_by":"project"|"folder"|"tag"|"due"|"flagged"|"none","sort_by":"project"|"due"|"planned"|"defer"|"added"|"changed"|"completed"|"duration"|"title","layout":"tree"|"flat"}';
 
 async function perspectiveData(api, needClosed) {
-  const [open, closed, projects, folders, tags, taskTags, projectTags, people] = await Promise.all([
+  const [open, closed, projects, folders, tags, taskTags, projectTags, people, taskWaits] = await Promise.all([
     api.q(`tasks?${api.u}&${OPEN}&select=*`),
     needClosed ? api.q(`tasks?${api.u}&or=(completed_at.not.is.null,dropped_at.not.is.null)&order=updated_at.desc&limit=500&select=*`) : [],
     api.q(`projects?${api.u}&select=*`),
@@ -807,9 +830,10 @@ async function perspectiveData(api, needClosed) {
     api.q(`task_tags?${api.u}&select=task_id,tag_id`),
     api.q(`project_tags?${api.u}&select=project_id,tag_id`),
     api.q(`people?${api.u}&archived_at=is.null&select=id,name,tag_id,archived_at`),
+    api.q(`task_waits?${api.u}&select=task_id,waits_for`),
   ]);
   const ids = new Set(open.map((t) => t.id));
-  return { tasks: [...open, ...closed.filter((t) => !ids.has(t.id))], open, projects, folders, tags, taskTags, projectTags, people };
+  return { tasks: [...open, ...closed.filter((t) => !ids.has(t.id))], open, projects, folders, tags, taskTags, projectTags, people, taskWaits };
 }
 const needsClosed = (x) => ['completed', 'dropped', 'all'].includes((x.options || {}).show) || JSON.stringify(x.rules || {}).includes('"completed"');
 
@@ -1190,6 +1214,12 @@ const TOOLS = [
         project: { type: ['string', 'null'], description: 'Project name or id; null to remove' },
         parent: { type: ['string', 'null'], description: 'Id of an open task to make this a step of (it and its own steps move into that task\'s project; max 4 levels, no loops); null to make it stand on its own' },
         steps_in_order: { type: 'boolean', description: 'Do this task\'s steps in order: only the first open step is available' },
+        steps_type: { type: 'string', enum: ['parallel', 'sequential', 'single_actions'], description: 'How its steps work, like a project type: parallel (all available), sequential (one at a time) or single_actions (a bucket of separate actions; the card itself is never an action and never completes on its own)' },
+        complete_with_last: { type: 'boolean', description: 'Finishing the last step completes this card (default true). false: it stays open to check off yourself' },
+        waits_for: { type: 'array', items: { type: 'string' }, description: 'Ids of cards (any project) this one waits for; replaces the list ([] clears). It isn\'t available until all of them are completed or dropped. No loops, and not its own steps or parent' },
+        add_waits_for: { type: 'array', items: { type: 'string' }, description: 'Ids of cards to add to what it waits for' },
+        remove_waits_for: { type: 'array', items: { type: 'string' }, description: 'Ids of cards it should stop waiting for' },
+        on_unblock: { type: 'string', enum: ['forecast', 'none'], description: 'When the last card it waits for is done: forecast (default) plans it for today; none just makes it available' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Replaces all tags. Labels like "Laptop" or "Waiting : Hiro"; missing tags are created.' },
         add_tags: { type: 'array', items: { type: 'string' }, description: 'Tags to add, keeping existing ones' },
         remove_tags: { type: 'array', items: { type: 'string' }, description: 'Tags to remove' },
@@ -1240,6 +1270,9 @@ const TOOLS = [
       if (a.notes !== undefined) patch.notes = a.notes;
       if (a.flagged !== undefined) patch.flagged = !!a.flagged;
       if (a.steps_in_order !== undefined) patch.steps_in_order = !!a.steps_in_order;
+      if (a.steps_type !== undefined) { patch.steps_in_order = a.steps_type === 'sequential'; patch.steps_single = a.steps_type === 'single_actions'; }
+      if (a.complete_with_last !== undefined) patch.complete_with_last = !!a.complete_with_last;
+      if (a.on_unblock !== undefined) patch.on_unblock = a.on_unblock === 'none' ? 'none' : 'forecast';
       if (a.due !== undefined) patch.due_at = zonedToIso(a.due, api.hours.due, api.tz);
       if (a.planned !== undefined) patch.planned_at = zonedToIso(a.planned, api.hours.planned, api.tz);
       if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, api.hours.defer, api.tz);
@@ -1314,6 +1347,15 @@ const TOOLS = [
       const eff = (k) => (k in patch ? patch[k] : task[k]);
       patch.in_inbox = !!eff('tickler') || !(eff('project_id') || parentId || tagCount || eff('waiting_on') || eff('agenda_for'));
       await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: patch });
+      if (Array.isArray(a.waits_for) || Array.isArray(a.add_waits_for) || Array.isArray(a.remove_waits_for)) {
+        const have = (await api.q(`task_waits?${api.u}&task_id=eq.${task.id}&select=waits_for`)).map((w) => w.waits_for);
+        const want = new Set(Array.isArray(a.waits_for) ? a.waits_for.map((x) => mustUuid(x, 'waits_for')) : have);
+        (a.add_waits_for || []).forEach((x) => want.add(mustUuid(x, 'add_waits_for')));
+        (a.remove_waits_for || []).forEach((x) => want.delete(mustUuid(x, 'remove_waits_for')));
+        const drop = have.filter((x) => !want.has(x)); const add = [...want].filter((x) => !have.includes(x));
+        if (drop.length) await api.q(`task_waits?${api.u}&task_id=eq.${task.id}&waits_for=in.(${drop.join(',')})`, { method: 'DELETE' });
+        if (add.length) await api.q('task_waits', { method: 'POST', body: add.map((w) => ({ task_id: task.id, waits_for: w, user_id: api.userId })) });
+      }
       if (Array.isArray(a.notifications)) await api.setNotifications('task_id', task.id, a.notifications);
       if (a.skip_occurrence) {
         if (!(patch.repeat_rule || task.repeat_rule)) throw new Error('skip_occurrence needs a repeating action');
@@ -2152,11 +2194,12 @@ const TOOLS = [
 TOOLS.push(...gtdTools({ OPEN, zonedToIso, localDate, inList, tool: (name) => TOOLS.find((t) => t.name === name) }));
 // Available actions (not Inbox items) with what What now? needs to filter and rank them.
 async function availableTasks(api) {
-  const [open, projects, tags, links, projectLinks, people] = await Promise.all([
+  const [open, projects, tags, links, projectLinks, people, taskWaits] = await Promise.all([
     api.q(`tasks?${api.u}&${OPEN}&select=*`), api.q(`projects?${api.u}&select=*`), api.q(`tags?${api.u}&select=id,name,parent_id,status`),
     api.q(`task_tags?${api.u}&select=task_id,tag_id`), api.q(`project_tags?${api.u}&select=project_id,tag_id`), api.q(`people?${api.u}&archived_at=is.null&select=id,name,tag_id,archived_at`),
+    api.q(`task_waits?${api.u}&select=task_id,waits_for`),
   ]);
-  const { available } = availabilityOf(open, projects, undefined, parkedOf({ tasks: open, tags, taskTags: links, projectTags: projectLinks, people }));
+  const { available } = availabilityOf(open, projects, undefined, parkedOf({ tasks: open, tags, taskTags: links, projectTags: projectLinks, people, taskWaits }));
   return { tasks: open.filter((t) => !t.in_inbox && available(t)), tags, links, projectLinks, projects };
 }
 TOOLS.push(...planTools({ projectOut }));

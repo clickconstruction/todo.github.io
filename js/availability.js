@@ -7,6 +7,8 @@
 //   ordered containers: a sequential project (only its first open top-level item goes) and a
 //               task with "do steps in order" (only its first open step goes). Blocking is
 //               checked at every level up the tree.
+//   waits for:  not while any card it (or a card it's a step of) waits for is still open.
+//   buckets:    a "single actions" card is a list, never an action itself.
 import { db, isOpen, taskSort, tagStatus } from './state.js';
 import { isDeferred } from './dates.js';
 import { makeWaiting } from './perspective-engine.js';
@@ -30,8 +32,8 @@ export const PROJECT_KINDS = [
 // current pass (microtask), or sooner if the task or tag-link lists change size.
 let IX = null;
 function ix() {
-  const key = `${db.tasks.length}|${db.taskTags.length}|${db.tags.length}|${(db.projectTags || []).length}|${db.projects.length}`;
-  if (IX && IX.key === key && IX.tasks === db.tasks && IX.links === db.taskTags) return IX;
+  const key = `${db.tasks.length}|${db.taskTags.length}|${db.tags.length}|${(db.projectTags || []).length}|${db.projects.length}|${(db.taskWaits || []).length}`;
+  if (IX && IX.key === key && IX.tasks === db.tasks && IX.links === db.taskTags && IX.waitRows === db.taskWaits) return IX;
   const kids = new Map(); const anyKids = new Set(); const projTop = new Map(); const tasks = new Map();
   db.tasks.forEach((t) => {
     tasks.set(t.id, t);
@@ -45,7 +47,8 @@ function ix() {
   const taskTags = new Map(); db.taskTags.forEach((x) => { if (!taskTags.has(x.task_id)) taskTags.set(x.task_id, []); taskTags.get(x.task_id).push(x.tag_id); });
   const projTags = new Map(); (db.projectTags || []).forEach((x) => { if (!projTags.has(x.project_id)) projTags.set(x.project_id, []); projTags.get(x.project_id).push(x.tag_id); });
   const projects = new Map(db.projects.map((p) => [p.id, p]));
-  IX = { key, tasks: db.tasks, links: db.taskTags, byTask: tasks, kids, anyKids, projTop, held, taskTags, projTags, projects };
+  const waits = new Map(); (db.taskWaits || []).forEach((w) => { if (!waits.has(w.task_id)) waits.set(w.task_id, []); waits.get(w.task_id).push(w.waits_for); });
+  IX = { key, tasks: db.tasks, links: db.taskTags, waitRows: db.taskWaits, byTask: tasks, kids, anyKids, projTop, held, taskTags, projTags, projects, waits };
   queueMicrotask(() => { IX = null; });
   return IX;
 }
@@ -93,7 +96,21 @@ export function isSequenceBlocked(t) {
   return false;
 }
 
+// The open cards this one waits for: its own links, or else those of the nearest card it's a step
+// of. A card that isn't loaded (closed more than a day ago) counts as done.
+export function cardBlockers(t) {
+  for (let n = t, i = 0; n && i < 8; i++) {
+    const open = (ix().waits.get(n.id) || []).map(taskById).filter((b) => b && isOpen(b));
+    if (open.length) return open;
+    n = taskById(n.parent_id);
+  }
+  return [];
+}
+// Open cards waiting for this one.
+export const unblocksOf = (t) => (db.taskWaits || []).filter((w) => w.waits_for === t.id).map((w) => taskById(w.task_id)).filter((x) => x && isOpen(x));
+
 export function isBlocked(t) {
+  if (t.steps_single) return true; // a bucket of actions, not an action
   if (openSteps(t).length) return true; // has steps: do the steps
   return isSequenceBlocked(t);
 }
@@ -113,6 +130,7 @@ export function isAvailable(t) {
   if (p && (p.status !== 'active' || isDeferred(p))) return false; // a deferred project hides its actions
   if (heldBy(t)) return false; // parked by an on-hold tag
   if (waitingRule()(t)) return false; // someone else's move (Waiting For), or for a meeting (Agenda)
+  if (cardBlockers(t).length) return false; // waits for another card
   return !isBlocked(t);
 }
 

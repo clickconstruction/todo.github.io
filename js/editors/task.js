@@ -13,6 +13,7 @@ import { attachFieldHtml, wireAttachField, uploadFiles } from './attachField.js'
 import { historyFieldHtml, wireHistoryField } from './historyField.js';
 import { skipOccurrence } from '../data.js';
 import { stepsFieldHtml, partOfFieldHtml, wireStepsFields } from './steps.js';
+import { waitsFieldHtml, wireWaitsField } from './waitsField.js';
 import { openBreakdown } from './breakdown.js';
 import { section, prop, propInline, wireProps } from './props.js';
 import { ENERGY, ENERGY_ICON, livePeople } from '../gtd.js';
@@ -61,6 +62,7 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
         ${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select><span class="prop-val follows" data-project-follows hidden></span>`)}
       ${prop('tags', 'Tags', tagPickerHtml())}
       ${prop('waiting', 'Waiting on', waitingFieldHtml(t, task))}
+      ${prop('waits_for', 'Waits for', waitsFieldHtml(t, task))}
       ${propInline('Energy', `<select name="energy"><option value="">None</option>${ENERGY.map(([v, l]) => `<option value="${v}" ${t.energy === v ? 'selected' : ''}>${ENERGY_ICON[v]} ${l}</option>`).join('')}</select>`)}
       ${propInline('Important', `<select name="important" title="For the Matrix: auto decides from flags, flagged projects and goals"><option value="">Auto</option><option value="yes" ${t.important === true ? 'selected' : ''}>★ Important</option><option value="no" ${t.important === false ? 'selected' : ''}>☆ Not important</option></select>`)}
       <div class="prop prop-inline prop-folder"><span class="prop-label">Folder</span>${folderFieldHtml(t.folder_path, t.title)}</div>`)}
@@ -101,6 +103,7 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
   const selectedTags = wireTagPicker(form, task ? tagsFor(task.id).map((x) => x.id) : [], onTagsChange);
 
   const collectSteps = wireStepsFields(form, t, task, { onChange: onTagsChange, ...stepsOpts });
+  const collectWaits = wireWaitsField(form, task, onTagsChange);
   const collectLocation = wireLocationField(form, onTagsChange);
   const collectRepeat = wireRepeatField(form, t, onTagsChange);
   const collectReminders = wireNotifyField(form, remindersFor('task_id', task && task.id), onTagsChange);
@@ -141,6 +144,7 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
       ...collectGain(),
       project_id: form.elements.project_id.value || null, // read directly: it's disabled while it's a step
       ...collectSteps(),
+      ...collectWaits(),
       flagged: f.get('flagged') === 'on',
       defer_at: fromDateInput(f.get('defer_at'), HOURS.defer_at),
       planned_at: fromDateInput(f.get('planned_at'), HOURS.planned_at),

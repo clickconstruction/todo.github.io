@@ -2,7 +2,7 @@
 import { db, esc, byId, tagsFor, tagLabel, projectTagsFor, isOpen, isCollapsed, PROJECT_STATUSES, tagStatus, onHoldTagFor } from './state.js';
 import { fmtMinutes } from './components.js';
 import { fmtDate, isOverdue, isDeferred, isPlannedPast } from './dates.js';
-import { isSequenceBlocked, nextAction } from './availability.js';
+import { isSequenceBlocked, nextAction, cardBlockers } from './availability.js';
 import { placeFor, isInside } from './places.js';
 import { describe } from './repeat.js';
 import { distanceM, fmtDistance } from './geo.js';
@@ -31,6 +31,8 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
     if (wp && !t.agenda_for) meta.push(`<span class="meta-wait ${followUpDue(t) ? 'late' : ''}" title="Waiting on ${esc(wp.name)}">${ic('⏳')}${esc(wp.name)}${t.follow_up_at ? ` · follow up ${esc(fmtDate(t.follow_up_at))}` : ''}</span>`);
     const ap = t.agenda_for && agendaPerson(t);
     if (ap) meta.push(`<span class="meta-agenda" title="To discuss with ${esc(ap.name)}">${ic('🗣')}${esc(ap.name)}</span>`);
+    const blockers = cardBlockers(t);
+    if (blockers.length) meta.push(`<span class="meta-wait meta-waits-for" title="Waits for: ${esc(blockers.map((b) => b.title).join(', '))}">${ic('⏳')}Waits for: ${esc(blockers[0].title)}${blockers.length > 1 ? ` +${blockers.length - 1}` : ''}</span>`);
     if (t.tickler && isTickled(t)) meta.push(`<span class="meta-tickler" title="In the tickler">${ic('📆')}${esc(fmtDate(t.defer_at))}</span>`);
     else if (returnedFromTickler(t)) meta.push(`<span class="meta-tickler">${ic('📆')}from the tickler</span>`);
   }
@@ -64,7 +66,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   if (kids.length) {
     const p = progress(t);
     const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
-    meta.unshift(`<span class="chip group-count">${p.done} of ${p.total} done</span>${t.steps_in_order ? '<span class="chip">in order</span>' : ''}`);
+    meta.unshift(`<span class="chip group-count">${p.done} of ${p.total} done</span>${t.steps_in_order ? '<span class="chip">in order</span>' : t.steps_single ? '<span class="chip">single actions</span>' : ''}`);
     const next = isOpen(t) && (collapsed || !hierarchy) ? nextStep(t) : null;
     prog = `<div class="step-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${p.total}" aria-valuenow="${p.done}" aria-label="${p.done} of ${p.total} steps done"><i style="width:${pct}%"></i></div>
       ${next ? `<div class="step-next"><span>Next:</span> ${esc(next.title)}</div>` : ''}`;
@@ -72,7 +74,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   const checkCls = ['check', done && 'done', t.flagged && 'flagged', isOverdue(t) && 'overdue'].filter(Boolean).join(' ');
   const held = isOpen(t) && onHoldTagFor(t);
   if (held && !tags.some((g) => g.id === held.id)) meta.push(`<span class="chip hold" title="On hold via ${esc(tagLabel(held))}">⏸ ${esc(tagLabel(held))}</span>`);
-  const blocked = isOpen(t) && (isSequenceBlocked(t) || !!held);
+  const blocked = isOpen(t) && (isSequenceBlocked(t) || !!held || cardBlockers(t).length > 0);
   const cls = [done || t.dropped_at ? 'completed' : '', hierarchy && depth ? 'row-sub' : '', blocked ? 'blocked' : ''].filter(Boolean).join(' ');
   // Reorder mode: ▲▼ move among siblings; ⇥ makes it a step of the item above, ⇤ moves it up a level.
   const handles = reorder && isOpen(t) ? `<span class="reorder">

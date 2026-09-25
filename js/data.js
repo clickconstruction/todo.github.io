@@ -5,6 +5,7 @@ import { openCompletionNote } from './editors/completion.js';
 import { saveReminders, refreshReminders } from './editors/notifyField.js';
 import { uploadFiles } from './editors/attachField.js';
 import { ancestors, descendants, stepsOf } from './tree.js';
+import { isAvailable } from './availability.js';
 
 const OUTBOX_KEY = 'todo.outbox';
 
@@ -23,7 +24,7 @@ async function every(query, ...keys) {
 
 export async function loadAll() {
   const since = new Date(Date.now() - 86400000).toISOString();
-  const [tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions] = await Promise.all([
+  const [tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions, taskWaits] = await Promise.all([
     every(() => sb.from('tasks').select('*').or(`and(completed_at.is.null,dropped_at.is.null),completed_at.gte.${since}`), 'id'),
     every(() => sb.from('projects').select('*'), 'id'),
     every(() => sb.from('folders').select('*'), 'id'),
@@ -47,8 +48,9 @@ export async function loadAll() {
     run(sb.from('imports').select('*').order('created_at', { ascending: false }).limit(20)),
     every(() => sb.from('slipbox_notes').select('*').is('archived_at', null), 'id'),
     run(sb.from('review_sessions').select('id,title,status,current_item,created_at').eq('status', 'active').order('created_at', { ascending: false }).limit(10)),
+    every(() => sb.from('task_waits').select('*'), 'task_id', 'waits_for'),
   ]);
-  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions });
+  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions, taskWaits });
   await loadSettings();
 }
 
@@ -129,6 +131,7 @@ export async function setCompleted(task, done) {
   const since = new Date(Date.now() - 2000).toISOString();
   const project = task.project_id && byId(db.projects, task.project_id);
   const projectWasOpen = project && ['active', 'on_hold'].includes(project.status);
+  const blockedBefore = done ? new Set(waitersOf(task).filter((w) => !isAvailable(w)).map((w) => w.id)) : new Set();
   const [row] = await run(sb.from('tasks').update({ completed_at }).eq('id', task.id).select());
   task = syncRow('tasks', task, row);
   const next = repeating ? (await pullNewSince(since)).tasks.find((t) => t.title === task.title && !t.completed_at) : null;
@@ -142,7 +145,9 @@ export async function setCompleted(task, done) {
   // Finishing the last step completes the level(s) above: celebrate the biggest one.
   const finished = done ? ancestors(task).filter((a) => a.completed_at && openBefore.includes(a.id)) : [];
   const elephant = finished[finished.length - 1];
-  const msg = elephant ? `🎉 Last step done · “${elephant.title}” is complete` : projectDone ? `Completed · “${project.name}” is done too` : next ? `Completed · next one ${nextAt ? fmtNext(nextAt) : 'is ready'}` : 'Completed';
+  const freed = waitersOf(task).filter((w) => blockedBefore.has(w.id) && isAvailable(w));
+  const freedMsg = freed.length ? ` · now available: ${freed.length === 1 ? `“${freed[0].title}”` : `${freed.length} cards`}` : '';
+  const msg = (elephant ? `🎉 Last step done · “${elephant.title}” is complete` : projectDone ? `Completed · “${project.name}” is done too` : next ? `Completed · next one ${nextAt ? fmtNext(nextAt) : 'is ready'}` : 'Completed') + freedMsg;
   toast(msg, [{ label: task.gain ? 'Did you gain it?' : 'Add note', run: () => openCompletionNote(task) },
     { label: 'Undo', run: () => undoComplete(task, projectDone && project, next, repeating) }]);
 }
@@ -223,6 +228,25 @@ export async function convertToProject(task) {
   return Array.isArray(pid) ? pid[0] : pid;
 }
 
+// ---------- waits for ----------
+// Cards waiting for this one (or for anything in its tree, which closes with it).
+export function waitersOf(task) {
+  const tree = [task, ...descendants(task)].map((t) => t.id);
+  const ids = new Set((db.taskWaits || []).filter((w) => tree.includes(w.waits_for)).map((w) => w.task_id));
+  return db.tasks.filter((t) => ids.has(t.id) && isOpen(t));
+}
+// Link a card to one it waits for; the database refuses loops and a card's own steps (toast).
+export async function addWait(task, other) {
+  const rows = await run(sb.from('task_waits').insert({ task_id: task.id, waits_for: other.id }).select());
+  db.taskWaits.push(...rows);
+  app.render();
+}
+export async function removeWait(task, otherId) {
+  await run(sb.from('task_waits').delete().eq('task_id', task.id).eq('waits_for', otherId));
+  db.taskWaits = db.taskWaits.filter((w) => !(w.task_id === task.id && w.waits_for === otherId));
+  app.render();
+}
+
 // Review: stamp the project as reviewed now; the database derives next_review_at.
 export const markReviewed = (project) => updateProject(project, { last_reviewed_at: new Date().toISOString() });
 
@@ -263,7 +287,9 @@ export async function moveTask(task, dir) {
 // the level above, all the way up), every step below (closed with their parent, or moved with it
 // to another project) and the project (complete with last action).
 export async function afterTaskWrite(task) {
-  const ids = [...ancestors(task), ...descendants(task)].map((t) => t.id);
+  const tree = [task, ...ancestors(task), ...descendants(task)].map((t) => t.id);
+  const waiters = (db.taskWaits || []).filter((w) => tree.includes(w.waits_for)).map((w) => w.task_id);
+  const ids = [...new Set([...tree.slice(1), ...waiters])];
   await Promise.all([
     ids.length ? refreshTasks(ids) : null,
     task.project_id ? refreshProject(task.project_id) : null,

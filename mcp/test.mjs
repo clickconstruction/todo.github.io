@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [], slipbox_notes: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [], slipbox_notes: [], task_waits: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -1312,5 +1312,29 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   count = 0; globalThis.fetch = (...x) => { count += 1; return real(...x); };
   let leaf; try { leaf = await tool('get_task', { id: lastLevel[5].id }); } finally { globalThis.fetch = real; }
   assert(leaf.part_of.map((x) => x.title).join(' < ') === 'Demo part 2 < Demo < Renovate the shop' && count < 20, `get_task: part_of nearest first in one query (${count} requests)`);
+}
+{ // steps type and "waits for" links
+  await tool('create_project', { name: 'Dad test' });
+  const move = await tool('capture', { title: 'Move Dad somewhere I can set up', project: 'Dad test' });
+  const kava = await tool('capture', { title: 'Offer kava in his morning tea', project: 'Dad test' });
+  const bucket = await tool('capture', { title: 'Gifts for Dad', project: 'Dad test' });
+  await tool('break_down', { id: bucket.id, steps: ['Riding jacket', 'Chess set'] });
+  await tool('update_task', { id: bucket.id, steps_type: 'single_actions' });
+  const row = db.tasks.find((x) => x.id === bucket.id);
+  assert(row.steps_single && !row.steps_in_order, 'update_task steps_type single_actions sets the bucket flag');
+  let g = await tool('get_task', { id: bucket.id });
+  assert(g.steps_type === 'single_actions', 'get_task shows steps_type');
+  await tool('update_task', { id: kava.id, add_waits_for: [move.id] });
+  assert(db.task_waits.some((w) => w.task_id === kava.id && w.waits_for === move.id), 'add_waits_for links the cards');
+  const avail = (await tool('list_tasks', { project: 'Dad test', available_only: true })).items.map((x) => x.title);
+  assert(avail.includes('Move Dad somewhere I can set up') && !avail.includes('Offer kava in his morning tea') && !avail.includes('Gifts for Dad') && avail.includes('Riding jacket'), `available_only leaves out waiting cards and buckets (${avail.join(' | ')})`);
+  g = await tool('get_task', { id: kava.id });
+  const m = await tool('get_task', { id: move.id });
+  assert(g.waits_for && g.waits_for[0].id === move.id && g.waits_for[0].done === false && m.unblocks && m.unblocks[0].id === kava.id, 'get_task shows waits_for and unblocks');
+  await tool('update_task', { id: kava.id, remove_waits_for: [move.id], complete_with_last: false, on_unblock: 'none' });
+  assert(!db.task_waits.some((w) => w.task_id === kava.id) && db.tasks.find((x) => x.id === kava.id).complete_with_last === false && db.tasks.find((x) => x.id === kava.id).on_unblock === 'none', 'remove_waits_for, complete_with_last and on_unblock save');
+  await tool('update_task', { id: kava.id, waits_for: [move.id, bucket.id] });
+  await tool('update_task', { id: kava.id, waits_for: [] });
+  assert(!db.task_waits.some((w) => w.task_id === kava.id), 'waits_for replaces the list ([] clears)');
 }
 console.log('ALL PASSED');

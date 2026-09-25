@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -56,6 +56,80 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Steps type (parallel / in order / single actions + complete with last step) and "Waits for" links.
+async function stepsAndWaits(check) {
+  const { db } = await import('/js/state.js');
+  const data = await import('/js/data.js');
+  const av = await import('/js/availability.js');
+  const { openEditor } = await import('/js/editors/task.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const t = T();
+  const task = (id) => db.tasks.find((x) => x.id === id);
+  const setKind = (k) => { const r = $(`#sheet [name=steps_kind][value=${k}]`); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); };
+  t.projects.find((p) => p.id === 'p2').kind = 'parallel'; // the card's own type is what's under test
+  await data.loadAll();
+  // 1. The editor shows the three-way picker on a card with steps.
+  openEditor(task('t6')); await wait(80);
+  const kinds = $$('#sheet [name=steps_kind]').map((r) => r.value);
+  check('steps type: Parallel, In order and Single actions, Parallel by default, complete with last on', kinds.join() === 'parallel,sequential,single' && $('#sheet [name=steps_kind]:checked').value === 'parallel' && $('#sheet [name=complete_with_last]').checked, kinds.join());
+  setKind('sequential');
+  check('switching explains the type', /only the next step/i.test($('#sheet [data-steps-kind-hint]').textContent) && $('#sheet [data-steps-kind-name]').textContent === 'In order');
+  $('#sheet form').requestSubmit(); await until(() => t.tasks.find((x) => x.id === 't6').steps_in_order);
+  await data.loadAll();
+  check('in order: saved, only the first step is available', task('t6').steps_in_order && !task('t6').steps_single && av.isAvailable(task('t7')) && !av.isAvailable(task('t8')));
+  // 2. Single actions: a bucket, never an action; every step available; the switch is off.
+  openEditor(task('t6')); await wait(80);
+  setKind('single');
+  check('single actions turns off (and disables) complete with last', $('#sheet [name=complete_with_last]').disabled && !$('#sheet [name=complete_with_last]').checked);
+  $('#sheet form').requestSubmit(); await until(() => t.tasks.find((x) => x.id === 't6').steps_single);
+  await data.loadAll();
+  check('single actions: saved, the bucket isn’t an action, its steps are', task('t6').steps_single && !task('t6').steps_in_order && !av.isAvailable(task('t6')) && av.isAvailable(task('t7')) && av.isAvailable(task('t8')));
+  await go('#project/p2');
+  check('the row says single actions', has(undefined, 'single actions'));
+  // 3. Complete with last step off: finishing every step leaves the card open (and then available).
+  openEditor(task('t6')); await wait(80);
+  setKind('parallel');
+  const cwl = $('#sheet [name=complete_with_last]'); cwl.click(); // touched: off
+  $('#sheet form').requestSubmit(); await until(() => t.tasks.find((x) => x.id === 't6').complete_with_last === false);
+  await data.loadAll();
+  await data.setCompleted(task('t7'), true); await data.setCompleted(task('t8'), true);
+  await data.loadAll();
+  check('complete with last off: the card stays open, ready to check off', !task('t6').completed_at && av.isAvailable(task('t6')));
+  if ($('#sheet').open) $('#sheet').close();
+  // 4. Waits for: link from the editor through the searchable picker.
+  openEditor(task('t11')); await wait(80);
+  $('#sheet [data-wait-add]').click(); await wait(60);
+  const q = $('#sheet2 [data-wp-search]'); q.value = 'measure'; q.dispatchEvent(new Event('input', { bubbles: true })); await wait(30);
+  const pick = $('#sheet2 [data-wp]');
+  check('the picker searches every card, grouped by project', pick && /measure driveway/i.test(pick.textContent) && has('#sheet2', 'driveway trailer'));
+  pick.click(); await until(() => t.task_waits.some((w) => w.task_id === 't11' && w.waits_for === 't9'));
+  await wait(60);
+  check('linked: saved at once, shown as a chip, with a "when done" choice', t.task_waits.some((w) => w.task_id === 't11' && w.waits_for === 't9') && /measure driveway/i.test(($('#sheet .wait-chip') || {}).textContent || '') && !!$('#sheet [name=on_unblock]'));
+  if ($('#sheet').open) $('#sheet').close();
+  await data.loadAll();
+  check('a waiting card isn’t available', !av.isAvailable(task('t11')) && av.cardBlockers(task('t11')).map((b) => b.id).join() === 't9');
+  await go('#project/p4');
+  const row = $('.row[data-task="t11"]');
+  check('its row says what it waits for, dimmed', row && row.classList.contains('blocked') && /waits for: measure driveway/i.test(row.textContent));
+  openEditor(task('t9')); await wait(80);
+  const wf = $('#sheet [data-waits-field]');
+  check('the other card shows what it unblocks, even with the row closed', wf && /unblocks 1/i.test(wf.textContent) && /buy fuel filter/i.test(wf.textContent) && /unblocks 1/i.test(($('#sheet [data-prop-val="waits_for"]') || {}).textContent || ''));
+  if ($('#sheet').open) $('#sheet').close();
+  // 5. Loops and a card's own steps are refused.
+  let refused = false; try { await data.addWait(task('t9'), task('t11')); } catch { refused = true; }
+  check('a loop is refused', refused && !t.task_waits.some((w) => w.task_id === 't9'));
+  // 6. Finishing the blocker frees the card and plans it for today.
+  await data.setCompleted(task('t9'), true); await wait(60);
+  await data.loadAll();
+  const planned = task('t11').planned_at && new Date(task('t11').planned_at).toDateString() === new Date().toDateString();
+  check('done: the waiting card is available, planned for today', av.isAvailable(task('t11')) && planned);
+  // 7. Removing a link.
+  openEditor(task('t11')); await wait(80);
+  $('#sheet [data-wait-remove]').click(); await until(() => !t.task_waits.some((w) => w.task_id === 't11'));
+  check('× removes the link', !t.task_waits.some((w) => w.task_id === 't11') && !$('#sheet .wait-chip'));
+  if ($('#sheet').open) $('#sheet').close();
+}
 
 // Folders on your Mac: a Folder field on actions and projects, 📂 opens it through a Shortcut link.
 async function folders(check) {

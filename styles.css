@@ -1451,3 +1451,20 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .ss-opt.ss-cur::before { content: '✓ '; color: var(--accent); }
 .ss-group { padding: 8px 10px 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .ss-empty { padding: 10px; color: var(--muted); font-size: 14px; }
+
+/* Steps type (parallel / in order / single actions) and "Waits for" */
+.steps-type { margin: 8px 0 4px; }
+.steps-type-head { display: flex; justify-content: space-between; align-items: baseline; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+.kind-seg label { flex: 1; display: block; color: var(--text); }
+.kind-seg span { display: flex !important; flex-direction: column; align-items: center; gap: 2px; font-size: 13px !important; }
+.kind-seg svg { width: 22px; height: 14px; fill: currentColor; }
+.steps-type [data-steps-kind-hint] { margin: 6px 2px; }
+.waits-field { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.waits-chips { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.wait-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; background: var(--accent-soft); border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 14px; }
+.wait-chip small { color: var(--muted); }
+.wait-chip.done { background: none; color: var(--muted); text-decoration: line-through; }
+.wait-chip .x { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 5px; }
+.waits-then { font-size: 14px; color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.waits-unblocks { margin: 0; }
+.meta-waits-for { color: var(--flag); }

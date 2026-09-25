@@ -25,11 +25,32 @@ export function stepsFieldHtml(task) {
   return `<fieldset class="steps-field"><legend>Steps · ${p.done} of ${p.total} done</legend>
     <div class="step-progress" aria-hidden="true"><i style="width:${pct}%"></i></div>
     <ol class="steps-mini">${kids.map((k) => `<li class="${k.completed_at ? 'done' : k.dropped_at ? 'dropped' : ''}">${esc(k.title)}${stepsOf(k).length ? ` <span class="hint">· ${progress(k).done}/${progress(k).total}</span>` : ''}</li>`).join('')}</ol>
-    <label class="flag-toggle"><input type="checkbox" name="steps_in_order" ${task.steps_in_order ? 'checked' : ''}> Do in order <span class="hint">only the next step is available</span></label>
+    ${stepsTypeHtml(task)}
     <div class="steps-actions">
       ${isOpen(task) && !deepest ? '<button type="button" class="link-btn" data-breakdown>Edit steps</button>' : ''}
       ${isOpen(task) ? '<button type="button" class="link-btn muted" data-to-project>Turn into a project</button>' : ''}
     </div></fieldset>`;
+}
+
+// Steps type: the same three choices a project has, plus "Complete with last step".
+const KIND_ICON = {
+  parallel: '<svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="7" cy="4" r="2.6"/><circle cx="15" cy="4" r="2.6"/><circle cx="7" cy="11" r="2.6"/><circle cx="15" cy="11" r="2.6"/></svg>',
+  sequential: '<svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="5" cy="3" r="2.6"/><circle cx="11" cy="7" r="2.6"/><circle cx="17" cy="11" r="2.6"/></svg>',
+  single: '<svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="11" cy="2.6" r="2.3"/><circle cx="5" cy="7" r="2.3"/><circle cx="17" cy="7" r="2.3"/><circle cx="11" cy="11.4" r="2.3"/></svg>',
+};
+export const STEP_KINDS = [
+  ['parallel', 'Parallel', 'All steps are available at once.'],
+  ['sequential', 'In order', 'One step at a time: only the next step is available.'],
+  ['single', 'Single actions', 'A bucket of separate actions: each is its own task, and the card never completes on its own.'],
+];
+export const stepsKindOf = (t) => (t.steps_single ? 'single' : t.steps_in_order ? 'sequential' : 'parallel');
+function stepsTypeHtml(task) {
+  const kind = stepsKindOf(task);
+  const cwl = task.complete_with_last !== false;
+  return `<div class="steps-type"><div class="steps-type-head"><span>Steps type</span><span class="hint" data-steps-kind-name>${STEP_KINDS.find(([k]) => k === kind)[1]}</span></div>
+    <div class="segmented kind-seg" role="radiogroup" aria-label="Steps type">${STEP_KINDS.map(([k, label]) => `<label><input type="radio" name="steps_kind" value="${k}" ${k === kind ? 'checked' : ''}><span>${KIND_ICON[k]}${label}</span></label>`).join('')}</div>
+    <p class="hint" data-steps-kind-hint>${STEP_KINDS.find(([k]) => k === kind)[2]}</p>
+    <label class="flag-toggle"><input type="checkbox" name="complete_with_last" ${cwl && kind !== 'single' ? 'checked' : ''} ${kind === 'single' ? 'disabled' : ''}> Complete with last step</label></div>`;
 }
 
 export function partOfFieldHtml(t) {
@@ -69,7 +90,17 @@ export function wireStepsFields(form, t, task, { onChange = () => {}, onBeforeBr
   const picker = $('[data-part-of]', form);
   if (picker) picker.onclick = () => openPartOfPicker(task || t, (p) => setParent(p));
 
+  form.addEventListener('change', (e) => {
+    if (e.target.name !== 'steps_kind') return;
+    const [, label, hint] = STEP_KINDS.find(([k]) => k === e.target.value);
+    $('[data-steps-kind-name]', form).textContent = label;
+    $('[data-steps-kind-hint]', form).textContent = hint;
+    const cwl = form.elements.complete_with_last;
+    cwl.disabled = e.target.value === 'single';
+    if (e.target.value === 'single') cwl.checked = false; else if (!cwl.dataset.touched) cwl.checked = task ? task.complete_with_last !== false : true;
+  });
   form.addEventListener('click', async (e) => {
+    if (e.target.name === 'complete_with_last') e.target.dataset.touched = '1';
     if (e.target.closest('[data-breakdown]')) {
       if (task) {
         // Afterwards, redraw this section in place (the editor may hold unsaved edits).
@@ -94,7 +125,11 @@ export function wireStepsFields(form, t, task, { onChange = () => {}, onBeforeBr
   });
   return () => ({
     parent_id: hidden.value || null,
-    ...(form.elements.steps_in_order ? { steps_in_order: form.elements.steps_in_order.checked } : {}),
+    ...(form.elements.steps_kind ? {
+      steps_in_order: form.elements.steps_kind.value === 'sequential',
+      steps_single: form.elements.steps_kind.value === 'single',
+      complete_with_last: form.elements.steps_kind.value === 'single' ? (task ? task.complete_with_last !== false : true) : form.elements.complete_with_last.checked,
+    } : {}),
   });
 }
 

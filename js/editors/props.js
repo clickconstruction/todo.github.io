@@ -37,6 +37,12 @@ const VALUES = {
     const fu = f.elements.follow_up_at && f.elements.follow_up_at.value;
     return [w && w.value ? `⏳ ${optText(w)}${fu ? ` · ${fmtDay(fu).replace(/,.*$/, '')}` : ''}` : '', a && a.value ? `🗣 ${optText(a)}` : ''].filter(Boolean).join(' · ');
   },
+  waits_for: (f) => {
+    const open = [...f.querySelectorAll('.wait-chip:not(.done)')];
+    const unblocks = f.querySelector('.waits-unblocks');
+    const own = open.length ? `⏳ ${open[0].firstChild.textContent.replace(/^⏳\s*/, '').trim()}${open.length > 1 ? ` +${open.length - 1}` : ''}` : '';
+    return [own, unblocks ? unblocks.textContent.replace(/:.*$/, '') : ''].filter(Boolean).join(' · ');
+  },
   estimate: (f) => { const m = Number(f.elements.estimate_minutes && f.elements.estimate_minutes.value); return m ? fmtMinutes(m) : ''; },
   repeat: (f) => { const s = f.elements.repeat_preset; return s && s.value && s.value !== 'none' ? optText(s) : ''; },
   notify: (f) => { const n = f.querySelectorAll('[data-notify-list] li').length; return n ? `${n} reminder${n === 1 ? '' : 's'}` : ''; },
@@ -51,7 +57,8 @@ const SUMMARIES = {
     const tags = f.querySelectorAll('.tag-picker .tag-toggle.on').length;
     const w = f.elements.waiting_on && f.elements.waiting_on.value ? `⏳ ${optText(f.elements.waiting_on)}` : '';
     const folder = f.elements.folder_path && f.elements.folder_path.value.trim() ? '📂' : '';
-    return [part ? `in ${part.textContent.split(' › ').pop()}` : proj, tags ? `${tags} tag${tags === 1 ? '' : 's'}` : '', w, folder].filter(Boolean).join(' · ');
+    const waits = f.querySelectorAll('.wait-chip:not(.done)').length ? '⏳ waits' : '';
+    return [part ? `in ${part.textContent.split(' › ').pop()}` : proj, tags ? `${tags} tag${tags === 1 ? '' : 's'}` : '', w, waits, folder].filter(Boolean).join(' · ');
   },
   dates: (f) => [['due_at', 'Due'], ['planned_at', 'Planned'], ['defer_at', 'Defer']]
     .map(([k, l]) => (VALUES[k](f) ? `${l} ${VALUES[k](f).replace(/,.*$/, '')}` : '')).filter(Boolean).slice(0, 2).join(' · '),

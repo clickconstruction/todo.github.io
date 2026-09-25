@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      perspectives: [], imports: [], settle_ops: [], review_sessions: [], review_items: [], slipbox_notes: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      task_waits: [], perspectives: [], imports: [], settle_ops: [], review_sessions: [], review_items: [], slipbox_notes: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -192,10 +192,18 @@
         taskRules(c, b);
       });
     }
+    if (wasOpen && !isOpen(t)) { // tasks_unblock(): cards now waiting on nothing open are planned for today
+      tables.task_waits.filter((w) => w.waits_for === t.id).forEach((w) => {
+        const x = tables.tasks.find((r) => r.id === w.task_id);
+        if (!x || !isOpen(x) || x.on_unblock === 'none' || (x.planned_at && x.planned_at <= now())) return;
+        const still = tables.task_waits.some((o) => { const b = o.task_id === x.id && tables.tasks.find((r) => r.id === o.waits_for); return b && isOpen(b); });
+        if (!still) x.planned_at = now();
+      });
+    }
     if (t.parent_id) {
       const parent = tables.tasks.find((x) => x.id === t.parent_id);
       const kids = tables.tasks.filter((x) => x.parent_id === t.parent_id);
-      if (parent && !isOpen(t) && !kids.some(isOpen) && kids.some((k) => k.completed_at) && isOpen(parent)) {
+      if (parent && !isOpen(t) && !kids.some(isOpen) && kids.some((k) => k.completed_at) && isOpen(parent) && parent.complete_with_last !== false && !parent.steps_single) {
         const b = { ...parent }; parent.completed_at = now(); taskRules(parent, b);
       } else if (parent && isOpen(t) && parent.completed_at) {
         const b = { ...parent }; parent.completed_at = null; taskRules(parent, b); // reopen upwards
@@ -223,13 +231,22 @@
     t.project_id = p.project_id; t.in_inbox = false;
     return null;
   }
+  // Mirrors task_waits_guard(): no self-links, no loops, not a card's own steps or parent.
+  function waitsGuard(w) {
+    if (w.task_id === w.waits_for) return 'A card can’t wait for itself.';
+    const seen = new Set(); const stack = [w.waits_for];
+    while (stack.length) { const c = stack.pop(); if (c === w.task_id) return 'That would make a loop: those cards would wait for each other.'; if (seen.has(c)) continue; seen.add(c); tables.task_waits.filter((x) => x.task_id === c).forEach((x) => stack.push(x.waits_for)); }
+    const up = (id) => { const out = []; let cur = (byTask(id) || {}).parent_id; while (cur) { out.push(cur); cur = (byTask(cur) || {}).parent_id; } return out; };
+    if (up(w.task_id).includes(w.waits_for) || up(w.waits_for).includes(w.task_id)) return 'A card can’t wait for one of its own steps, or for the card it’s a step of.';
+    return null;
+  }
   // Mirrors tasks_tree_follow(): moving a task moves its steps.
   function follow(t) { tables.tasks.filter((c) => c.parent_id === t.id).forEach((c) => { if (c.project_id !== t.project_id) { c.project_id = t.project_id; follow(c); } }); }
 
   // Column defaults the real database fills in (and returns) on insert.
   const DEFAULTS = {
     tasks: () => ({ project_id: null, parent_id: null, in_inbox: true, notes: '', completion_note: '', flagged: false, defer_at: null, planned_at: null,
-      due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null, repeat_rule: null, steps_in_order: false, scheduled_at: null, scheduled_minutes: null, checklist_id: null,
+      due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null, repeat_rule: null, steps_in_order: false, steps_single: false, complete_with_last: true, on_unblock: 'forecast', scheduled_at: null, scheduled_minutes: null, checklist_id: null,
       energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, gain: '', gain_cost: '', gain_by: null, gain_met: null, clarify_skips: 0, reading_type: null, reading_state: null, reading_url: null, reading_notes_done: false, important: null, folder_path: null }),
     projects: () => ({ folder_id: null, folder_path: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
       review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null, defer_at: null, planned_at: null, due_at: null, estimate_minutes: null,
@@ -297,6 +314,7 @@
       if (st.op === 'insert') {
         const add = [].concat(st.payload).map((p) => ({ id: id(), user_id: uid, created_at: now(), updated_at: now(), sort: 0, ...(DEFAULTS[table] ? DEFAULTS[table]() : {}), ...p }));
         if (table === 'tasks') { for (const r of add) { const err = treeGuard(r); if (err) return { data: null, error: { message: err } }; } }
+        if (table === 'task_waits') { for (const r of add) { const err = waitsGuard(r); if (err) return { data: null, error: { message: err } }; } }
         rows.push(...add);
         add.forEach((r) => { if (table === 'projects') { reviewSchedule(r); projectStatusChange(r, null); } if (table === 'tasks') taskRules(r, null); if (table === 'notifications') { fireAt(r); history(r, 'notification', null, { kind: r.kind, offset_minutes: r.offset_minutes, at: r.at }); } });
         return { data: add.map(copy), error: null };
