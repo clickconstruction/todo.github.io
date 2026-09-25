@@ -356,7 +356,7 @@ async function authenticate(request, env, ctx) {
 // The API returns at most 1,000 rows a request, so a read without its own limit is fetched a page at a
 // time, in a stable order (the table's key breaks ties), until a short page.
 const PAGE = 1000;
-const TIE = { task_tags: 'task_id.asc,tag_id.asc', project_tags: 'project_id.asc,tag_id.asc', user_settings: 'user_id.asc' };
+const TIE = { task_tags: 'task_id.asc,tag_id.asc', project_tags: 'project_id.asc,tag_id.asc', task_waits: 'task_id.asc,waits_for.asc', user_settings: 'user_id.asc' };
 async function rest(env, path, opts = {}) {
   if ((opts.method || 'GET') !== 'GET' || path.startsWith('rpc/') || /[?&]limit=/.test(path)) return rest1(env, path, opts);
   const tie = TIE[path.split('?')[0]] || 'id.asc';
@@ -441,7 +441,19 @@ class Api {
       this.hours = { due: (s.due_minutes ?? 1020) / 60, planned: (s.planned_minutes ?? 540) / 60, defer: (s.defer_minutes ?? 0) / 60 };
     } catch { /* defaults */ }
   }
-  q(path, opts) { return rest(this.env, path, opts); }
+  // Reads are shared within one call (the same list asked for twice, e.g. every tag link for availability
+  // and again for display, costs one set of requests; a Worker gets 50 a call). Any write clears them.
+  q(path, opts) {
+    const read = !opts || (opts.method || 'GET') === 'GET';
+    if (!read) { this.reads = null; return rest(this.env, path, opts); }
+    this.reads ||= new Map();
+    if (!this.reads.has(path)) {
+      const p = rest(this.env, path, opts);
+      this.reads.set(path, p);
+      p.catch(() => { if (this.reads) this.reads.delete(path); });
+    }
+    return this.reads.get(path).then((rows) => (Array.isArray(rows) ? rows.slice() : rows));
+  }
 
   async lookups() {
     const [projects, tags, people] = await Promise.all([
@@ -777,15 +789,14 @@ const parkedOf = (data) => {
   return (t) => hold(t) || wait(t) || cards(t) || (data.buckets ? data.buckets.has(t.id) : !!t.steps_single);
 };
 async function holdFor(api, tasks) {
-  const [tags, taskTags, projectTags, people, taskWaits, buckets] = await Promise.all([
-    api.q(`tags?${api.u}&select=id,name,parent_id,status`),
+  const [tags, taskTags, projectTags, people, taskWaits] = await Promise.all([
+    api.q(`tags?${api.u}&select=*`),
     api.q(`task_tags?${api.u}&select=task_id,tag_id`),
     api.q(`project_tags?${api.u}&select=project_id,tag_id`),
     api.q(`people?${api.u}&archived_at=is.null&select=id,name,tag_id,archived_at`),
     api.q(`task_waits?${api.u}&select=task_id,waits_for`),
-    api.q(`tasks?${api.u}&${OPEN}&steps_single=is.true&select=id`),
   ]);
-  return parkedOf({ tasks, tags, taskTags, projectTags, people, taskWaits, buckets: new Set(buckets.map((b) => b.id)) });
+  return parkedOf({ tasks, tags, taskTags, projectTags, people, taskWaits });
 }
 
 // A task with its steps as a nested tree (progress counted over the smallest steps, the leaves) and the
@@ -826,7 +837,7 @@ async function perspectiveData(api, needClosed) {
     needClosed ? api.q(`tasks?${api.u}&or=(completed_at.not.is.null,dropped_at.not.is.null)&order=updated_at.desc&limit=500&select=*`) : [],
     api.q(`projects?${api.u}&select=*`),
     api.q(`folders?${api.u}&select=*`),
-    api.q(`tags?${api.u}&select=id,name,parent_id,status`),
+    api.q(`tags?${api.u}&select=*`),
     api.q(`task_tags?${api.u}&select=task_id,tag_id`),
     api.q(`project_tags?${api.u}&select=project_id,tag_id`),
     api.q(`people?${api.u}&archived_at=is.null&select=id,name,tag_id,archived_at`),
@@ -1055,8 +1066,8 @@ const TOOLS = [
       let rows = await api.q(`tasks?${f.join('&')}`);
       if (a.available_only) {
         const [allOpen, projects] = await Promise.all([
-          api.q(`tasks?${api.u}&${OPEN}&select=id,project_id,parent_id,steps_in_order,sort,created_at,defer_at,completed_at,dropped_at,waiting_on,agenda_for`),
-          api.q(`projects?${api.u}&select=id,kind,status,defer_at`),
+          api.q(`tasks?${api.u}&${OPEN}&select=*`),
+          api.q(`projects?${api.u}&select=*`),
         ]);
         const { available } = availabilityOf(allOpen, projects, undefined, await holdFor(api, allOpen));
         const ok = new Set(allOpen.filter(available).map((t) => t.id));
@@ -1085,7 +1096,7 @@ const TOOLS = [
       // Settings → Dates → "Always show in Today": that tag's open, available-now actions.
       const ftag = api.settings.forecast_tag_id;
       if (ftag) {
-        const [tags, links] = await Promise.all([api.q(`tags?${api.u}&select=id,name,parent_id`), api.q(`task_tags?${api.u}&select=task_id,tag_id`)]);
+        const [tags, links] = await Promise.all([api.q(`tags?${api.u}&select=*`), api.q(`task_tags?${api.u}&select=task_id,tag_id`)]);
         const ids = new Set([ftag, ...tags.filter((g) => g.parent_id === ftag).map((g) => g.id)]);
         const taggedIds = [...new Set(links.filter((l) => ids.has(l.tag_id)).map((l) => l.task_id))];
         const nowIso = new Date().toISOString();
@@ -1129,14 +1140,19 @@ const TOOLS = [
       const nowIso = new Date().toISOString();
       const [projects, open, folders] = await Promise.all([
         api.q(`projects?${api.u}&status=in.(active,on_hold)&order=next_review_at.asc&select=*`),
-        api.q(`tasks?${api.u}&${OPEN}&select=id,title,project_id,parent_id,steps_in_order,sort,created_at,defer_at,due_at,planned_at,completed_at,dropped_at,waiting_on,agenda_for`),
+        api.q(`tasks?${api.u}&${OPEN}&select=*`),
         api.q(`folders?${api.u}&select=id,name`),
       ]);
       const due = projects.filter((p) => include_not_due || (p.next_review_at && p.next_review_at <= nowIso));
       const { nextFor } = availabilityOf(open, projects, nowIso, await holdFor(api, open));
       const todayStart = zonedToIso(localDate(nowIso, api.tz), 0, api.tz);
       const out = [];
-      for (const p of due.slice(0, 50)) {
+      // Completions in the last 30 days for these projects, in one read (not one per project).
+      const shown = due.slice(0, 50);
+      const since30 = new Date(Date.now() - 30 * 86400000).toISOString();
+      const recent = shown.length ? await api.q(`tasks?${api.u}&completed_at=gte.${since30}&project_id=${inList(shown.map((p) => p.id))}&select=project_id,completed_at`) : [];
+      const lastDone = new Map(); recent.forEach((t) => { if (!lastDone.has(t.project_id) || t.completed_at > lastDone.get(t.project_id)) lastDone.set(t.project_id, t.completed_at); });
+      for (const p of shown) {
         const mine = open.filter((t) => t.project_id === p.id);
         const next = p.status === 'active' ? nextFor(p.id) : null;
         const hints = [];
@@ -1147,9 +1163,7 @@ const TOOLS = [
         const slipped = mine.filter((t) => t.planned_at && t.planned_at < todayStart).length;
         if (slipped) hints.push(`${slipped} planned date(s) slipped`);
         if (p.status === 'active' && mine.length) {
-          const [last] = await api.q(`tasks?${api.u}&project_id=eq.${p.id}&completed_at=not.is.null&order=completed_at.desc&limit=1&select=completed_at`);
-          const days = last ? Math.floor((Date.now() - Date.parse(last.completed_at)) / 86400000) : null;
-          if (days === null || days >= 30) hints.push(days === null ? 'Nothing ever completed.' : `Nothing completed in ${days} days.`);
+          if (!lastDone.has(p.id)) hints.push('Nothing completed in the last 30 days.');
         }
         if (p.status === 'on_hold' && p.updated_at && Date.now() - Date.parse(p.updated_at) > 90 * 86400000) hints.push('On hold 3+ months.');
         out.push({
@@ -1181,7 +1195,7 @@ const TOOLS = [
     async run(api, { available_only = false }) {
       const [open, projects] = await Promise.all([
         api.q(`tasks?${api.u}&${OPEN}&select=*`),
-        api.q(`projects?${api.u}&select=id,name,kind,status,flagged,defer_at`),
+        api.q(`projects?${api.u}&select=*`),
       ]);
       const flaggedProjects = new Set(projects.filter((p) => p.flagged).map((p) => p.id));
       const { available } = availabilityOf(open, projects, undefined, await holdFor(api, open));
@@ -1743,7 +1757,7 @@ const TOOLS = [
       const [projects, folders, open] = await Promise.all([
         api.q(`projects?${api.u}${include_inactive ? '' : '&status=in.(active,on_hold)'}&order=sort.asc&select=*`),
         api.q(`folders?${api.u}&select=id,name`),
-        api.q(`tasks?${api.u}&${OPEN}&select=id,title,project_id,parent_id,steps_in_order,sort,created_at,defer_at,completed_at,dropped_at`),
+        api.q(`tasks?${api.u}&${OPEN}&select=*`),
       ]);
       const { nextFor } = availabilityOf(open, projects, undefined, await holdFor(api, open));
       return projects.map((p) => {
@@ -1952,7 +1966,7 @@ const TOOLS = [
       const [{ tags, tagLabel }, links, open] = await Promise.all([
         api.lookups(),
         api.q(`task_tags?${api.u}&select=task_id,tag_id`),
-        api.q(`tasks?${api.u}&${OPEN}&select=id`),
+        api.q(`tasks?${api.u}&${OPEN}&select=*`),
       ]);
       const openIds = new Set(open.map((t) => t.id));
       const statusOf = (t) => { let st = 'active'; for (let g = t, i = 0; g && i < 8; i++) { if (g.status === 'dropped') return 'dropped'; if (g.status === 'on_hold') st = 'on_hold'; g = tags.find((x) => x.id === g.parent_id); } return st; };
@@ -2170,7 +2184,7 @@ const TOOLS = [
       const data = await loadPlaceData((path) => api.q(path), api.userId);
       const resolve = makePlaceResolver(data);
       const full = await api.q(`tasks?${api.u}&${OPEN}&select=*`);
-      const { available } = availabilityOf(full, await api.q(`projects?${api.u}&select=id,status,kind,defer_at`), undefined, await holdFor(api, full));
+      const { available } = availabilityOf(full, await api.q(`projects?${api.u}&select=*`), undefined, await holdFor(api, full));
       const byPlace = new Map();
       full.forEach((t) => {
         if (available_only && !available(t)) return;
@@ -2195,7 +2209,7 @@ TOOLS.push(...gtdTools({ OPEN, zonedToIso, localDate, inList, tool: (name) => TO
 // Available actions (not Inbox items) with what What now? needs to filter and rank them.
 async function availableTasks(api) {
   const [open, projects, tags, links, projectLinks, people, taskWaits] = await Promise.all([
-    api.q(`tasks?${api.u}&${OPEN}&select=*`), api.q(`projects?${api.u}&select=*`), api.q(`tags?${api.u}&select=id,name,parent_id,status`),
+    api.q(`tasks?${api.u}&${OPEN}&select=*`), api.q(`projects?${api.u}&select=*`), api.q(`tags?${api.u}&select=*`),
     api.q(`task_tags?${api.u}&select=task_id,tag_id`), api.q(`project_tags?${api.u}&select=project_id,tag_id`), api.q(`people?${api.u}&archived_at=is.null&select=id,name,tag_id,archived_at`),
     api.q(`task_waits?${api.u}&select=task_id,waits_for`),
   ]);

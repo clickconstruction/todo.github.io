@@ -44,10 +44,10 @@ export function makePlaceResolver({ tasks, taskTags, tags, projects, projectTags
 export async function loadPlaceData(rest, userId) {
   const u = `user_id=eq.${userId}`;
   const [tasks, taskTags, tags, projects, projectTags, places] = await Promise.all([
-    rest(`tasks?${u}&completed_at=is.null&dropped_at=is.null&select=id,title,parent_id,project_id,place_id,location_trigger,location_radius_m,defer_at,flagged,due_at,planned_at`),
+    rest(`tasks?${u}&completed_at=is.null&dropped_at=is.null&select=*`),
     rest(`task_tags?${u}&select=task_id,tag_id`),
-    rest(`tags?${u}&select=id,name,parent_id,status,place_id,location_trigger,location_radius_m`),
-    rest(`projects?${u}&select=id,name,status,place_id,location_trigger,location_radius_m`),
+    rest(`tags?${u}&select=*`),
+    rest(`projects?${u}&select=*`),
     rest(`project_tags?${u}&select=project_id,tag_id`),
     rest(`places?${u}&select=*`),
   ]);
