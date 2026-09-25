@@ -1836,7 +1836,7 @@ async function steps(check) {
   const kids = db.tasks.filter((t) => t.parent_id === 't13').sort((a, b) => a.sort - b.sort).map((t) => t.title);
   check('steps saved in order, typed text kept', JSON.stringify(kids) === JSON.stringify(['Research mirror grinding', 'Order a 16-inch mirror blank', 'Build the tube and mount', 'Build the grinding stand', 'Grind and polish the mirror']), kids.join(' | '));
   check('do in order saved; steps left the Inbox', task('t13').steps_in_order && db.tasks.filter((t) => t.parent_id === 't13').every((t) => !t.in_inbox));
-  check('editor Steps section redraws in place', has('#editor .steps-field', '0 of 5 done', 'grind and polish the mirror') && $('#editor [name=steps_in_order]').checked);
+  check('editor Steps section redraws in place', has('#editor .steps-field', '0 of 5 done', 'grind and polish the mirror') && $('#editor [name=steps_kind][value=sequential]').checked);
   $('#sheet').close();
 
   // Inbox shows the tree; in order: first step is Next, the rest wait.
