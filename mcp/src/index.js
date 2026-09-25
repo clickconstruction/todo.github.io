@@ -379,6 +379,12 @@ async function rest1(env, path, { method = 'GET', body, prefer } = {}) {
 }
 
 const inList = (ids) => `in.(${ids.map((id) => `"${id}"`).join(',')})`;
+// A read by a long id list, 150 ids a request, so the address stays short (a big steps tree has hundreds).
+async function byIds(ids, read) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += 150) out.push(...await read(ids.slice(i, i + 150)));
+  return out;
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function mustUuid(v, field) {
   if (!UUID.test(String(v || ''))) throw new Error(`${field} must be a task/project id (uuid)`);
@@ -501,14 +507,18 @@ class Api {
     const known = new Set(placeData.tasks.map((t) => t.id));
     placeData.tasks.push(...tasks.filter((t) => !known.has(t.id))); // closed tasks too
     const placeOf = makePlaceResolver(placeData);
-    const reminders = await this.notificationsFor('task_id', tasks.map((t) => t.id));
-    const files = await this.q(`attachments?${this.u}&task_id=${inList(tasks.map((t) => t.id))}&archived_at=is.null&order=created_at.asc&select=id,task_id,name,size,mime`);
-    const projectIds = [...new Set(tasks.map((t) => t.project_id).filter(Boolean))];
-    const [{ projects, tags, tagLabel, people }, links, pLinks] = await Promise.all([
-      this.lookups(),
-      this.q(`task_tags?${this.u}&task_id=${inList(tasks.map((t) => t.id))}&select=task_id,tag_id`),
-      projectIds.length ? this.q(`project_tags?${this.u}&project_id=${inList(projectIds)}&select=project_id,tag_id`) : [],
+    // The place data already holds every tag, project and tag link: reuse them (a Worker gets 50 requests a call).
+    const ids = tasks.map((t) => t.id);
+    const [reminders, files, people] = await Promise.all([
+      this.notificationsFor('task_id', ids),
+      byIds(ids, (part) => this.q(`attachments?${this.u}&task_id=${inList(part)}&archived_at=is.null&order=created_at.asc&select=id,task_id,name,size,mime`)),
+      this.q(`people?${this.u}&select=id,name`),
     ]);
+    const { projects, tags } = placeData;
+    const tagLabel = (t) => { const p = t.parent_id && tags.find((x) => x.id === t.parent_id); return p ? `${p.name} : ${t.name}` : t.name; };
+    const wanted = new Set(ids);
+    const links = placeData.taskTags.filter((l) => wanted.has(l.task_id));
+    const pLinks = placeData.projectTags;
     return tasks.map((t) => ({
       id: t.id,
       title: t.title,
@@ -624,7 +634,7 @@ class Api {
   // Custom notifications: { id -> [{kind, minutes, at, fires_at, sent}] } for task_id or project_id.
   async notificationsFor(col, ids) {
     if (!ids.length) return {};
-    const rows = await this.q(`notifications?${this.u}&${col}=${inList(ids)}&order=fire_at.asc&select=*`);
+    const rows = await byIds(ids, (part) => this.q(`notifications?${this.u}&${col}=${inList(part)}&order=fire_at.asc&select=*`));
     const out = {};
     rows.forEach((n) => { (out[n[col]] = out[n[col]] || []).push({ kind: n.kind, minutes: n.kind === 'before_due' || n.kind === 'before_planned' ? n.offset_minutes : undefined, at: n.at || undefined, fires_at: n.fire_at, sent: !!n.sent_at }); });
     return out;
@@ -755,21 +765,31 @@ async function holdFor(api, tasks) {
   return parkedOf({ tasks, tags, taskTags, projectTags, people });
 }
 
-// A task's steps as a nested tree, with progress counted over the smallest steps (leaves).
-async function stepsTree(api, rootId) {
+// A task with its steps as a nested tree (progress counted over the smallest steps, the leaves) and the
+// tasks it is part of (part_of, nearest first). One query for the whole family and one shape pass, so a
+// big tree stays well inside the Worker's 50 requests.
+async function taskWithTree(api, id) {
+  const family = await api.q('rpc/task_family', { method: 'POST', body: { task_id: mustUuid(id, 'id'), owner: api.userId } });
+  const byId = new Map(family.map((t) => [t.id, t]));
+  const task = family.find((t) => t.id.toLowerCase() === String(id).toLowerCase());
+  if (!task) throw new Error('Task not found');
+  const kidsOf = new Map();
+  family.forEach((t) => { if (t.parent_id) { if (!kidsOf.has(t.parent_id)) kidsOf.set(t.parent_id, []); kidsOf.get(t.parent_id).push(t); } });
+  const kids = (pid) => (kidsOf.get(pid) || []).sort((a, b) => (a.sort || 0) - (b.sort || 0));
   const all = [];
-  let level = [rootId];
-  for (let d = 0; d < 5 && level.length; d++) {
-    const rows = await api.q(`tasks?${api.u}&parent_id=${inList(level)}&order=sort.asc&select=*`);
-    all.push(...rows);
-    level = rows.map((r) => r.id);
+  const collect = (pid, d) => { if (d < 8) kids(pid).forEach((t) => { all.push(t); collect(t.id, d + 1); }); };
+  collect(task.id, 0);
+  const shaped = new Map((await api.shape([task, ...all])).map((x) => [x.id, x]));
+  const out = shaped.get(task.id);
+  if (all.length) {
+    const build = (pid) => kids(pid).map((t) => { const x = shaped.get(t.id); const k = build(t.id); if (k.length) x.steps = k; return x; });
+    const leaves = all.filter((t) => !kidsOf.has(t.id) && (!t.dropped_at || t.completed_at));
+    Object.assign(out, { steps: build(task.id), progress: { done: leaves.filter((t) => t.completed_at).length, total: leaves.length } });
   }
-  if (!all.length) return null;
-  const shaped = new Map((await api.shape(all)).map((x) => [x.id, x]));
-  const kids = (id) => all.filter((t) => t.parent_id === id).sort((a, b) => (a.sort || 0) - (b.sort || 0));
-  const build = (id) => kids(id).map((t) => { const x = shaped.get(t.id); const k = build(t.id); if (k.length) x.steps = k; return x; });
-  const leaves = all.filter((t) => !all.some((c) => c.parent_id === t.id) && (!t.dropped_at || t.completed_at));
-  return { steps: build(rootId), progress: { done: leaves.filter((t) => t.completed_at).length, total: leaves.length } };
+  const up = [];
+  for (let p = byId.get(task.parent_id); p && up.length < 6; p = byId.get(p.parent_id)) up.push({ id: p.id, title: p.title });
+  if (up.length) out.part_of = up;
+  return out;
 }
 
 
@@ -1153,14 +1173,8 @@ const TOOLS = [
     description: 'Get one task with its notes, project, tags, dates, repeat, notifications, attachments (with download links valid for an hour), the tasks it is part of (part_of, nearest first) and its steps as a nested tree with progress (done/total over the smallest steps).',
     inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
     async run(api, { id }) {
-      const task = await api.task(id);
-      const [shaped] = await api.shape([task]);
-      const tree = await stepsTree(api, task.id);
-      if (tree) Object.assign(shaped, tree);
-      const up = [];
-      for (let p = task.parent_id; p && up.length < 6;) { const [r] = await api.q(`tasks?${api.u}&id=eq.${p}&select=id,title,parent_id`); if (!r) break; up.push({ id: r.id, title: r.title }); p = r.parent_id; }
-      if (up.length) shaped.part_of = up;
-      if (shaped.attachments) shaped.attachments = await api.withLinks('task_id', task.id);
+      const shaped = await taskWithTree(api, id);
+      if (shaped.attachments) shaped.attachments = await api.withLinks('task_id', shaped.id);
       return shaped;
     },
   },
@@ -1364,8 +1378,7 @@ const TOOLS = [
         await api.q('tasks', { method: 'POST', body: titles.map((title, i) => ({ user_id: api.userId, title, parent_id: task.id, project_id: task.project_id, in_inbox: false, sort: base + i, source: 'mcp' })) });
       }
       if (in_order !== undefined) await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: { steps_in_order: !!in_order } });
-      const [shaped] = await api.shape([await api.task(task.id)]);
-      return Object.assign(shaped, await stepsTree(api, task.id));
+      return taskWithTree(api, task.id);
     },
   },
   {
