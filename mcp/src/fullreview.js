@@ -125,7 +125,7 @@ actions:
   upcoming {count? ≤10} → the next cards in full, for drafting ahead
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
   annotate {…same fields…} / decide {decision, note?} → apply now (only when asked to just do it)
-  prioritize {task_ids} · goto {item_id | "next" | "previous"} · undo {item_id?} · list
+  prioritize {task_ids (up to 20)} · goto {item_id | "next" | "previous"} · undo {item_id?} · list
 Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, up next)|slipbox (an idea, not an action → fleeting note); group cards accept|one_by_one|keep_all|skip.`,
     inputSchema: {
       type: 'object',
@@ -294,22 +294,23 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
       if (action === 'prioritize') {
         const ids = [...new Set(a.task_ids || [])];
         if (!ids.length) throw new Error('task_ids is required');
+        if (ids.length > 20) throw new Error('At most 20 task_ids at a time.');
+        // Batched: one write per moved card, one per group touched, one insert for the rest (50 requests a call).
         const base = cur ? cur.sort : 0;
-        let k = 0;
         let groups = null;
-        for (const tid of ids) {
-          k += 1;
-          const sort = base + (k / (ids.length + 1)) * 0.5; // right after the current card
+        const touched = new Map();
+        const fresh = [];
+        for (const [i, tid] of ids.entries()) {
+          const sort = base + ((i + 1) / (ids.length + 1)) * 0.5; // right after the current card
           const single = list.find((x) => x.kind === 'task' && x.task_id === tid && x.status === 'pending');
           if (single) { await api.q(`review_items?${api.u}&id=eq.${single.id}`, { method: 'PATCH', body: { sort, priority: true } }); continue; }
           if (!groups) groups = await api.q(`review_items?${api.u}&session_id=eq.${s.id}&kind=eq.group&status=eq.pending&select=id,sort,grp`);
           const grp = groups.find((x) => ((x.grp || {}).task_ids || []).includes(tid));
-          if (grp) {
-            grp.grp = { ...grp.grp, task_ids: grp.grp.task_ids.filter((x) => x !== tid) };
-            await api.q(`review_items?${api.u}&id=eq.${grp.id}`, { method: 'PATCH', body: { grp: grp.grp } });
-          }
-          await api.q('review_items', { method: 'POST', body: { session_id: s.id, user_id: api.userId, sort, kind: 'task', task_id: tid, priority: true } });
+          if (grp) { grp.grp = { ...grp.grp, task_ids: grp.grp.task_ids.filter((x) => x !== tid) }; touched.set(grp.id, grp); }
+          fresh.push({ session_id: s.id, user_id: api.userId, sort, kind: 'task', task_id: tid, priority: true });
         }
+        for (const grp of touched.values()) await api.q(`review_items?${api.u}&id=eq.${grp.id}`, { method: 'PATCH', body: { grp: grp.grp } });
+        if (fresh.length) await api.q('review_items', { method: 'POST', body: fresh });
         await touch(api, s.id);
         return { prioritized: ids.length, ...(await stateOut(api, s, await items(api, s.id))) };
       }

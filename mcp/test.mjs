@@ -63,6 +63,13 @@ globalThis.fetch = async (url, init = {}) => {
     Object.assign(t, { dropped_at: new Date().toISOString(), completion_note: `Became the project “${t.title}”` });
     return new Response(JSON.stringify(pid), { status: 200 });
   }
+  if (String(url).includes('/rest/v1/rpc/task_family')) { // mirror of the SQL function: the task, every step below it, every task above it
+    const b = JSON.parse(init.body); const mine = db.tasks.filter((x) => x.user_id === b.owner); const out = new Set();
+    const down = (pid, d) => { if (d < 8) mine.filter((x) => x.parent_id === pid).forEach((x) => { out.add(x); down(x.id, d + 1); }); };
+    down(b.task_id, 0);
+    for (let t = mine.find((x) => x.id === b.task_id), d = 0; t && d < 9; t = mine.find((x) => x.id === t.parent_id), d++) out.add(t);
+    return new Response(JSON.stringify([...out]), { status: 200 });
+  }
   if (String(url).includes('/rest/v1/rpc/apply_project_plan')) { // SQL is tested in supabase/tests/project_planning.sql; a small mirror
     const b = JSON.parse(init.body); const p = db.projects.find((x) => x.id === b.project && x.user_id === b.owner);
     if (!p) return new Response(JSON.stringify({ message: 'Project not found.' }), { status: 400 });
@@ -1282,5 +1289,28 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(rpcCalls.slice(b0).some((c) => c.fn === 'matrix_park' && c.body.ids[0] === m4 && c.body.owner === UID) && rpcCalls.slice(b0).some((c) => c.fn === 'matrix_unpark'), 'matrix park / unpark → rpc');
   let bad = false; try { await tool('matrix', { action: 'urgent_days', days: 0 }); } catch { bad = true; }
   assert(bad, 'matrix urgent_days: 1 to 60');
+}
+{ // a big steps tree: get_task stays well inside Cloudflare's 50 requests a call
+  await tool('create_project', { name: 'Shop renovation' });
+  const root = await tool('capture', { title: 'Renovate the shop', project: 'Shop renovation' });
+  const mid = (await tool('break_down', { id: root.id, steps: ['Demo', 'Framing', 'Electrical', 'Plumbing'] })).steps;
+  let leaves = 0; const lastLevel = [];
+  for (const m of mid) {
+    const kids = (await tool('break_down', { id: m.id, steps: [1, 2, 3, 4].map((i) => `${m.title} part ${i}`) })).steps;
+    for (const k of kids) { const s = (await tool('break_down', { id: k.id, steps: [1, 2, 3].map((i) => `${k.title} step ${i}`) })).steps; leaves += s.length; lastLevel.push(...s); }
+  }
+  const total = db.tasks.filter((x) => { for (let p = x.parent_id, i = 0; p && i < 6; i++) { if (p === root.id) return true; p = db.tasks.find((y) => y.id === p)?.parent_id; } return false; }).length;
+  db.tasks.find((x) => x.id === lastLevel[0].id).completed_at = new Date().toISOString();
+  db.tasks.find((x) => x.id === lastLevel[1].id).dropped_at = new Date().toISOString();
+  const real = globalThis.fetch; let count = 0;
+  globalThis.fetch = (...x) => { count += 1; return real(...x); };
+  let got; try { got = await tool('get_task', { id: root.id }); } finally { globalThis.fetch = real; }
+  const flat = (list) => (list || []).flatMap((x) => [x, ...flat(x.steps)]);
+  assert(total === 68 && flat(got.steps).length === 68 && got.steps.length === 4 && got.steps[0].steps.length === 4 && got.steps[0].steps[0].steps.length === 3, `get_task: a ${total}-step tree three levels deep comes back whole`);
+  assert(got.progress.total === leaves - 1 && got.progress.done === 1, 'get_task: progress over the smallest steps (dropped ones left out)');
+  assert(count < 20, `get_task: ${count} requests for a big tree (under 20)`);
+  count = 0; globalThis.fetch = (...x) => { count += 1; return real(...x); };
+  let leaf; try { leaf = await tool('get_task', { id: lastLevel[5].id }); } finally { globalThis.fetch = real; }
+  assert(leaf.part_of.map((x) => x.title).join(' < ') === 'Demo part 2 < Demo < Renovate the shop' && count < 20, `get_task: part_of nearest first in one query (${count} requests)`);
 }
 console.log('ALL PASSED');
