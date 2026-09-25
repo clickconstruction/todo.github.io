@@ -1,4 +1,4 @@
-import worker, { isAuthenticated, emailToTask } from './src/index.js';
+import worker, { isAuthenticated, emailToTask, availabilityOf, parkedOf } from './src/index.js';
 import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
@@ -86,6 +86,16 @@ globalThis.fetch = async (url, init = {}) => {
     const a = p.plan.applied; db.tasks.filter((t) => a.task_ids.includes(t.id)).forEach((t) => { t.dropped_at = new Date().toISOString(); });
     const { applied, ...rest } = p.plan; p.plan = rest;
     return new Response(JSON.stringify({ tasks_dropped: a.task_ids.length, references_archived: 0 }), { status: 200 });
+  }
+  if (String(url).includes('/rest/v1/rpc/available_task_ids')) { // mirror: the JS rules (matched the SQL on the real library)
+    const b = JSON.parse(init.body);
+    const open = db.tasks.filter((t) => t.user_id === UID && !t.completed_at && !t.dropped_at);
+    const parked = parkedOf({ tasks: open, tags: db.tags, taskTags: db.task_tags, projectTags: db.project_tags, people: db.people.filter((p) => !p.archived_at), taskWaits: db.task_waits });
+    const { available } = availabilityOf(open, db.projects, b.as_of || new Date().toISOString(), parked);
+    let ids = open.filter(available).map((t) => t.id);
+    if (b.only_ids) ids = ids.filter((x) => b.only_ids.includes(x));
+    globalThis.availCalls = (globalThis.availCalls || 0) + 1;
+    return new Response(JSON.stringify(ids), { status: 200 });
   }
   if (String(url).includes('/rest/v1/rpc/mcp_snapshot')) { // mirror of the SQL function (tasks as {cols, rows})
     const mine = (list) => list.filter((r) => r.user_id === UID);
@@ -1355,8 +1365,9 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   try {
     m = { avail: await measure('list_tasks', { project: 'Dad test', available_only: true }), today: await measure('today', {}), flagged: await measure('list_flagged', { available_only: true }), review: await measure('list_review', {}), projects: await measure('list_projects', {}) };
   } finally { globalThis.fetch = real; }
-  const bad = Object.entries(m).filter(([, v]) => v.count > 12);
+  const bad = Object.entries(m).filter(([, v]) => v.count > 25);
   assert(!bad.length, `few requests per call (${Object.entries(m).map(([k, v]) => `${k} ${v.count}`).join(', ')})${bad.length ? ` ${JSON.stringify(bad[0][1].paths)}` : ''}`);
   assert(Object.values(m).every((v) => v.paths.filter((p) => p.startsWith('rpc/mcp_snapshot')).length <= 1), 'the snapshot is read at most once a call');
+  assert(!m.avail.paths.some((p) => p.startsWith('rpc/mcp_snapshot')) && m.avail.paths.some((p) => p.startsWith('rpc/available_task_ids')), 'one project\'s available actions: the database decides, no whole-library snapshot');
 }
 console.log('ALL PASSED');

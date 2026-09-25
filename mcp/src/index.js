@@ -450,6 +450,33 @@ class Api {
     this.snap.catch(() => { this.snap = null; });
     return this.snap;
   }
+  // Place and tag data for just these tasks: them, the tasks they're steps of (up to 4 levels), their
+  // tag links, and the small lists (tags, projects, project tags, places). Direct reads, not the snapshot.
+  async placeDataFor(tasks) {
+    const d = (path) => this.q(path, { direct: true });
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    let need = [...new Set(tasks.map((t) => t.parent_id).filter((x) => x && !byId.has(x)))];
+    for (let i = 0; i < 4 && need.length; i++) {
+      const up = await byIds(need, (part) => d(`tasks?${this.u}&id=${inList(part)}&select=*`));
+      up.forEach((t) => byId.set(t.id, t));
+      need = [...new Set(up.map((t) => t.parent_id).filter((x) => x && !byId.has(x)))];
+    }
+    const all = [...byId.values()];
+    const [taskTags, tags, projects, projectTags, places] = await Promise.all([
+      byIds(all.map((t) => t.id), (part) => d(`task_tags?${this.u}&task_id=${inList(part)}&select=task_id,tag_id`)),
+      d(`tags?${this.u}&select=*`), d(`projects?${this.u}&select=*`), d(`project_tags?${this.u}&select=project_id,tag_id`), d(`places?${this.u}&select=*`),
+    ]);
+    return { tasks: all, taskTags, tags, projects, projectTags, places };
+  }
+  // Available open task ids, decided by the database (rpc/available_task_ids, the same rules as the app).
+  // All of them (shared by the call) or just those in ids. A read, so it doesn't clear the call's cache.
+  availableSet(ids = null) {
+    const ask = (body) => rest1(this.env, 'rpc/available_task_ids', { method: 'POST', body }).then((x) => new Set(x || []));
+    if (ids && ids.length <= 2000) return ask({ owner: this.userId, only_ids: ids });
+    this.avail ||= ask({ owner: this.userId });
+    this.avail.catch(() => { this.avail = null; });
+    return this.avail;
+  }
   // The whole-library reads the tools make, answered from the snapshot instead of 20-odd paged requests.
   fromSnapshot(path) {
     const u = this.u;
@@ -469,8 +496,8 @@ class Api {
   }
   q(path, opts) {
     const read = !opts || (opts.method || 'GET') === 'GET';
-    if (!read) { this.reads = null; this.snap = null; return rest(this.env, path, opts); }
-    const pick = this.fromSnapshot(path);
+    if (!read) { this.reads = null; this.snap = null; this.avail = null; return rest(this.env, path, opts); }
+    const pick = opts && opts.direct ? null : this.fromSnapshot(path); // direct: a small read, shared but not from the snapshot
     if (pick) return this.snapshot().then((s) => pick(s).slice());
     this.reads ||= new Map();
     if (!this.reads.has(path)) {
@@ -542,19 +569,24 @@ class Api {
 
   async shape(tasks) {
     if (!tasks.length) return [];
-    const placeData = await loadPlaceData((path) => this.q(path), this.userId);
+    // The snapshot if this call already has it; otherwise only what these rows need (a few small reads).
+    const placeData = this.snap ? await loadPlaceData((path) => this.q(path), this.userId) : await this.placeDataFor(tasks);
     const known = new Set(placeData.tasks.map((t) => t.id));
     placeData.tasks.push(...tasks.filter((t) => !known.has(t.id))); // closed tasks too
     const placeOf = makePlaceResolver(placeData);
     // The place data already holds every tag, project and tag link: reuse them (a Worker gets 50 requests a call).
     const ids = tasks.map((t) => t.id);
+    const d = (path) => this.q(path, this.snap ? undefined : { direct: true }); // small direct reads unless the snapshot is here
     const [reminders, files, people, waits] = await Promise.all([
       this.notificationsFor('task_id', ids),
       byIds(ids, (part) => this.q(`attachments?${this.u}&task_id=${inList(part)}&archived_at=is.null&order=created_at.asc&select=id,task_id,name,size,mime`)),
-      this.q(`people?${this.u}&select=id,name`),
-      this.q(`task_waits?${this.u}&select=task_id,waits_for`),
+      d(`people?${this.u}&select=id,name`),
+      this.snap ? this.q(`task_waits?${this.u}&select=task_id,waits_for`)
+        : byIds(ids, (part) => this.q(`task_waits?${this.u}&or=(task_id.${inList(part)},waits_for.${inList(part)})&select=task_id,waits_for`, { direct: true })),
     ]);
     const card = new Map(placeData.tasks.map((x) => [x.id, x]));
+    const linked = [...new Set(waits.flatMap((w) => [w.task_id, w.waits_for]))].filter((x) => !card.has(x));
+    if (linked.length) (await byIds(linked, (part) => this.q(`tasks?${this.u}&id=${inList(part)}&select=id,title,completed_at,dropped_at`, { direct: true }))).forEach((x) => card.set(x.id, x));
     const openCard = (x) => x && !x.completed_at && !x.dropped_at;
     const { projects, tags } = placeData;
     const tagLabel = (t) => { const p = t.parent_id && tags.find((x) => x.id === t.parent_id); return p ? `${p.name} : ${t.name}` : t.name; };
@@ -751,7 +783,9 @@ const OPEN = 'completed_at=is.null&dropped_at=is.null';
 // Mirror of the app's js/availability.js. available = open, not deferred (nor any ancestor),
 // project active and not deferred, no open steps of its own, and not waiting its turn in an
 // ordered container (a sequential project, or a task with steps_in_order) at any level up the tree.
-function availabilityOf(tasks, projects, nowIso = new Date().toISOString(), onHold = () => false) {
+// known: the set of available ids from the database (api.availableSet); when given it decides availability
+// and this only supplies the tree walk for nextFor. The JS rules stay as the reference (tests, parity).
+export function availabilityOf(tasks, projects, nowIso = new Date().toISOString(), onHold = () => false, known = null) {
   const isOpenT = (t) => !t.completed_at && !t.dropped_at;
   const byIdT = new Map(tasks.map((t) => [t.id, t]));
   const projectById = new Map(projects.map((p) => [p.id, p]));
@@ -777,7 +811,7 @@ function availabilityOf(tasks, projects, nowIso = new Date().toISOString(), onHo
     }
     return false;
   };
-  const available = (t) => {
+  const available = known ? (t) => known.has(t.id) : (t) => {
     if (!isOpenT(t) || deferred(t)) return false;
     const p = t.project_id && projectById.get(t.project_id);
     if (p && (p.status !== 'active' || (p.defer_at && p.defer_at > nowIso))) return false; // deferred project hides its actions
@@ -810,7 +844,7 @@ const cardWaitsOf = (data) => {
   const open = (id) => { const t = byId.get(id); return !!t && !t.completed_at && !t.dropped_at; };
   return (t) => { for (let n = t, i = 0; n && i < 8; i++) { if ((w.get(n.id) || []).some(open)) return true; n = n.parent_id && byId.get(n.parent_id); } return false; };
 };
-const parkedOf = (data) => {
+export const parkedOf = (data) => {
   const hold = P.makeOnHold(data); const wait = P.makeWaiting(data); const cards = cardWaitsOf(data);
   return (t) => hold(t) || wait(t) || cards(t) || (data.buckets ? data.buckets.has(t.id) : !!t.steps_single);
 };
@@ -1091,12 +1125,7 @@ const TOOLS = [
       }
       let rows = await api.q(`tasks?${f.join('&')}`);
       if (a.available_only) {
-        const [allOpen, projects] = await Promise.all([
-          api.q(`tasks?${api.u}&${OPEN}&select=*`),
-          api.q(`projects?${api.u}&select=*`),
-        ]);
-        const { available } = availabilityOf(allOpen, projects, undefined, await holdFor(api, allOpen));
-        const ok = new Set(allOpen.filter(available).map((t) => t.id));
+        const ok = await api.availableSet(rows.map((t) => t.id)); // the database decides, for just these rows
         rows = rows.filter((t) => ok.has(t.id));
       }
       return { count: rows.length, items: await api.shape(rows) };
@@ -1170,7 +1199,7 @@ const TOOLS = [
         api.q(`folders?${api.u}&select=id,name`),
       ]);
       const due = projects.filter((p) => include_not_due || (p.next_review_at && p.next_review_at <= nowIso));
-      const { nextFor } = availabilityOf(open, projects, nowIso, await holdFor(api, open));
+      const { nextFor } = availabilityOf(open, projects, nowIso, undefined, await api.availableSet());
       const todayStart = zonedToIso(localDate(nowIso, api.tz), 0, api.tz);
       const out = [];
       // Completions in the last 30 days for these projects, in one read (not one per project).
@@ -1224,7 +1253,7 @@ const TOOLS = [
         api.q(`projects?${api.u}&select=*`),
       ]);
       const flaggedProjects = new Set(projects.filter((p) => p.flagged).map((p) => p.id));
-      const { available } = availabilityOf(open, projects, undefined, await holdFor(api, open));
+      const { available } = availabilityOf(open, projects, undefined, undefined, await api.availableSet());
       const rows = open.filter((t) => (t.flagged || flaggedProjects.has(t.project_id)) && (!available_only || available(t)));
       const items = await api.shape(rows);
       const byProject = {};
@@ -1484,7 +1513,7 @@ const TOOLS = [
     async run(api, { include_archived = false }) {
       const all = (await api.q(`perspectives?${api.u}&order=sort.asc&select=*`)).filter((p) => include_archived || !p.archived_at).sort((x, y) => (x.sort - y.sort) || x.name.localeCompare(y.name));
       const data = await perspectiveData(api, all.some(needsClosed));
-      const { available } = availabilityOf(data.open, data.projects, undefined, parkedOf(data));
+      const { available } = availabilityOf(data.open, data.projects, undefined, undefined, await api.availableSet());
       return all.map((p) => ({ ...perspectiveOut(p, data), open_count: P.evaluate(p, data, { tz: api.tz, available }).tasks.filter((t) => !t.completed_at && !t.dropped_at).length }));
     },
   },
@@ -1511,7 +1540,7 @@ const TOOLS = [
         const errors = P.validate({ rules: p.rules, options: p.options });
         if (errors.length) throw new Error(errors.join('; '));
       }
-      const { available } = availabilityOf(data.open, data.projects, undefined, parkedOf(data));
+      const { available } = availabilityOf(data.open, data.projects, undefined, undefined, await api.availableSet());
       const r = P.evaluate(p, data, { tz: api.tz, available });
       const limit = Math.min(Math.max(1, +a.limit || 100), 500);
       const picked = new Set(r.tasks.slice(0, limit).map((t) => t.id));
@@ -1785,7 +1814,7 @@ const TOOLS = [
         api.q(`folders?${api.u}&select=id,name`),
         api.q(`tasks?${api.u}&${OPEN}&select=*`),
       ]);
-      const { nextFor } = availabilityOf(open, projects, undefined, await holdFor(api, open));
+      const { nextFor } = availabilityOf(open, projects, undefined, undefined, await api.availableSet());
       return projects.map((p) => {
         const next = p.status === 'active' ? nextFor(p.id) : null;
         return {
@@ -2210,7 +2239,7 @@ const TOOLS = [
       const data = await loadPlaceData((path) => api.q(path), api.userId);
       const resolve = makePlaceResolver(data);
       const full = await api.q(`tasks?${api.u}&${OPEN}&select=*`);
-      const { available } = availabilityOf(full, await api.q(`projects?${api.u}&select=*`), undefined, await holdFor(api, full));
+      const { available } = availabilityOf(full, await api.q(`projects?${api.u}&select=*`), undefined, undefined, await api.availableSet());
       const byPlace = new Map();
       full.forEach((t) => {
         if (available_only && !available(t)) return;
@@ -2240,8 +2269,8 @@ async function availableTasks(api) {
     api.q(`task_tags?${api.u}&select=task_id,tag_id`), api.q(`project_tags?${api.u}&select=project_id,tag_id`), api.q(`people?${api.u}&archived_at=is.null&select=id,name,tag_id,archived_at`),
     api.q(`task_waits?${api.u}&select=task_id,waits_for`),
   ]);
-  const { available } = availabilityOf(open, projects, undefined, parkedOf({ tasks: open, tags, taskTags: links, projectTags: projectLinks, people, taskWaits }));
-  return { tasks: open.filter((t) => !t.in_inbox && available(t)), tags, links, projectLinks, projects };
+  const ok = await api.availableSet();
+  return { tasks: open.filter((t) => !t.in_inbox && ok.has(t.id)), tags, links, projectLinks, projects };
 }
 TOOLS.push(...planTools({ projectOut }));
 TOOLS.push(...checklistTools({ localDate }));
