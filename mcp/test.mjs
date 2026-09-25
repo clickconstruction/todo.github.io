@@ -87,6 +87,16 @@ globalThis.fetch = async (url, init = {}) => {
     const { applied, ...rest } = p.plan; p.plan = rest;
     return new Response(JSON.stringify({ tasks_dropped: a.task_ids.length, references_archived: 0 }), { status: 200 });
   }
+  if (String(url).includes('/rest/v1/rpc/mcp_snapshot')) { // mirror of the SQL function (tasks as {cols, rows})
+    const mine = (list) => list.filter((r) => r.user_id === UID);
+    const open = mine(db.tasks).filter((t) => !t.completed_at && !t.dropped_at).sort((a, b) => (a.id < b.id ? -1 : 1));
+    const cols = [...new Set(open.flatMap((t) => Object.keys(t)))].filter((c) => c !== 'user_id');
+    globalThis.snapshotCalls = (globalThis.snapshotCalls || 0) + 1;
+    return new Response(JSON.stringify({ tasks: { cols, rows: open.map((t) => cols.map((c) => (t[c] === undefined ? null : t[c]))) },
+      tags: mine(db.tags), task_tags: db.task_tags.filter((x) => x.user_id === UID || x.user_id === undefined).map(({ task_id, tag_id }) => ({ task_id, tag_id })),
+      project_tags: db.project_tags.map(({ project_id, tag_id }) => ({ project_id, tag_id })), projects: mine(db.projects), people: mine(db.people),
+      places: mine(db.places), task_waits: db.task_waits.map(({ task_id, waits_for }) => ({ task_id, waits_for })) }), { status: 200 });
+  }
   if (String(url).includes('/rest/v1/rpc/')) { rpcCalls.push({ fn: String(url).split('/rpc/')[1], body: JSON.parse(init.body) }); return new Response('{}', { status: 200 }); }
   const u = new URL(url); const table = u.pathname.split('/').pop();
   const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','offset','or'].includes(k));
@@ -1336,5 +1346,17 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   await tool('update_task', { id: kava.id, waits_for: [move.id, bucket.id] });
   await tool('update_task', { id: kava.id, waits_for: [] });
   assert(!db.task_waits.some((w) => w.task_id === kava.id), 'waits_for replaces the list ([] clears)');
+}
+{ // requests per call: whole-library reads come from one snapshot
+  const real = globalThis.fetch; let count = 0; const paths = [];
+  globalThis.fetch = (u, ...x) => { count += 1; paths.push(String(u).split('/rest/v1/')[1] || String(u)); return real(u, ...x); };
+  const measure = async (name, args) => { count = 0; paths.length = 0; await tool(name, args); return { count, paths: [...paths] }; };
+  let m;
+  try {
+    m = { avail: await measure('list_tasks', { project: 'Dad test', available_only: true }), today: await measure('today', {}), flagged: await measure('list_flagged', { available_only: true }), review: await measure('list_review', {}), projects: await measure('list_projects', {}) };
+  } finally { globalThis.fetch = real; }
+  const bad = Object.entries(m).filter(([, v]) => v.count > 12);
+  assert(!bad.length, `few requests per call (${Object.entries(m).map(([k, v]) => `${k} ${v.count}`).join(', ')})${bad.length ? ` ${JSON.stringify(bad[0][1].paths)}` : ''}`);
+  assert(Object.values(m).every((v) => v.paths.filter((p) => p.startsWith('rpc/mcp_snapshot')).length <= 1), 'the snapshot is read at most once a call');
 }
 console.log('ALL PASSED');

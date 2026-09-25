@@ -11,6 +11,9 @@ export function makePlaceResolver({ tasks, taskTags, tags, projects, projectTags
   const taskById = new Map(tasks.map((t) => [t.id, t]));
   const tagById = new Map(tags.map((t) => [t.id, t]));
   const projectById = new Map(projects.map((p) => [p.id, p]));
+  // Tag links by task and by project, built once: scanning every link for every task was 8k × 9.5k.
+  const linksOf = new Map(); taskTags.forEach((x) => { if (!linksOf.has(x.task_id)) linksOf.set(x.task_id, []); linksOf.get(x.task_id).push(x); });
+  const pLinksOf = new Map(); projectTags.forEach((x) => { if (!pLinksOf.has(x.project_id)) pLinksOf.set(x.project_id, []); pLinksOf.get(x.project_id).push(x); });
   const fromRow = (row, via) => {
     const place = row && row.place_id && placeById.get(row.place_id);
     return place ? { place, trigger: row.location_trigger || null, radius: row.location_radius_m || place.radius_m, via } : null;
@@ -18,7 +21,7 @@ export function makePlaceResolver({ tasks, taskTags, tags, projects, projectTags
   const resolve = (t, depth = 0) => {
     const own = fromRow(t, null);
     if (own) return own;
-    for (const link of taskTags.filter((x) => x.task_id === t.id)) {
+    for (const link of linksOf.get(t.id) || []) {
       const tag = tagById.get(link.tag_id);
       const r = fromRow(tag, tag && { kind: 'tag', label: tag.name });
       if (r) return r;
@@ -29,7 +32,7 @@ export function makePlaceResolver({ tasks, taskTags, tags, projects, projectTags
     if (project) {
       const r = fromRow(project, { kind: 'project', label: project.name });
       if (r) return r;
-      for (const link of projectTags.filter((x) => x.project_id === project.id)) {
+      for (const link of pLinksOf.get(project.id) || []) {
         const tag = tagById.get(link.tag_id);
         const pr = fromRow(tag, tag && { kind: 'project tag', label: tag.name });
         if (pr) return pr;
@@ -41,6 +44,18 @@ export function makePlaceResolver({ tasks, taskTags, tags, projects, projectTags
 }
 
 // Everything the resolver needs for one user (open tasks only).
+// rpc/mcp_snapshot sends open tasks as a table ({cols, rows}, each column name once): back to objects.
+export function decodeSnapshot(s, userId) {
+  const { cols, rows } = s.tasks || { cols: [], rows: [] };
+  s.tasks = rows.map((r) => { const o = { user_id: userId }; for (let i = 0; i < cols.length; i++) o[cols[i]] = r[i]; return o; });
+  return s;
+}
+// Everything place alerts need, in one request.
+export async function snapshotPlaceData(rest, userId) {
+  const s = decodeSnapshot(await rest('rpc/mcp_snapshot', { method: 'POST', body: { owner: userId } }), userId);
+  return { tasks: s.tasks, taskTags: s.task_tags, tags: s.tags, projects: s.projects, projectTags: s.project_tags, places: s.places };
+}
+
 export async function loadPlaceData(rest, userId) {
   const u = `user_id=eq.${userId}`;
   const [tasks, taskTags, tags, projects, projectTags, places] = await Promise.all([
@@ -105,7 +120,7 @@ export async function handleGeo(request, env, ctx, { rest, sha256Hex, json }) {
     if (!/^[0-9a-f-]{36}$/i.test(String(p.place || ''))) return json({ error: 'place must be a place id' }, 400);
     [place] = await rest(`places?id=eq.${p.place}&user_id=eq.${userId}&archived_at=is.null&select=*`);
     if (!place) return json({ error: 'Place not found (archived or not yours)' }, 404);
-    actions = actionsForEvent(await loadPlaceData(rest, userId), place.id, event);
+    actions = actionsForEvent(await snapshotPlaceData(rest, userId), place.id, event);
     if (!actions.length) return json({ place: place.name, event, actions: [], sent: 0, note: 'No open actions ask for this alert, so nothing was sent.' });
     message = eventMessage(place, event, actions);
   }

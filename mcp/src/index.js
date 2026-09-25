@@ -7,7 +7,7 @@
 // below is explicitly scoped to the token owner's user_id.
 
 import PostalMime from 'postal-mime';
-import { handleGeo, makePlaceResolver, loadPlaceData } from './geo.js';
+import { handleGeo, makePlaceResolver, loadPlaceData, decodeSnapshot } from './geo.js';
 import { sendDueReminders, sendReviewReminders, sendDailyReminders } from './reminders.js';
 import { deliver, sendQueuedTests } from './deliver.js';
 import { handleCalendarFetch, calendarEvents } from './calendar.js';
@@ -443,9 +443,35 @@ class Api {
   }
   // Reads are shared within one call (the same list asked for twice, e.g. every tag link for availability
   // and again for display, costs one set of requests; a Worker gets 50 a call). Any write clears them.
+  // Everything the rules need, in one request (rpc/mcp_snapshot): open tasks (sent as a table, each
+  // column name once), tags, tag links, projects, people, places and waits-for links. Shared by the call.
+  snapshot() {
+    this.snap ||= rest1(this.env, 'rpc/mcp_snapshot', { method: 'POST', body: { owner: this.userId } }).then((s) => decodeSnapshot(s, this.userId));
+    this.snap.catch(() => { this.snap = null; });
+    return this.snap;
+  }
+  // The whole-library reads the tools make, answered from the snapshot instead of 20-odd paged requests.
+  fromSnapshot(path) {
+    const u = this.u;
+    const map = {
+      [`tasks?${u}&${OPEN}&select=*`]: (s) => s.tasks,
+      [`tags?${u}&select=*`]: (s) => s.tags,
+      [`task_tags?${u}&select=task_id,tag_id`]: (s) => s.task_tags,
+      [`project_tags?${u}&select=project_id,tag_id`]: (s) => s.project_tags,
+      [`projects?${u}&select=*`]: (s) => s.projects,
+      [`places?${u}&select=*`]: (s) => s.places,
+      [`task_waits?${u}&select=task_id,waits_for`]: (s) => s.task_waits,
+      [`people?${u}&select=*`]: (s) => s.people,
+      [`people?${u}&select=id,name`]: (s) => s.people,
+      [`people?${u}&archived_at=is.null&select=id,name,tag_id,archived_at`]: (s) => s.people.filter((p) => !p.archived_at),
+    };
+    return map[path] || null;
+  }
   q(path, opts) {
     const read = !opts || (opts.method || 'GET') === 'GET';
-    if (!read) { this.reads = null; return rest(this.env, path, opts); }
+    if (!read) { this.reads = null; this.snap = null; return rest(this.env, path, opts); }
+    const pick = this.fromSnapshot(path);
+    if (pick) return this.snapshot().then((s) => pick(s).slice());
     this.reads ||= new Map();
     if (!this.reads.has(path)) {
       const p = rest(this.env, path, opts);
@@ -2196,10 +2222,11 @@ const TOOLS = [
         byPlace.get(loc.place.id).tasks.push(t);
       });
       const groups = [...byPlace.values()].sort((a, b) => a.distance_m - b.distance_m);
+      const shaped = new Map((await api.shape(groups.flatMap((g) => g.tasks))).map((x) => [x.id, x])); // one pass, not one per place
       const out = [];
       for (const g of groups) {
         out.push({ place: g.place.name, place_id: g.place.id, address: g.place.address || undefined, distance_m: g.distance_m,
-          inside_radius: g.distance_m <= g.place.radius_m, actions: await api.shape(g.tasks) });
+          inside_radius: g.distance_m <= g.place.radius_m, actions: g.tasks.map((t) => shaped.get(t.id)) });
       }
       return { count: out.reduce((n, g) => n + g.actions.length, 0), places: out };
     },
