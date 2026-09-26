@@ -5,3 +5,5 @@ exclude:
   - mcp/
   - supabase/
   - dev/
+  - README.md
+  - CLAUDE.md

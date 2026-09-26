@@ -83,12 +83,13 @@ export async function createToken() {
   const token_hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
   await run(sb.from('api_tokens').insert({ name: name.trim(), token_hash, token_hint: token.slice(-4) }));
   await loadSettings();
-  const cmd = `claude mcp add --transport http todotooling ${MCP_URL} --header "Authorization: Bearer ${token}"`;
+  const cmd = `claude mcp add --transport http --scope user todotooling ${MCP_URL} --header "Authorization: Bearer ${token}"`;
   const sheet = openSheet(`<form method="dialog">
     <h2>Token created</h2>
     <p class="view-sub" style="margin:0">Copy it now. It won't be shown again.</p>
     <label>Token<textarea readonly rows="2" onclick="this.select()">${esc(token)}</textarea></label>
     <label>Claude Code command<textarea readonly rows="4" onclick="this.select()">${esc(cmd)}</textarea></label>
+    <p class="hint" style="margin:0">Paste this in Terminal on the computer you'll use Claude on. It connects Todo Tooling in every folder there.</p>
     <div class="actions"><div class="right"><button type="button" class="btn" data-copy>Copy command</button><button class="btn primary">Done</button></div></div>
   </form>`);
   $('[data-copy]', sheet).onclick = async () => { await navigator.clipboard.writeText(cmd); toast('Copied'); };
