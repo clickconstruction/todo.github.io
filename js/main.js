@@ -42,6 +42,7 @@ import { requestLocation, startWatching, onLocation } from './geo.js';
 import { enableAlerts } from './alerts.js';
 import { subscribePush, testAlert, copyGeoUrl, resetAlerts, turnOnAlerts, replaceGeoKey, openAutomationGuide, hideNudge, primeAlerts, isIOS, isStandalone } from './views/alerts.js';
 import { openPlaceEditor, openTagEditor } from './editors/place.js';
+import { openEventEditor } from './editors/event.js';
 import { setWithin } from './views/nearby.js';
 import { openErrandPlanner } from './views/errands.js';
 import { hereNowCount } from './places.js';
@@ -78,6 +79,7 @@ const ACTIONS = {
   'toggle-reorder': () => { const id = location.hash.split('/')[1]; app.reorder = app.reorder === id ? null : id; render(); },
   'new-tag': createTag,
   'new-place': () => openPlaceEditor(null),
+  'new-event': () => { const d = location.hash.split('/')[1]; openEventEditor(null, { day: /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : null }); },
   'request-location': () => requestLocation().then(render, render),
   'enable-alerts': () => enableAlerts().then(render),
   'subscribe-push': subscribePush,
@@ -188,6 +190,7 @@ const CLICKS = [
   ['[data-flag-keep]', () => {}], // a Settle in flag tick is just a checkbox
   ['[data-cl-tick]', () => {}], // a checklist tick is handled on change
   ['[data-now], [data-now-set]', (el, e) => { e.stopPropagation(); nowAction(el); }],
+  ['[data-event]', (el, e) => { if (e.target.closest('a')) return; e.stopPropagation(); const ev = byId(db.events, el.dataset.event); if (ev) openEventEditor(ev); }],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
   ['[data-copy-geo]', (el) => copyGeoUrl(el)],
   ['[data-setup-auto]', (el) => openAutomationGuide(el.dataset.setupAuto)],

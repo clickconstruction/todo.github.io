@@ -25,9 +25,10 @@ import { dailyTools } from './daily.js';
 import { settleTools } from './settle.js';
 import { gainsTools } from './gains.js';
 import { fullReviewTools } from './fullreview.js';
+import { eventsTools, nextDay } from './events.js';
 import { slipboxTools } from './slipbox.js';
 import { matrixTools } from './matrix.js';
-import { eventOf, icsCalendar } from '../../js/schedule.js';
+import { eventOf, ownEventOf, icsCalendar } from '../../js/schedule.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -49,6 +50,7 @@ Folders and projects are never deleted: archive a folder with update_folder (onl
 Templates: for repeated projects (a new job, a trip), list_templates then create_from_template with the blanks' values; save_as_template turns a project into one.
 Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); then settle_import walks the sort (status → recommend → apply, each with an Undo); undo_import takes a whole import back.
 Slipbox and reading: ideas to think with (not actions) go to the slipbox tool as fleeting notes (one idea, the user's words, [[links]]); things to read/watch/listen to go on the reading list (reading tool; clarify_item/full_review decisions slipbox and reading). When they finish something, offer to take notes. The Weekly Review step "notes" turns fleeting notes into permanent ones.
+Events: the user's own calendar entries (an airshow, a trip, an appointment) go in with the events tool (add; several at once with items); they show in Forecast and reach their phone through the calendar feed. Not actions: a time block on an action is update_task schedule.
 Matrix (Eisenhower): the matrix tool sorts available actions into do / schedule / delegate / park from due dates, flags and goals; the user can override with ★/☆ (mark). Use it when they ask what matters, or to park the neither-urgent-nor-important box in Someday (only what they agree to; unpark undoes).
 Full Review (full_review): when the user wants to go through things together, start or resume a session, give them the app link, and work card by card while they watch it in the app. Turn what they tell you into a suggestion (full_review suggest) that they Submit in the app (or, when they say "submit", call full_review submit to press it for them); draft suggestions ahead for the next cards (upcoming + suggest items) so they can approve quickly. Apply directly (annotate/decide) only when they say to just do it. Important items come first; group cards need their agreement on the proposal.
 Perspectives are the user's saved views (e.g. Calls, Today): list_perspectives, then run_perspective to see what's in one; to answer "what should I do now" questions, prefer the user's own perspectives. create_perspective/update_perspective build them (preview rules with run_perspective first).
@@ -173,11 +175,18 @@ async function handleFeed(url, env, ctx) {
   ctx.waitUntil(rest(env, `api_tokens?id=eq.${key.id}`, { method: 'PATCH', body: { last_used_at: new Date().toISOString() } }).catch(() => {}));
   const from = new Date(Date.now() - 30 * 86400000).toISOString();
   const to = new Date(Date.now() + 366 * 86400000).toISOString();
-  const [tasks, projects] = await Promise.all([
+  const [tasks, projects, events, settings] = await Promise.all([
     rest(env, `tasks?user_id=eq.${key.user_id}&scheduled_at=gte.${from}&scheduled_at=lte.${to}&dropped_at=is.null&order=scheduled_at.asc&limit=1000&select=id,title,notes,scheduled_at,scheduled_minutes,estimate_minutes,completed_at,project_id,created_at,updated_at`),
     rest(env, `projects?user_id=eq.${key.user_id}&select=id,name`),
+    rest(env, `events?user_id=eq.${key.user_id}&archived_at=is.null&starts_at=lte.${to}&ends_at=gte.${from}&order=starts_at.asc&limit=1000&select=*`),
+    rest(env, `user_settings?user_id=eq.${key.user_id}&select=timezone`),
   ]);
-  const body = icsCalendar(tasks.map((t) => eventOf(t, { project: (projects.find((p) => p.id === t.project_id) || {}).name || null })));
+  const tz = (settings[0] && settings[0].timezone) || env.TIMEZONE || 'America/Chicago';
+  const projectName = (id) => (projects.find((p) => p.id === id) || {}).name || null;
+  const body = icsCalendar([
+    ...tasks.map((t) => eventOf(t, { project: projectName(t.project_id) })),
+    ...events.map((ev) => ownEventOf(ev, { project: projectName(ev.project_id), dayKey: (iso) => localDate(iso, tz) })),
+  ]);
   return new Response(body, { status: 200, headers: { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'max-age=300', ...CORS } });
 }
 
@@ -1176,6 +1185,14 @@ const TOOLS = [
         events.forEach((e) => e.days.forEach((d) => { if (out.days[d]) (out.days[d].events = out.days[d].events || []).push({ title: e.title, start: e.allDay ? undefined : e.start, end: e.allDay ? undefined : e.end, all_day: e.allDay || undefined, location: e.location || undefined, calendar: e.calendar }); }));
         if (errors.length) out.calendar_errors = errors;
       } catch { out.calendar_errors = [{ error: 'Calendars unavailable right now.' }]; }
+      // The user's own events (the events tool, Forecast → + Event), on each day they cover.
+      const own = await api.q(`events?${api.u}&archived_at=is.null&starts_at=lt.${encodeURIComponent(end)}&ends_at=gt.${encodeURIComponent(start)}&order=starts_at.asc&limit=500&select=*`);
+      own.forEach((e) => {
+        const last = localDate(new Date(Math.max(Date.parse(e.starts_at), Date.parse(e.ends_at) - 1)).toISOString(), api.tz);
+        for (let d = localDate(e.starts_at, api.tz), i = 0; d <= last && i < 62; i++, d = nextDay(d)) {
+          if (out.days[d]) (out.days[d].events = out.days[d].events || []).push({ id: e.id, title: e.title, start: e.all_day ? undefined : e.starts_at, end: e.all_day ? undefined : e.ends_at, all_day: e.all_day || undefined, location: e.location || undefined, url: e.url || undefined, calendar: 'Todo Tooling', own: true });
+        }
+      });
       items.forEach((t) => {
         if (t.due && t.due < today) out.past.overdue.push(t);
         else if (t.planned && t.planned < today && !(t.due && t.due < today)) out.past.planned_earlier.push(t);
@@ -2279,6 +2296,7 @@ TOOLS.push(...gainsTools({ OPEN, localDate }));
 TOOLS.push(...fullReviewTools({ OPEN, localDate, zonedToIso, tool: (name) => TOOLS.find((t) => t.name === name) }));
 TOOLS.push(...slipboxTools({ tool: (name) => TOOLS.find((t) => t.name === name) }));
 TOOLS.push(...matrixTools({ OPEN, availableTasks }));
+TOOLS.push(...eventsTools({ localDate, zonedToIso }));
 TOOLS.push(...dailyTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));

@@ -1,0 +1,24 @@
+-- Events (migration 20261025000001). One rolled-back transaction; every row should be ok = true.
+begin;
+insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','ev1@test.invalid'),('00000000-0000-0000-0000-0000000000e2','00000000-0000-0000-0000-000000000000','authenticated','authenticated','ev2@test.invalid');
+create temp table r (n int generated always as identity, test text, ok boolean, detail text); grant all on r to authenticated;
+insert into public.events (user_id, title, starts_at, ends_at) values ('00000000-0000-0000-0000-0000000000e2', 'Theirs', '2026-10-31 05:00+00', '2026-11-02 06:00+00');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e1","role":"authenticated"}', true);
+insert into public.events (title, all_day, starts_at, ends_at, location, url) values ('Wings Over Houston', true, '2026-10-31 05:00+00', '2026-11-02 06:00+00', 'Ellington Airport', 'https://wingsoverhouston.com');
+insert into r (test, ok, detail) select 'owner adds an all-day event', count(*) = 1, '' from public.events;
+insert into r (test, ok, detail) select 'can''t read another user''s event', count(*) = 0, '' from public.events where title = 'Theirs';
+do $$ begin insert into public.events (title, starts_at, ends_at) values ('Backwards', '2026-11-02 06:00+00', '2026-10-31 05:00+00'); insert into r (test, ok, detail) values ('ends before it starts is refused', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('ends before it starts is refused', true, sqlerrm); end $$;
+do $$ begin insert into public.events (title, starts_at, ends_at) values ('   ', '2026-10-31 05:00+00', '2026-10-31 06:00+00'); insert into r (test, ok, detail) values ('a blank title is refused', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('a blank title is refused', true, sqlerrm); end $$;
+do $$ begin insert into public.events (title, starts_at, ends_at, url) values ('Bad link', '2026-10-31 05:00+00', '2026-10-31 06:00+00', 'javascript:alert(1)'); insert into r (test, ok, detail) values ('links are http(s) only', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('links are http(s) only', true, sqlerrm); end $$;
+update public.events set title = 'Wings Over Houston 2026' where title = 'Wings Over Houston';
+insert into r (test, ok, detail) select 'owner edits; updated_at moves', count(*) = 1, '' from public.events where title = 'Wings Over Houston 2026' and updated_at >= created_at;
+update public.events set archived_at = now();
+insert into r (test, ok, detail) select 'archive works', count(*) = 1, '' from public.events where archived_at is not null;
+delete from public.events;
+insert into r (test, ok, detail) select 'delete does nothing', count(*) = 1, '' from public.events;
+select test, ok, detail from r order by n;
+rollback;

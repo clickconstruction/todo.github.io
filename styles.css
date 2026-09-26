@@ -1468,3 +1468,13 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .waits-then { font-size: 14px; color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .waits-unblocks { margin: 0; }
 .meta-waits-for { color: var(--flag); }
+
+/* Events of your own (js/editors/event.js, Forecast) */
+.cal-event.own { cursor: pointer; }
+.cal-event.own:hover .cal-title { text-decoration: underline; }
+.ev-allday { display: flex; align-items: center; gap: 8px; }
+.ev-when { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ev-dt { display: flex; gap: 6px; }
+.ev-dt input { min-width: 0; }
+.ev-dt input[hidden] { display: none; }
+@media (max-width: 480px) { .ev-when { grid-template-columns: 1fr; } }

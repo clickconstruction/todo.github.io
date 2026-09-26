@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [], slipbox_notes: [], task_waits: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [], slipbox_notes: [], task_waits: [], events: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -131,6 +131,7 @@ globalThis.fetch = async (url, init = {}) => {
     if (op === 'in') return val.slice(1, -1).split(',').map(s => s.replace(/"/g,'')).includes(String(r[k]));
     if (op === 'not') return r[k] != null;
     if (op === 'lt') return r[k] && r[k] < val;
+    if (op === 'gt') return r[k] && r[k] > val;
     if (op === 'gte') return r[k] && r[k] >= val;
     if (op === 'lte') return r[k] != null && (typeof r[k] === 'number' ? r[k] <= Number(val) : r[k] <= val);
     return true;
@@ -173,7 +174,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 73 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 73 tools, no internals leaked');
+assert(list.body.result.tools.length === 74 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 74 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -1381,4 +1382,52 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(Object.values(m).every((v) => v.paths.filter((p) => p.startsWith('rpc/mcp_snapshot')).length <= 1), 'the snapshot is read at most once a call');
   assert(!m.avail.paths.some((p) => p.startsWith('rpc/mcp_snapshot')) && m.avail.paths.some((p) => p.startsWith('rpc/available_task_ids')), 'one project\'s available actions: the database decides, no whole-library snapshot');
 }
+// ---------- events: the user's own calendar entries ----------
+{
+  assert(TOOL_NAMES.includes('events'), 'events tool listed');
+  db.projects.push({ id: 'pAdvUSA', user_id: UID, name: 'Adventure USA', status: 'active', kind: 'parallel' });
+  const today = localToday();
+  const woh = await tool('events', { action: 'add', title: 'Wings Over Houston', start: '2026-10-31', end: '2026-11-01', location: 'Ellington Airport, Houston', url: 'https://wingsoverhouston.com', project: 'Adventure USA', notes: 'Thunderbirds' });
+  const row = db.events.find((e) => e.id === woh.id);
+  assert(woh.all_day && woh.start === '2026-10-31' && woh.end === '2026-11-01' && woh.days.join() === '2026-10-31,2026-11-01' && woh.project === 'Adventure USA', 'add: an all-day event from two dates, with its project');
+  assert(row.starts_at === '2026-10-31T05:00:00.000Z' && row.ends_at === '2026-11-02T06:00:00.000Z' && row.all_day === true && row.source === 'mcp', 'stored as local midnights, end exclusive (across the DST change)');
+  const gate = await tool('events', { action: 'add', title: 'Gates open', start: `${today}T08:00` });
+  assert(!gate.all_day && gate.start === `${today}T08:00` && gate.end === `${today}T09:00` && !gate.days, 'add: a timed event, an hour long by default, in local time');
+  const allToday = await tool('events', { action: 'add', title: 'Company holiday', start: today });
+  const many = await tool('events', { action: 'add', items: [
+    { title: 'Texas Capital Air Show', start: '2026-11-07', end: '2026-11-08', location: 'San Marcos' },
+    { title: 'Amigo Airsho', start: '2026-10-24', end: '2026-10-25', location: 'El Paso' },
+  ] });
+  assert(many.added === 2 && many.events.length === 2 && db.events.length === 5, 'add items: several in one call');
+  let bad = ''; try { await tool('events', { action: 'add', title: 'X', start: 'tomorrow' }); } catch (e) { bad = e.message; }
+  assert(/YYYY-MM-DD/.test(bad), 'dates are checked');
+  bad = ''; try { await tool('events', { action: 'add', title: 'X', start: '2026-10-31', project: 'Nope' }); } catch (e) { bad = e.message; }
+  assert(/No project called "Nope"/.test(bad) && db.events.length === 5, 'an unknown project saves nothing');
+  bad = ''; try { await tool('events', { action: 'add', title: 'X', start: '2026-10-31', end: '2026-10-30' }); } catch (e) { bad = e.message; }
+  assert(/before start/.test(bad), 'end before start is refused');
+  const listed = await tool('events', { action: 'list', from: '2026-10-01', to: '2026-11-30' });
+  assert(listed.events.map((e) => e.title).join('|') === 'Amigo Airsho|Wings Over Houston|Texas Capital Air Show', `list: a window, in date order (${listed.events.map((e) => e.title).join('|')})`);
+  const fc = await tool('forecast', { days: 2 });
+  const ev = fc.days[today].events || [];
+  assert(ev.some((e) => e.id === gate.id && e.own && e.start === db.events.find((x) => x.id === gate.id).starts_at) && ev.some((e) => e.id === allToday.id && e.all_day === true), 'forecast shows your events on their days');
+  const upd = await tool('events', { action: 'update', id: woh.id, title: 'Wings Over Houston 2026', end: '2026-11-02' });
+  assert(upd.title === 'Wings Over Houston 2026' && upd.start === '2026-10-31' && upd.days.length === 3 && upd.location === 'Ellington Airport, Houston', 'update: a new end keeps the start; other fields stay');
+  const timed = await tool('events', { action: 'update', id: woh.id, all_day: false, start: '2026-10-31T10:30', end: '2026-10-31T16:15' });
+  assert(!timed.all_day && timed.start === '2026-10-31T10:30' && timed.end === '2026-10-31T16:15', 'update: all-day → timed');
+  const back = await tool('events', { action: 'update', id: woh.id, all_day: true });
+  assert(back.all_day && back.start === '2026-10-31' && back.end === '2026-10-31', 'update: timed → all-day keeps the day');
+  const gone = await tool('events', { action: 'remove', id: gate.id });
+  assert(gone.archived && db.events.find((e) => e.id === gate.id).archived_at && !(await tool('events', { action: 'list' })).events.some((e) => e.id === gate.id), 'remove archives (never deletes)');
+  const restored = await tool('events', { action: 'restore', id: gate.id });
+  assert(!restored.archived && !db.events.find((e) => e.id === gate.id).archived_at, 'restore brings it back');
+  // The feed carries them: all-day as dates (end exclusive), timed as instants, with the location.
+  const FEED = 'tt_' + 'g'.repeat(32);
+  db.api_tokens.push({ id: 'feed2', user_id: UID, token_hash: createHash('sha256').update(FEED).digest('hex'), scope: 'feed' });
+  const ics = await (await worker.fetch(new Request(`https://mcp.todotooling.com/feed/${FEED}.ics`), env, ctx)).text();
+  assert(ics.includes('SUMMARY:Amigo Airsho') && ics.includes('DTSTART;VALUE=DATE:20261024') && ics.includes('DTEND;VALUE=DATE:20261026') && ics.includes('LOCATION:El Paso'), 'feed: all-day events as dates, end exclusive, with the location');
+  assert(ics.includes('SUMMARY:Gates open') && new RegExp(`UID:${gate.id}@todotooling.com`).test(ics) && !ics.includes('SUMMARY:Company holiday\r\nDTSTART:'), 'feed: timed events as instants');
+  assert(ics.includes('Project: Adventure USA'), 'feed: the project in the description');
+  db.events.length = 0;
+}
+
 console.log('ALL PASSED');

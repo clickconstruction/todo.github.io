@@ -37,12 +37,21 @@ export function eventOf(t, { project = null, appUrl = 'https://todotooling.com/'
   return { uid: `${t.id}@todotooling.com`, start, end, title: `${t.completed_at ? '✓ ' : ''}${t.title}`, details: [project && `Project: ${project}`, t.notes && t.notes.slice(0, 500), link].filter(Boolean).join('\n\n'), link, updated: t.updated_at || t.created_at || start };
 }
 
+// One of your own events (js/events.js) as a feed entry. All-day: DATE values, end exclusive, in the
+// user's time zone (dayKey turns an instant into that zone's YYYY-MM-DD).
+export function ownEventOf(ev, { project = null, dayKey, appUrl = 'https://todotooling.com/' } = {}) {
+  const link = `${appUrl}#forecast/${dayKey(ev.starts_at)}`;
+  return { uid: `${ev.id}@todotooling.com`, allDay: !!ev.all_day, start: ev.all_day ? dayKey(ev.starts_at) : ev.starts_at, end: ev.all_day ? dayKey(ev.ends_at) : ev.ends_at,
+    title: ev.title, location: ev.location || '', details: [project && `Project: ${project}`, ev.notes && ev.notes.slice(0, 500), ev.url, link].filter(Boolean).join('\n\n'), link: ev.url || link, updated: ev.updated_at || ev.created_at };
+}
+
 export function icsCalendar(events, { name = 'Todo Tooling' } = {}) {
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Todo Tooling//Schedule//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', `X-WR-CALNAME:${icsText(name)}`,
     'X-PUBLISHED-TTL:PT15M', 'REFRESH-INTERVAL;VALUE=DURATION:PT15M'];
   for (const e of events) {
-    lines.push('BEGIN:VEVENT', `UID:${e.uid}`, `DTSTAMP:${icsDate(e.updated)}`, `DTSTART:${icsDate(e.start)}`, `DTEND:${icsDate(e.end)}`,
-      `SUMMARY:${icsText(e.title)}`, `DESCRIPTION:${icsText(e.details)}`, `URL:${e.link}`, 'END:VEVENT');
+    const when = (k, v) => (e.allDay ? `${k};VALUE=DATE:${String(v).replace(/-/g, '')}` : `${k}:${icsDate(v)}`);
+    lines.push('BEGIN:VEVENT', `UID:${e.uid}`, `DTSTAMP:${icsDate(e.updated)}`, when('DTSTART', e.start), when('DTEND', e.end),
+      `SUMMARY:${icsText(e.title)}`, `DESCRIPTION:${icsText(e.details)}`, ...(e.location ? [`LOCATION:${icsText(e.location)}`] : []), `URL:${e.link}`, 'END:VEVENT');
   }
   lines.push('END:VCALENDAR');
   return `${lines.map(fold).join('\r\n')}\r\n`;

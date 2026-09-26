@@ -10,6 +10,7 @@ import { weeklyBanner } from './weekly.js';
 import { dailyBanner } from './daily.js';
 import { followUpDue, isWaiting, livePeople, agendaFor, mentions } from '../gtd.js';
 import { calendarEvents, calendarErrors, liveCalendars, fmtEventTime } from '../calendars.js';
+import { ownEvents } from '../events.js';
 
 const DAYS_AHEAD = 6;
 const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -60,7 +61,7 @@ export const forecastBadgeCount = () => {
 };
 
 const fmtHM = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(/\s/g, '').toLowerCase();
-const eventRow = (e) => `<li class="cal-event ${e.busy ? '' : 'free'}" style="--cal:${esc(e.color)}">
+const eventRow = (e) => `<li class="cal-event ${e.busy ? '' : 'free'} ${e.own ? 'own' : ''}" style="--cal:${esc(e.color)}"${e.own ? ` data-event="${e.id}" title="Edit event"` : ''}>
   <span class="cal-time">${esc(fmtEventTime(e))}</span><span class="cal-main"><span class="cal-title">${esc(e.title)}</span>
   ${e.location || e.calendar ? `<span class="cal-meta">${[e.location, e.calendar].filter(Boolean).map((x) => esc(x.split('\n')[0])).join(' · ')}</span>` : ''}${agendaHtml(e)}</span></li>`;
 // A scheduled action in the day: tick it off right there, tap to open it.
@@ -76,11 +77,15 @@ function agendaHtml(e) {
   return hits.map((p) => `<a class="cal-agenda" href="#person/${p.id}">🗣 ${esc(p.name)}: ${agendaFor(p).slice(0, 3).map((t) => esc(t.title)).join(' · ')}${agendaFor(p).length > 3 ? ` · +${agendaFor(p).length - 3}` : ''}</a>`).join('');
 }
 
+// Subscribed calendars' events and your own, all-day first, then by time.
+const allEvents = (fromKey, toKey) => [...(liveCalendars().some((c) => c.enabled) ? calendarEvents(fromKey, toKey) : []), ...ownEvents(fromKey, toKey)]
+  .sort((a, b) => (a.allDay === b.allDay ? a.start.localeCompare(b.start) : a.allDay ? -1 : 1));
+
 export function viewForecast(selected = 'today') {
   const { today, tasks, overdue, plannedPast, days, future, liveProjects, overdueProjects } = forecastData();
   const pastCount = overdue.length + plannedPast.length + overdueProjects.length;
   // Calendar events for the strip's days (loaded in the background; counts show once they arrive).
-  const events = liveCalendars().some((c) => c.enabled) ? calendarEvents(key(days[0]), key(days[days.length - 1])) : [];
+  const events = allEvents(key(days[0]), key(days[days.length - 1]));
   const eventsOn = (k) => events.filter((e) => e.days.includes(k));
   const cell = (id, label, sub, n, cls = '', ev = 0) => `<a class="fc-day ${selected === id ? 'on' : ''} ${cls}" href="#forecast/${id}" aria-current="${selected === id}">
     <span class="fc-label">${label}</span><span class="fc-sub">${sub}</span><b class="fc-n">${n || ''}</b>${ev ? `<span class="fc-ev" title="${ev} calendar event${ev === 1 ? '' : 's'}">${ev} ev</span>` : ''}</a>`;
@@ -115,7 +120,7 @@ export function viewForecast(selected = 'today') {
     // Calendar first: the day's fixed commitments frame what the actions can fit around.
     const dayKey = key(day);
     const inStrip = days.some((d) => key(d) === dayKey);
-    const dayEvents = inStrip ? eventsOn(dayKey) : (liveCalendars().some((c) => c.enabled) ? calendarEvents(dayKey, dayKey) : []);
+    const dayEvents = inStrip ? eventsOn(dayKey) : allEvents(dayKey, dayKey);
     // The day: calendar events and scheduled actions in time order, with free gaps (today, 7am-7pm).
     const sched = tasks.filter((t) => t.scheduled_at && key(new Date(t.scheduled_at)) === dayKey && !t.dropped_at);
     const timed = [
@@ -159,7 +164,7 @@ export function viewForecast(selected = 'today') {
 
   const title = selected === 'today' ? `Today · ${today.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}`
     : selected === 'past' ? 'Past' : selected === 'future' ? 'Later' : new Date(selected + 'T00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-  return `<div class="view-head"><h1 class="today">Forecast</h1></div>
+  return `<div class="view-head"><h1 class="today">Forecast</h1><span><button class="btn small" data-act="new-event" title="Add something to your calendar">+ Event</button></span></div>
     <nav class="fc-strip" aria-label="Days">${strip}</nav>
     ${filterBar()}
     <p class="view-sub">${esc(title)}</p>

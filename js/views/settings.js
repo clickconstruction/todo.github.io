@@ -327,7 +327,7 @@ const FEED_BASE = 'mcp.todotooling.com/feed/';
 function feedSection() {
   const feeds = (apiTokens || []).filter((t) => t.scope === 'feed');
   return `<div class="settings-card feed-card"><p><b>Your scheduled actions in your calendar</b></p>
-    <p class="hint">Subscribe once in Apple or Google Calendar and actions you schedule (Schedule it) appear there, and stay in sync. Apple checks every few minutes; Google can take a few hours, so use “Add to Google” for today.</p>
+    <p class="hint">Subscribe once in Apple or Google Calendar and actions you schedule (Schedule it) and your own events (Forecast → + Event) appear there, and stay in sync. Apple checks every few minutes; Google can take a few hours, so use “Add to Google” for today.</p>
     ${feeds.length ? `<p class="hint">Feed link made ${esc(fmtDate(feeds[0].created_at))}${feeds[0].last_used_at ? ` · last read ${esc(fmtDate(feeds[0].last_used_at))}` : ' · not subscribed yet'}</p>` : ''}
     <button class="btn" data-act="feed-link">${feeds.length ? 'Reset the link' : 'Get the feed link'}</button></div>`;
 }
@@ -375,7 +375,7 @@ function calendarsSection() {
         ${calState.checked ? '<button type="submit" class="btn primary" data-cal-save>Add calendar</button>' : `<button type="submit" class="btn primary" data-cal-check ${calState.checking ? 'disabled' : ''}>${calState.checking ? 'Checking…' : 'Check link'}</button>`}</div></div>
     </form>` : '<button class="btn" data-cal-new>+ Add a calendar</button>';
   return `<h2 class="section-title">Calendars</h2>
-    <p class="view-sub">Show your calendar events in Forecast, next to what’s due and planned. Read-only; events aren’t stored.</p>
+    <p class="view-sub">Show your calendar events in Forecast, next to what’s due and planned. Read-only; events aren’t stored. Your own events (an airshow, a trip) are added in Forecast with <b>+ Event</b>, or by Claude.</p>
     <div class="settings-card">
       ${list.map((c) => `<div class="cal-row"><span class="cal-dot" style="--cal:${esc(c.color)}"></span>
         <span class="set-text"><b>${esc(c.name)}</b><span class="hint">${esc(maskUrl(c.url))} ${status(c)}</span></span>

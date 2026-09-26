@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -1608,6 +1608,55 @@ async function energy(check) {
   const { perspectiveData } = await import('/js/perspectives.js');
   const res = evaluate({ rules: { v: 1, match: 'all', rules: [{ type: 'energy', max: 'low' }] }, options: { show: 'remaining' } }, perspectiveData(), { available: () => true });
   check('perspective rule “energy ≤ low”', res.tasks.map((t) => t.id).join() === 't11', res.tasks.map((t) => t.id).join());
+}
+
+// Events of your own: + Event in Forecast, the editor, the day's Calendar section, the strip counts, Remove + Undo.
+async function events(check) {
+  const { toDateInput } = await import('/js/dates.js');
+  const day = (off) => { const d = new Date(); d.setDate(d.getDate() + off); return toDateInput(d.toISOString()); };
+  const fire = (el, type = 'input') => el.dispatchEvent(new Event(type, { bubbles: true }));
+  await go('#forecast');
+  check('Forecast has + Event', !!$('[data-act="new-event"]'));
+  $('[data-act="new-event"]').click(); await wait(80);
+  let f = $('#event-form');
+  check('editor opens: all day, today', !!f && f.elements.all_day.checked && f.elements.start_day.value === day(0) && f.elements.start_time.hidden);
+  f.elements.title.value = 'Wings Over Houston';
+  f.elements.start_day.value = day(1); fire(f.elements.start_day);
+  check('Ends follows Starts', f.elements.end_day.value === day(1));
+  f.elements.end_day.value = day(2); fire(f.elements.end_day);
+  f.elements.location.value = 'Ellington Airport';
+  f.elements.project_id.value = 'p4';
+  f.requestSubmit(); await wait(200);
+  const row = T().events.find((e) => e.title === 'Wings Over Houston');
+  check('saved: all day over two days (end exclusive), with place and project', row && row.all_day && toDateInput(row.starts_at) === day(1) && new Date(row.starts_at).getHours() === 0 && toDateInput(new Date(Date.parse(row.ends_at) - 1).toISOString()) === day(2) && row.location === 'Ellington Airport' && row.project_id === 'p4', JSON.stringify(row));
+  check('strip: 1 ev on both days, none today', $$('.fc-day')[2].textContent.includes('1 ev') && $$('.fc-day')[3].textContent.includes('1 ev') && !$$('.fc-day')[1].textContent.includes('ev'), $$('.fc-day').map((d) => d.textContent).join(' / '));
+  await go(`#forecast/${day(2)}`);
+  check('the day shows it: all day, where, the project', has('.cal-list', 'wings over houston', 'all day', 'ellington airport', 'errands') && !!$('[data-event]'), text('.cal-list'));
+  $('[data-event]').click(); await wait(80);
+  f = $('#event-form');
+  check('tap opens the editor with its values', !!f && f.elements.title.value === 'Wings Over Houston' && f.elements.end_day.value === day(2) && !!$('[data-remove]', f));
+  f.elements.all_day.checked = false; fire(f.elements.all_day, 'change');
+  check('untick All day: times appear', !f.elements.start_time.hidden);
+  f.elements.start_day.value = day(2); fire(f.elements.start_day); f.elements.end_day.value = day(2);
+  f.elements.start_time.value = '10:30'; f.elements.end_time.value = '16:15';
+  f.requestSubmit(); await wait(200);
+  check('timed now: 10:30am–4:15pm', has('.cal-list', '10:30am–4:15pm') && !T().events.find((e) => e.title === 'Wings Over Houston').all_day, text('.cal-list'));
+  check('a link is checked', (() => { $('[data-event]').click(); return true; })());
+  await wait(80); f = $('#event-form');
+  f.elements.url.value = 'ellington.com'; f.requestSubmit(); await wait(80);
+  check('a link without https:// is refused', $('#sheet').open && has('#event-form', 'links start with https://'));
+  f.elements.url.value = 'https://wingsoverhouston.com'; f.requestSubmit(); await wait(200);
+  check('link saved', T().events.find((e) => e.title === 'Wings Over Houston').url === 'https://wingsoverhouston.com');
+  $('[data-event]').click(); await wait(80);
+  $('#event-form [data-remove]').click(); await wait(200);
+  check('Remove archives it, with Undo', !$('[data-event]') && T().events.find((e) => e.title === 'Wings Over Houston').archived_at && has('#toast', 'removed', 'undo'), text('#toast'));
+  $$('#toast button').find((b) => b.textContent === 'Undo').click(); await wait(200);
+  check('Undo brings it back', !!$('[data-event]') && !T().events.find((e) => e.title === 'Wings Over Houston').archived_at);
+  await go('#forecast');
+  check('+ Event on a day opens on that day', (() => { location.hash = `#forecast/${day(3)}`; return true; })());
+  await wait(120); $('[data-act="new-event"]').click(); await wait(80);
+  check('… the editor starts on that day', $('#event-form').elements.start_day.value === day(3));
+  $('#event-form [data-cancel]').click();
 }
 
 // Behaviour that existed before the feature phases; must never regress.
