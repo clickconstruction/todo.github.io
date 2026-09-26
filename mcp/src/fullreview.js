@@ -115,13 +115,14 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
   return [{
     name: 'full_review',
     description: `Full Review: go through the user's actions one card at a time WITH them while they watch the same card in the app.
-Default way of working: SUGGEST, the user approves. When the user tells you what to do with a card, turn it into a suggestion ("suggest": decision plus any title/gain/project/dates/flag/tags and a one-line note). It appears on the card in the app as "Suggested by Claude" with Submit / Edit / Dismiss; nothing changes until they Submit. Only use "annotate" + "decide" (which apply immediately) when the user says to just do it.
+Default way of working: SUGGEST, the user approves. When the user tells you what to do with a card, turn it into a suggestion ("suggest": decision plus any title/gain/project/dates/flag/tags and a one-line note). It appears on the card in the app as "Suggested by Claude" with Submit / Edit / Dismiss; nothing changes until they Submit. When the user says "submit" (e.g. "submit, next card"), call "submit": it presses Submit for them, exactly like the app's button, and moves to the next card. (If they say "submitted", they pressed it themselves: just check status.) Only use "annotate" + "decide" (which apply immediately) when the user says to just do it.
 Big actions: when the user describes the parts ("cut the spot, run power, then…"), put them in the suggestion as steps (in order if they said so) rather than applying break_down; Submit adds them.
 Draft ahead: call "upcoming" and "suggest" with items [...] for the next few cards from the user's patterns; these show as "drafted ahead" so the user can Submit quickly and only talk to you when they disagree. Never suggest drop/done for something the user hasn't clearly let go of; the gain should be the user's words (set gain_suggested when it's yours).
 actions:
   start {import_id | project | all:true, min_age_days?, title?} → a new session (give the user app_link)
   status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
   suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down), steps_in_order?, mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
+  submit {item_id? (default current)} → apply the pending suggestion as the app's Submit does (only when the user says "submit"), then the next card
   upcoming {count? ≤10} → the next cards in full, for drafting ahead
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
   annotate {…same fields…} / decide {decision, note?} → apply now (only when asked to just do it)
@@ -130,7 +131,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['start', 'status', 'suggest', 'upcoming', 'add', 'annotate', 'decide', 'prioritize', 'goto', 'undo', 'list'], default: 'status' },
+        action: { type: 'string', enum: ['start', 'status', 'suggest', 'submit', 'upcoming', 'add', 'annotate', 'decide', 'prioritize', 'goto', 'undo', 'list'], default: 'status' },
         notes: { type: 'string', description: 'add: notes for the new idea' },
         items: { type: 'array', description: 'suggest: several cards at once, each {item_id, decision, title?, gain?, project?, planned?, due?, defer?, flagged?, add_tags?, remove_tags?, steps?, steps_in_order?, proposal?, note?}', items: { type: 'object' } },
         ahead: { type: 'boolean', description: 'suggest: drafted before talking it through (shown as “drafted ahead”)' },
@@ -210,6 +211,18 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
         await touch(api, s.id, { agent_status: '' });
         return { suggested: planned.length, items: planned.map((p) => ({ item_id: p.id, decision: p.s.decision, ahead: p.s.ahead || undefined })),
           next: 'The user sees each suggestion on its card in the app and Submits (or edits / dismisses) it there. Check status to see what they decided.' };
+      }
+      if (action === 'submit') {
+        // The app's Submit button, pressed for the user: the same database function applies the suggestion
+        // (title, gain, project, dates, flag, tags, steps, folder) and decides the card. Undo works as usual.
+        const it = a.item_id ? await itemFull(api, a.item_id) : cur;
+        if (!it || it.session_id !== s.id) throw new Error('No such card in this review.');
+        if (it.status !== 'pending') throw new Error('That card is already decided.');
+        if (!it.suggestion || it.suggestion.applied_at) throw new Error('No suggestion on that card to submit. Suggest first (action "suggest"), then submit.');
+        await api.q('rpc/review_apply', { method: 'POST', body: { item: it.id, owner: api.userId } });
+        await touch(api, s.id, { agent_status: '' });
+        const [s2] = await api.q(`review_sessions?${api.u}&id=eq.${s.id}&select=*`);
+        return { submitted: { item_id: it.id, decision: it.suggestion.decision }, ...(await stateOut(api, s2 || s, await items(api, s.id))) };
       }
       if (action === 'upcoming') {
         // The next few cards in one go (for drafting suggestions ahead): 4–5 queries, whatever the count.

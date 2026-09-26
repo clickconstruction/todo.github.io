@@ -1224,6 +1224,17 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Fix the gate latch before winter', gain: 'Goats stay in', project: 'Estate and legacy', planned: '2026-10-05', flagged: false, add_tags: ['Brand new tag'], note: 'You said before the cold snap' });
   const st2 = await tool('full_review', { action: 'status' });
   assert(st2.current.suggestion && st2.current.suggestion.note === 'You said before the cold snap', 'status shows the pending suggestion');
+  {
+    const before3 = rpcCalls.length;
+    await tool('full_review', { action: 'submit' });
+    const ap = rpcCalls.slice(before3).find((c) => c.fn === 'review_apply');
+    assert(ap && ap.body.item === s1.id && ap.body.owner === UID, 'submit: review_apply on the current card, like the app\'s Submit');
+    const sub = db.review_items.find((x) => x.id === s1.id);
+    const saved = sub.suggestion; sub.suggestion = null;
+    let bad5 = ''; try { await tool('full_review', { action: 'submit' }); } catch (e) { bad5 = e.message; }
+    assert(/No suggestion/.test(bad5), 'submit: refuses a card with nothing suggested');
+    sub.suggestion = saved;
+  }
   const up = await tool('full_review', { action: 'upcoming', count: 3 });
   assert(Array.isArray(up.cards), 'upcoming: the next cards in one go');
   const nextTask = db.review_items.find((x) => x.kind === 'task' && x.status === 'pending' && x.id !== s1.id && x.task_id !== W);

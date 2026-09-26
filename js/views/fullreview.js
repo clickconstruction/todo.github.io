@@ -149,7 +149,7 @@ export const resumePrompt = (s) => `Let's continue my Full Review in Todo Toolin
 
 Use the full_review tool (Todo Tooling MCP). Start with action "status" and tell me the current card.
 
-How we work: I tell you what to do with each card in a few words. You turn it into a suggestion (action "suggest") on the current card, and I press Submit in the app. Only apply changes directly if I say "just do it". Name the card in every reply, because I may have moved on in the app. Draft ahead with "upcoming" and "suggest" when I ask. Nothing gets deleted; drop means drop.`;
+How we work: I tell you what to do with each card in a few words. You turn it into a suggestion (action "suggest") on the current card, and I press Submit in the app. When I say "submit" (for example "submit, next card"), press Submit for me (action "submit"). Only apply changes directly if I say "just do it". Name the card in every reply, because I may have moved on in the app. Draft ahead with "upcoming" and "suggest" when I ask. Nothing gets deleted; drop means drop.`;
 
 // ---------- view ----------
 // Claude only acts when you message it, so "connected" is about the conversation, not a live socket:
