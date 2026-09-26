@@ -11,6 +11,7 @@ import { dailyBanner } from './daily.js';
 import { followUpDue, isWaiting, livePeople, agendaFor, mentions } from '../gtd.js';
 import { calendarEvents, calendarErrors, liveCalendars, fmtEventTime } from '../calendars.js';
 import { ownEvents } from '../events.js';
+import { upcomingEvents, eventRow as ownEventRow } from './events.js';
 
 const DAYS_AHEAD = 6;
 const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -86,6 +87,7 @@ export function viewForecast(selected = 'today') {
   const pastCount = overdue.length + plannedPast.length + overdueProjects.length;
   // Calendar events for the strip's days (loaded in the background; counts show once they arrive).
   const events = allEvents(key(days[0]), key(days[days.length - 1]));
+  const laterEvents = upcomingEvents(key(addDays(days[days.length - 1], 1))); // your events beyond the strip (Future)
   const eventsOn = (k) => events.filter((e) => e.days.includes(k));
   const cell = (id, label, sub, n, cls = '', ev = 0) => `<a class="fc-day ${selected === id ? 'on' : ''} ${cls}" href="#forecast/${id}" aria-current="${selected === id}">
     <span class="fc-label">${label}</span><span class="fc-sub">${sub}</span><b class="fc-n">${n || ''}</b>${ev ? `<span class="fc-ev" title="${ev} calendar event${ev === 1 ? '' : 's'}">${ev} ev</span>` : ''}</a>`;
@@ -97,7 +99,7 @@ export function viewForecast(selected = 'today') {
       const n = it.due.length + it.planned.length + projectsOn(d, liveProjects).length + tagged;
       return cell(i === 0 ? 'today' : key(d), i === 0 ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' }), d.getDate(), n, it.due.length && i === 0 ? 'due' : '', eventsOn(key(d)).length);
     }),
-    cell('future', 'Future', '', future.length),
+    cell('future', 'Future', '', future.length, '', laterEvents.length),
   ].join('');
 
   let body = ''; let notes = '';
@@ -112,7 +114,8 @@ export function viewForecast(selected = 'today') {
     body += section('Planned earlier', plannedPast, plannedPast.length ? ' <button class="btn small" data-triage="planned-to-today">Move to today</button>' : '');
     if (!body) body = '<p class="empty">Nothing overdue. 🎉</p>';
   } else if (selected === 'future') {
-    body = future.filter(passes).length ? taskList(future.filter(passes)) : '<p class="empty">Nothing scheduled beyond next week.</p>';
+    body = future.filter(passes).length ? taskList(future.filter(passes)) : (laterEvents.length ? '' : '<p class="empty">Nothing scheduled beyond next week.</p>');
+    if (laterEvents.length) body += `<h2 class="section-title">Events · ${laterEvents.length} <a class="btn small" href="#events">All events</a></h2><ul class="list cal-list ev-list">${laterEvents.slice(0, 30).map(ownEventRow).join('')}</ul>`;
   } else {
     const day = selected === 'today' ? today : new Date(selected + 'T00:00');
     const it = dayItems(day, tasks);

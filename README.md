@@ -11,7 +11,7 @@ A GTD (Getting Things Done) to-do app at **[todotooling.com](https://todotooling
 - **Capture anywhere:** the Inbox, email (send or BCC `inbox@todotooling.com`), an iPhone Shortcut, or Claude.
 - **Clarify and organize:** projects (parallel, sequential or single actions), steps up to four levels deep, tags, people, "waiting on", "waits for" links between cards, the tickler, reference and someday.
 - **Dates that mean something:** *Planned* is when you intend to do it and *Due* is a hard deadline. Forecast shows both day by day.
-- **Your own events:** an airshow, a trip, an appointment. Forecast shows them on every day they cover, next to your subscribed calendars, and they reach your phone through the calendar feed. Add them in Forecast (+ Event) or ask Claude.
+- **Your own events:** an airshow, a trip, an appointment. Forecast shows them on every day they cover, next to your subscribed calendars, the Events list shows what's coming by month, and they reach your phone through the calendar feed. Add them with + Event or ask Claude.
 - **Reviews:** Daily, Weekly (the full GTD checklist), per-project Review, and Full Review, which walks you through a whole library card by card with Claude suggesting and you approving.
 - **Places:** actions tied to locations, with Nearby, errand runs and location alerts.
 - **Horizons, perspectives, the Eisenhower matrix, checklists, templates, a slipbox and a reading list.**

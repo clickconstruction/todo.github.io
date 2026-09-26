@@ -1657,6 +1657,38 @@ async function events(check) {
   await wait(120); $('[data-act="new-event"]').click(); await wait(80);
   check('… the editor starts on that day', $('#event-form').elements.start_day.value === day(3));
   $('#event-form [data-cancel]').click();
+
+  // The Events list: sidebar entry in Lists, upcoming by month, past folded, the badge, Forecast's Future bucket.
+  const lists = $('.nav-group[data-group="lists"] .nav-items');
+  check('sidebar: Events sits in Lists after Tickler', !!lists && [...lists.querySelectorAll('a[data-nav]')].map((a) => a.dataset.nav).join(',').includes('tickler,events'));
+  check('badge: the timed event within the week counts', $('#badge-events').textContent === '1 this week', $('#badge-events').textContent);
+  await go('#events');
+  const monthLabel = new Date(`${day(2)}T12:00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  check('Events view: this month, the event with when and where', has(undefined, 'events', `${monthLabel} · 1`, 'wings over houston', '10:30am–4:15pm', 'ellington airport') && !!$('[data-event]'), text());
+  check('no Past section yet', !$('.ev-past'));
+  // A far-off all-day event and a past one.
+  const { insertEvent } = await import('/js/events.js');
+  const far = new Date(); far.setDate(far.getDate() + 40); far.setHours(0, 0, 0, 0);
+  const farEnd = new Date(far); farEnd.setDate(farEnd.getDate() + 2);
+  await insertEvent({ title: 'Amigo Airsho', all_day: true, starts_at: far.toISOString(), ends_at: farEnd.toISOString(), location: 'El Paso', url: '', notes: '', project_id: null });
+  const gone = new Date(); gone.setDate(gone.getDate() - 10); gone.setHours(0, 0, 0, 0);
+  const goneEnd = new Date(gone); goneEnd.setDate(goneEnd.getDate() + 1);
+  await insertEvent({ title: 'Old show', all_day: true, starts_at: gone.toISOString(), ends_at: goneEnd.toISOString(), location: '', url: '', notes: '', project_id: null });
+  await wait(100);
+  const farLabel = new Date(far).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  check('grouped by month; a two-day event shows its range', has(undefined, `${farLabel} · 1`, 'amigo airsho', ' – ', 'el paso'), text());
+  check('past events fold away, in their own section', !!$('.ev-past') && !$('.ev-past').open && has('.ev-past > summary', 'past · 1') && $$('.ev-past [data-event]').length === 1 && $('.ev-past .cal-title').textContent === 'Old show');
+  check('badge unchanged by far-off and past events', $('#badge-events').textContent === '1 this week');
+  await go('#forecast');
+  check('Future cell counts the far-off event', $$('.fc-day')[8].textContent.includes('1 ev'), $$('.fc-day')[8].textContent);
+  await go('#forecast/future');
+  check('Future lists it under Events, with a link to all', has(undefined, 'events · 1', 'amigo airsho', 'all events'), text());
+  $('#more-tab').click(); await wait(80);
+  check('More sheet: Events in Lists with its badge', has('#sheet', 'lists', 'events', '1 this week'));
+  $('#sheet').close();
+  $('[data-act="customize-sidebar"]').click(); await wait(80);
+  check('Customize lists Events (hideable)', !!$('#sheet [data-nav-toggle="events"]'));
+  $('#sheet').close();
 }
 
 // Behaviour that existed before the feature phases; must never regress.

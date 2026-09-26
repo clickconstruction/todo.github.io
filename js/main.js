@@ -43,6 +43,7 @@ import { enableAlerts } from './alerts.js';
 import { subscribePush, testAlert, copyGeoUrl, resetAlerts, turnOnAlerts, replaceGeoKey, openAutomationGuide, hideNudge, primeAlerts, isIOS, isStandalone } from './views/alerts.js';
 import { openPlaceEditor, openTagEditor } from './editors/place.js';
 import { openEventEditor } from './editors/event.js';
+import { eventsThisWeekCount } from './views/events.js';
 import { setWithin } from './views/nearby.js';
 import { openErrandPlanner } from './views/errands.js';
 import { hereNowCount } from './places.js';
@@ -277,7 +278,8 @@ $('#more-tab').onclick = () => {
   const here = hereNowCount();
   const waiting = waitingBadgeCount();
   const some = somedayCount();
-  const badges = { waiting: waiting ? ` <b class="badge due inline">${waiting}</b>` : '', someday: some ? ` <span class="hint">${some}</span>` : '', weekly: due ? ` <b class="badge review inline">${due}</b>` : '', nearby: here ? ` <b class="badge here inline">${here}</b>` : '' };
+  const evWeek = eventsThisWeekCount();
+  const badges = { events: evWeek ? ` <span class="hint">${evWeek} this week</span>` : '', waiting: waiting ? ` <b class="badge due inline">${waiting}</b>` : '', someday: some ? ` <span class="hint">${some}</span>` : '', weekly: due ? ` <b class="badge review inline">${due}</b>` : '', nearby: here ? ` <b class="badge here inline">${here}</b>` : '' };
   const perspectives = livePerspectives().filter((p) => p.pinned !== false).map((p) => { const n = badgeCount(p); return [`#perspective/${p.id}`, esc(p.icon), `${esc(p.name)}${n ? ` <b class="badge persp inline">${n}</b>` : ''}`]; });
   const focusLine = `<button type="button" class="btn focus-more" data-act="focus">🎯 ${getFocus() ? `Focused on ${esc(focusLabel())} · change` : 'Focus'}</button>`;
   const sheet = openSheet(moreSheetHtml({ badges, perspectives, focusLine: `${document.body.classList.contains('update-ready') ? '<button type="button" class="btn primary update-more" data-update-now>Update ready · Reload</button>' : ''}${focusLine}` }));

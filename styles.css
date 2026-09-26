@@ -1478,3 +1478,9 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .ev-dt input { min-width: 0; }
 .ev-dt input[hidden] { display: none; }
 @media (max-width: 480px) { .ev-when { grid-template-columns: 1fr; } }
+.ev-list .cal-time { flex-basis: 190px; }
+.ev-past { margin-top: 8px; }
+.ev-past > summary { cursor: pointer; list-style: none; }
+.ev-past > summary::before { content: '▸ '; }
+.ev-past[open] > summary::before { content: '▾ '; }
+@media (max-width: 560px) { .ev-list .cal-event { flex-wrap: wrap; } .ev-list .cal-time { flex-basis: 100%; } }
