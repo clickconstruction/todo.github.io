@@ -24,7 +24,7 @@ Guidance for Claude working in this repo. See README.md for what the app is and 
    - the smoke suites at `http://localhost:8765/?mock`: `const { run } = await import('/dev/smoke.js'); await run({ only: ['suite'] })`
      The full run takes two to three minutes, longer than the Browser pane's 45-second script timeout. A timed-out call keeps running in the page, and a second run resets the mock data under it, which produces dozens of bogus `null.click` failures. In the Browser pane start it detached and poll: `import('/dev/smoke.js').then(m => m.run()).then(r => window.__smokeResult = r)`, then read `window.__smokeResult`. Reload the page before any re-run.
    - SQL rule tests: wrap them in a transaction that rolls back (or ends by raising an exception) so nothing is left behind in the real database
-3. Commit to `main` and push (that deploys the app), then deploy the Worker if `mcp/` changed. Production deploys need the user's go-ahead.
+3. Apply any new migration and deploy the Worker (if `mcp/` changed) as part of finishing the feature; Todd has asked for this to happen without a separate go-ahead once the tests pass. Migration first: the app and the Worker read new tables on start. Then commit, and merge into `main` when Todd asks (that deploys the app).
 4. Commit messages: an app release is titled after the feature with the version in parentheses, matching `sw.js` (`Steps type and "Waits for" links (v74)`). Worker-only changes are prefixed `MCP:` and carry no version; test-only changes are prefixed `smoke:` or `dev:`.
 
 ## MCP limits (Cloudflare free plan)
