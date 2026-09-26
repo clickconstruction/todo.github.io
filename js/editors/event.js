@@ -2,7 +2,7 @@
 // (+ Event, or tap one of your events). Remove archives it, with Undo in the toast.
 import { db, $, esc, openSheet, bySort } from '../state.js';
 import { toDateInput } from '../dates.js';
-import { insertEvent, updateEvent, archiveEvent } from '../events.js';
+import { insertEvent, updateEvent, archiveEvent, cardOf } from '../events.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const timeOf = (iso) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
@@ -30,6 +30,7 @@ export function openEventEditor(event = null, { day = null } = {}) {
     <label>Project<select name="project_id"><option value="">None</option>${projects.map((p) => `<option value="${p.id}" ${e && e.project_id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
     <input type="url" name="url" value="${esc(e ? e.url : '')}" placeholder="Link (optional)" autocomplete="off" spellcheck="false" aria-label="Link">
     <label>Notes<textarea name="notes" placeholder="Tickets, gate times, who’s going…">${esc(e ? e.notes : '')}</textarea></label>
+    ${e && cardOf(e.task_id) ? `<p class="ev-card">↩ From the card <b>${esc(cardOf(e.task_id).title)}</b> <label class="hint"><input type="checkbox" name="unlink"> Unlink</label></p>` : ''}
     <p class="hint">Shows in Forecast on each day it covers, and in your calendar feed. Not an action: nothing to tick off.</p>
     <p class="form-error" data-error hidden></p>
     <div class="actions">
@@ -61,6 +62,7 @@ export function openEventEditor(event = null, { day = null } = {}) {
     const url = f.url.value.trim();
     if (url && !/^https?:\/\//i.test(url)) { err('Links start with https://'); return; }
     const fields = { title, all_day, starts_at, ends_at, location: f.location.value.trim(), project_id: f.project_id.value || null, url, notes: f.notes.value };
+    if (e && f.unlink && f.unlink.checked) fields.task_id = null;
     sheet.close();
     if (e) await updateEvent(e, fields); else await insertEvent(fields);
   };

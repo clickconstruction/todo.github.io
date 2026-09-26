@@ -2,11 +2,18 @@
 // they cover, and sent out in the private calendar feed so they reach your phone. Not actions.
 // Timed events have instants; an all-day event runs from local midnight of its first day to local
 // midnight after its last day (exclusive, as iCalendar does it). Archived, never deleted.
-import { db, app, sb, run, syncRow, toast, byId } from './state.js';
+import { db, app, sb, run, syncRow, toast, byId, esc } from './state.js';
 
 export const EVENT_COLOR = '#7F77DD';
 const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 export const liveEvents = () => (db.events || []).filter((e) => !e.archived_at);
+// The card an event came from (open, or fetched with the events if it's done), if any.
+export const cardOf = (taskId) => (taskId ? byId(db.tasks, taskId) || byId(db.eventTasks || [], taskId) || null : null);
+// A quiet "from" link on an event row; opens the card.
+export function fromHtml(taskId) {
+  const t = cardOf(taskId);
+  return t ? `<button type="button" class="ev-from" data-task="${t.id}" title="Open the card this came from">↩ ${esc(t.title)}</button>` : '';
+}
 
 // The local days an event covers, first to last.
 export function eventDays(e) {
@@ -26,7 +33,7 @@ export function ownEvents(fromKey, toKey) {
     if (!days.length) return;
     const p = e.project_id && byId(db.projects, e.project_id);
     out.push({ id: e.id, own: true, uid: `${e.id}@todotooling.com`, title: e.title, location: e.location, url: e.url, allDay: e.all_day,
-      start: e.starts_at, end: e.ends_at, days, busy: true, calendar: p ? p.name : null, color: EVENT_COLOR });
+      start: e.starts_at, end: e.ends_at, days, busy: true, calendar: p ? p.name : null, color: EVENT_COLOR, task_id: e.task_id || null });
   });
   return out.sort((a, b) => (a.allDay === b.allDay ? a.start.localeCompare(b.start) : a.allDay ? -1 : 1));
 }

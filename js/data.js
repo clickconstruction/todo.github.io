@@ -52,6 +52,9 @@ export async function loadAll() {
     every(() => sb.from('events').select('*').is('archived_at', null), 'id'),
   ]);
   Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions, taskWaits, events });
+  // Cards that events point at but that aren't loaded any more (completed a while ago): fetched so the link still reads.
+  const linked = [...new Set(events.map((e) => e.task_id).filter((id) => id && !byId(tasks, id)))];
+  db.eventTasks = linked.length ? await run(sb.from('tasks').select('*').in('id', linked.slice(0, 1000))) : [];
   await loadSettings();
 }
 

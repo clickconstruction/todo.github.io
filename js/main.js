@@ -66,7 +66,7 @@ const inspectOrEdit = (id) => {
   if (t) openEditor(t);
 };
 app.openTask = (id) => inspectOrEdit(id);
-const findTask = (id) => byId(db.tasks, id) || byId(app.searchExtra, id) || (app.doneCache && byId(app.doneCache.rows, id));
+const findTask = (id) => byId(db.tasks, id) || byId(app.searchExtra, id) || byId(db.eventTasks || [], id) || (app.doneCache && byId(app.doneCache.rows, id));
 
 const ACTIONS = {
   'customize-sidebar': () => openCustomize(),
@@ -199,7 +199,12 @@ const CLICKS = [
   ['[data-flag-keep]', () => {}], // a Settle in flag tick is just a checkbox
   ['[data-cl-tick]', () => {}], // a checklist tick is handled on change
   ['[data-now], [data-now-set]', (el, e) => { e.stopPropagation(); nowAction(el); }],
-  ['[data-event]', (el, e) => { if (e.target.closest('a')) return; e.stopPropagation(); const ev = byId(db.events, el.dataset.event); if (ev) openEventEditor(ev); }],
+  ['[data-event]', (el, e) => {
+    const card = e.target.closest('[data-task]'); // the "from" link opens the card, not the event
+    if (card) { e.stopPropagation(); inspectOrEdit(card.dataset.task); return; }
+    if (e.target.closest('a')) return;
+    e.stopPropagation(); const ev = byId(db.events, el.dataset.event); if (ev) openEventEditor(ev);
+  }],
   ['[data-edit-place]', (el, e) => { e.preventDefault(); e.stopPropagation(); openPlaceEditor(byId(db.places, el.dataset.editPlace)); }],
   ['[data-copy-geo]', (el) => copyGeoUrl(el)],
   ['[data-setup-auto]', (el) => openAutomationGuide(el.dataset.setupAuto)],

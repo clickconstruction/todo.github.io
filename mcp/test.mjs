@@ -1428,6 +1428,21 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(ics.includes('SUMMARY:Amigo Airsho') && ics.includes('DTSTART;VALUE=DATE:20261024') && ics.includes('DTEND;VALUE=DATE:20261026') && ics.includes('LOCATION:El Paso'), 'feed: all-day events as dates, end exclusive, with the location');
   assert(ics.includes('SUMMARY:Gates open') && new RegExp(`UID:${gate.id}@todotooling.com`).test(ics) && !ics.includes('SUMMARY:Company holiday\r\nDTSTART:'), 'feed: timed events as instants');
   assert(ics.includes('Project: Adventure USA'), 'feed: the project in the description');
+  // The card an event comes from.
+  const card = await tool('capture', { title: 'Add Texas airshows to my calendar' });
+  const linked = await tool('events', { action: 'add', title: 'Rose City AirFest', start: '2026-10-09', end: '2026-10-11', task: 'Add Texas airshows to my calendar' });
+  assert(linked.card && linked.card.id === card.id && linked.card.title === 'Add Texas airshows to my calendar' && db.events.find((e) => e.id === linked.id).task_id === card.id, 'add: task links the event to its card (by title)');
+  bad = ''; try { await tool('events', { action: 'add', title: 'X', start: '2026-10-09', task: 'Nope' }); } catch (e) { bad = e.message; }
+  assert(/No open card called "Nope"/.test(bad), 'an unknown card is refused');
+  const withCard = (await tool('events', { action: 'list', from: '2026-10-01', to: '2026-10-31' })).events.find((e) => e.id === linked.id);
+  assert(withCard.card && withCard.card.title === 'Add Texas airshows to my calendar', 'list shows the card');
+  const both = await tool('events', { action: 'add', items: [{ title: 'A', start: '2026-10-12', task: card.id }, { title: 'B', start: '2026-10-13' }] });
+  assert(both.events[0].card && both.events[0].card.id === card.id && !both.events[1].card, 'add items: task by id on one, none on the other, one insert');
+  const unlinked = await tool('events', { action: 'update', id: linked.id, task: null });
+  assert(!unlinked.card && db.events.find((e) => e.id === linked.id).task_id === null, 'update task null unlinks');
+  const todayCard = await tool('events', { action: 'add', title: 'Today with card', start: localToday(), task: card.id });
+  const fc2 = await tool('forecast', { days: 1 });
+  assert((fc2.days[localToday()].events || []).some((e) => e.id === todayCard.id && e.card === 'Add Texas airshows to my calendar'), 'forecast shows the card behind an event');
   db.events.length = 0;
 }
 

@@ -1689,6 +1689,22 @@ async function events(check) {
   $('[data-act="customize-sidebar"]').click(); await wait(80);
   check('Customize lists Events (hideable)', !!$('#sheet [data-nav-toggle="events"]'));
   $('#sheet').close();
+
+  // The card an event came from: a quiet "from" link that opens the card; Unlink in the editor.
+  const soon = new Date(); soon.setDate(soon.getDate() + 4); soon.setHours(0, 0, 0, 0);
+  const soonEnd = new Date(soon); soonEnd.setDate(soonEnd.getDate() + 1);
+  const withCard = await insertEvent({ title: 'Fuel run', all_day: true, starts_at: soon.toISOString(), ends_at: soonEnd.toISOString(), location: '', url: '', notes: '', project_id: null, task_id: 't11' });
+  await go('#events');
+  check('row shows the card it came from', has(undefined, 'fuel run', '↩ buy fuel filter') && !!$(`[data-event="${withCard.id}"] .ev-from[data-task="t11"]`), text());
+  $(`[data-event="${withCard.id}"] .ev-from`).click(); await wait(120);
+  check('the from link opens the card, not the event', $('#sheet').open && !$('#event-form') && !!$('#sheet [name="title"]') && $('#sheet [name="title"]').value === 'Buy fuel filter', $('#sheet [name="title"]') && $('#sheet [name="title"]').value);
+  $('#sheet').close();
+  await go(`#forecast/${day(4)}`);
+  check('Forecast shows the same link', !!$(`[data-event="${withCard.id}"] .ev-from[data-task="t11"]`));
+  $(`[data-event="${withCard.id}"]`).click(); await wait(80);
+  check('editor names the card, with Unlink', has('#event-form', 'from the card', 'buy fuel filter') && !!$('#event-form [name=unlink]'));
+  $('#event-form [name=unlink]').checked = true; $('#event-form').requestSubmit(); await wait(200);
+  check('unlinked', T().events.find((e) => e.id === withCard.id).task_id === null && !$(`[data-event="${withCard.id}"] .ev-from`));
 }
 
 // Settings → App: the version you're on, and Check for updates (switches right away when one is there).

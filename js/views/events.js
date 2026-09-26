@@ -2,7 +2,7 @@
 // folded away. Not actions: nothing to tick off. Tap one to edit; + Event adds one. Forecast shows
 // the same events by day, and its Future bucket lists the ones beyond next week.
 import { db, esc, byId } from '../state.js';
-import { liveEvents, eventDays, EVENT_COLOR } from '../events.js';
+import { liveEvents, eventDays, EVENT_COLOR, fromHtml } from '../events.js';
 import { fmtEventTime } from '../calendars.js';
 
 const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -22,7 +22,7 @@ export function eventRow(e) {
   const meta = [e.location, p && p.name].filter(Boolean);
   return `<li class="cal-event own" style="--cal:${EVENT_COLOR}" data-event="${e.id}" title="Edit event">
     <span class="cal-time">${esc(fmtWhen(e))}</span><span class="cal-main"><span class="cal-title">${esc(e.title)}</span>
-    ${meta.length ? `<span class="cal-meta">${meta.map((x) => esc(x.split('\n')[0])).join(' · ')}</span>` : ''}</span></li>`;
+    ${meta.length ? `<span class="cal-meta">${meta.map((x) => esc(x.split('\n')[0])).join(' · ')}</span>` : ''}${fromHtml(e.task_id)}</span></li>`;
 }
 
 // Events still to come (or under way) on or after a day, soonest first.
