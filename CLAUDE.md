@@ -12,7 +12,7 @@ Guidance for Claude working in this repo. See README.md for what the app is and 
 ## Stack
 
 - Plain JavaScript ES modules, no framework and no build step. State lives in `db` and `app` in `js/state.js`.
-- Supabase project `cgssdelgtxlrfgozchps` (Postgres with owner-only RLS on every table). Apply migrations with the Supabase MCP (`apply_migration`), and keep a copy in `supabase/migrations/`.
+- Supabase project `cgssdelgtxlrfgozchps` (Postgres with owner-only RLS on every table). Apply migrations with the Supabase MCP (`apply_migration`) or with `python3 dev/sbq.py supabase/migrations/<file>.sql` (the Management API with the CLI's saved login; then record the version in `supabase_migrations.schema_migrations`), and keep a copy in `supabase/migrations/`. Never `supabase db push`: the history table holds the MCP's own version numbers. `python3 dev/sbq.py supabase/tests/<file>.sql` runs a rule test.
 - MCP server: a Cloudflare Worker in `mcp/`, at `https://mcp.todotooling.com/mcp`. It uses the server secret key, so **every query must be scoped to the token owner** (`api.u` / `user_id`).
 - Local Node is v20, so deploy with `npx -y wrangler@3 deploy`.
 
