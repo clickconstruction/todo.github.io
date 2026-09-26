@@ -87,6 +87,20 @@ async function routeMinutes(origin, dest) {
     return routes && routes[0] && routes[0].duration ? Math.round(parseInt(routes[0].duration, 10) / 60) : null;
   } catch { return null; }
 }
+// After a render: events with a location but no coordinates yet (added by an agent whose lookup
+// didn't find them, or before this existed) are geocoded here, a few at a time, and saved.
+const locating = new Set();
+export async function refreshCoordinates(events, { limit = 3 } = {}) {
+  const todo = events.filter((e) => e.location && e.lat == null && !locating.has(e.id) && !e.geo_tried).slice(0, limit);
+  for (const e of todo) {
+    locating.add(e.id);
+    try {
+      const g = await geocodeText(e.location);
+      if (g && byId(db.events, e.id)) await updateEvent(e, { lat: g.lat, lng: g.lng, drive_minutes: null, drive_from: null });
+      else e.geo_tried = true; // not this session again
+    } catch { e.geo_tried = true; } finally { locating.delete(e.id); }
+  }
+}
 // After a render: fill in drive times that are missing or were measured from somewhere else, a few at
 // a time, saving each on the event (so every device has it) and re-rendering as they arrive.
 const driving = new Set();

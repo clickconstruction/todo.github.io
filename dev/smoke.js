@@ -1732,6 +1732,12 @@ async function events(check) {
   await go('#settings');
   check('Settings → Calendars: Distances to events picks the place', $('[data-setting-distance-place]') && $('[data-setting-distance-place]').value === 'pl2');
   await saveSettings({ distance_place_id: null }, { quiet: true });
+  // An event that arrived without coordinates (an agent's lookup failed) gets them on the next render.
+  const bare = await insertEvent({ title: 'Bare location', all_day: true, starts_at: soon.toISOString(), ends_at: soonEnd.toISOString(), location: 'Somewhere, TX', url: '', notes: '', project_id: null, task_id: null });
+  A.here = { lat: 29.7610, lng: -95.3705, accuracy: 20 };
+  await go('#forecast'); await go('#events'); await wait(300);
+  const filled = T().events.find((e) => e.id === bare.id);
+  check('location without coordinates: geocoded on render, distance shown', filled.lat != null && has(undefined, 'bare location') && $(`[data-event="${bare.id}"]`).textContent.includes(' mi'), JSON.stringify([filled.lat, filled.lng]));
   window.__geocode = undefined; window.__routeMinutes = undefined; A.here = null;
 }
 

@@ -2,7 +2,7 @@
 // folded away. Not actions: nothing to tick off. Tap one to edit; + Event adds one. Forecast shows
 // the same events by day, and its Future bucket lists the ones beyond next week.
 import { db, esc, byId } from '../state.js';
-import { liveEvents, eventDays, EVENT_COLOR, fromHtml, distanceText, refreshDriveTimes, distanceOrigin } from '../events.js';
+import { liveEvents, eventDays, EVENT_COLOR, fromHtml, distanceText, refreshDriveTimes, refreshCoordinates, distanceOrigin } from '../events.js';
 import { fmtEventTime } from '../calendars.js';
 
 const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -34,7 +34,7 @@ export function eventsThisWeekCount() {
 }
 
 // After the list renders: drive times for what's coming up (router AFTER hook, also used by Forecast).
-export const refreshEventDrives = () => refreshDriveTimes(upcomingEvents());
+export const refreshEventDrives = async () => { await refreshCoordinates(upcomingEvents()); await refreshDriveTimes(upcomingEvents()); };
 
 export function viewEvents(section) {
   const today = todayKey();
