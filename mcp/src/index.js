@@ -731,7 +731,7 @@ class Api {
   async setNotifications(col, id, list) {
     const rows = list.map((n) => {
       if (!['before_due', 'before_planned', 'at_defer', 'at'].includes(n.kind)) throw new Error('notification kind must be before_due, before_planned, at_defer or at');
-      const row = { user_id: this.userId, [col]: id, kind: n.kind, offset_minutes: Math.min(525600, Math.max(0, Math.round(Number(n.minutes) || 0))) };
+      const row = { user_id: this.userId, [col]: id, kind: n.kind, offset_minutes: Math.min(525600, Math.max(0, Math.round(Number(n.minutes) || 0))), at: null }; // every row the same keys: one insert
       if (n.kind === 'at') {
         if (!n.at || isNaN(new Date(n.at))) throw new Error('an "at" notification needs at (an ISO time)');
         row.at = new Date(n.at).toISOString();

@@ -100,7 +100,8 @@ Dates are the user's local time: "YYYY-MM-DD" makes an all-day event (end = its 
       if (action === 'add') {
         const list = Array.isArray(a.items) && a.items.length ? a.items : [a];
         if (list.length > 100) throw new Error('Add up to 100 events in one call');
-        const rows = list.map((x) => ({ user_id: api.userId, source: 'mcp', ...fields(x) })); // every row checked before anything is saved
+        // Every row is checked before anything is saved, and every row carries the same keys (a bulk insert requires it).
+        const rows = list.map((x) => ({ user_id: api.userId, source: 'mcp', location: '', notes: '', url: '', project_id: null, ...fields(x) }));
         const saved = await api.q('events', { method: 'POST', prefer: 'return=representation', body: rows });
         const out = saved.map((e) => shape(e, tz, projectName));
         return Array.isArray(a.items) && a.items.length ? { added: out.length, events: out } : out[0];

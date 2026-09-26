@@ -154,6 +154,7 @@ globalThis.fetch = async (url, init = {}) => {
   const follow = (r) => db.tasks.filter((x) => x.parent_id === r.id && x.project_id !== r.project_id).forEach((x) => { x.project_id = r.project_id; follow(x); });
   if (m === 'POST' && table === 'tasks') for (const b of (Array.isArray(body) ? body : [body])) { const e = guard({}, b); if (e) return res({ message: e }, 400); }
   if (m === 'PATCH' && table === 'tasks') for (const r of rows.filter(match)) { const b = { ...body }; const e = guard(r, b); if (e) return res({ message: e }, 400); Object.assign(r, b); follow(r); }
+  if (m === 'POST' && Array.isArray(body) && body.some((b) => Object.keys(b).sort().join() !== Object.keys(body[0]).sort().join())) return res({ code: 'PGRST102', message: 'All object keys must match' }, 400); // as PostgREST does
   if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...(table === 'checklists' ? { complete_action: true, archived_at: null } : {}), ...(table === 'review_items' ? { status: 'pending', note: '', changed: {}, priority: false } : {}), ...(table === 'checklist_runs' ? { started_at: new Date().toISOString(), finished_at: null } : {}), ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
   if (m === 'PATCH') { const hit = rows.filter((r) => match(r) && orMatch(r)); hit.forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); if (table === 'tasks') hit.forEach((r) => { if (!r.waiting_on) r.follow_up_at = null; }); return init.headers.Prefer ? res(hit) : res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
@@ -1396,9 +1397,9 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const allToday = await tool('events', { action: 'add', title: 'Company holiday', start: today });
   const many = await tool('events', { action: 'add', items: [
     { title: 'Texas Capital Air Show', start: '2026-11-07', end: '2026-11-08', location: 'San Marcos' },
-    { title: 'Amigo Airsho', start: '2026-10-24', end: '2026-10-25', location: 'El Paso' },
+    { title: 'Amigo Airsho', start: '2026-10-24', end: '2026-10-25', location: 'El Paso', url: 'https://www.amigoairsho.com/', notes: 'Blue Angels' },
   ] });
-  assert(many.added === 2 && many.events.length === 2 && db.events.length === 5, 'add items: several in one call');
+  assert(many.added === 2 && many.events.length === 2 && db.events.length === 5, 'add items: several in one call, with different fields given (one insert)');
   let bad = ''; try { await tool('events', { action: 'add', title: 'X', start: 'tomorrow' }); } catch (e) { bad = e.message; }
   assert(/YYYY-MM-DD/.test(bad), 'dates are checked');
   bad = ''; try { await tool('events', { action: 'add', title: 'X', start: '2026-10-31', project: 'Nope' }); } catch (e) { bad = e.message; }
