@@ -42,7 +42,7 @@ export function viewSettings() {
       <button class="btn small danger" data-revoke="${t.id}">Revoke</button></li>`).join('');
   return `<div class="view-head"><h1>Settings</h1></div>
     <p class="view-sub">Signed in as ${esc(app.user.email)}</p>
-    <nav class="set-index" aria-label="Settings sections">${[['Sidebar', 'Sidebar'], ['Agents', 'Agent access'], ['Notifications', 'Notifications'], ['Email', 'Email capture'], ['Dates', 'Dates'], ['Reviews', 'Weekly and daily'], ['Calendars', 'Calendars'], ['Keyboard', 'Keyboard'], ['Folders', 'Folders on your Mac'], ['Import', 'Import'], ['Account', 'Account']]
+    <nav class="set-index" aria-label="Settings sections">${[['Sidebar', 'Sidebar'], ['Agents', 'Agent access'], ['Notifications', 'Notifications'], ['Email', 'Email capture'], ['Dates', 'Dates'], ['Reviews', 'Weekly and daily'], ['Calendars', 'Calendars'], ['Keyboard', 'Keyboard'], ['Folders', 'Folders on your Mac'], ['Import', 'Import'], ['App', 'App'], ['Account', 'Account']]
       .map(([l, h]) => `<button type="button" class="chip" data-scroll-to="${h}">${l}</button>`).join('')}</nav>
     <h2 class="section-title">Sidebar</h2>
     <p class="view-sub" style="margin-bottom:8px">Hide views you don’t use, order each group, and pin perspectives to Do.</p>
@@ -70,6 +70,9 @@ export function viewSettings() {
     <h2 class="section-title">Import</h2>
     <p class="view-sub" style="margin-bottom:8px">Moving from OmniFocus? Bring folders, projects, tags, repeats and review schedules over; you'll see a preview first.</p>
     <a class="btn" href="#import">Import from OmniFocus</a>
+    <h2 class="section-title">App</h2>
+    <p class="view-sub" style="margin-bottom:8px">${app.appVersion ? `Version ${esc(app.appVersion)}. ` : ''}New versions install in the background and switch at a quiet moment. Check now to switch right away.</p>
+    <p class="set-inline"><button class="btn" data-act="check-updates" ${app.updateChecking ? 'disabled' : ''}>${app.updateChecking ? 'Checking…' : 'Check for updates'}</button>${app.updateNote ? `<span class="hint">${esc(app.updateNote)}</span>` : ''}</p>
     <h2 class="section-title">Account</h2>
     <button class="btn" data-act="sign-out">Sign out</button>`;
 }

@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, checkUpdates, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -1689,6 +1689,28 @@ async function events(check) {
   $('[data-act="customize-sidebar"]').click(); await wait(80);
   check('Customize lists Events (hideable)', !!$('#sheet [data-nav-toggle="events"]'));
   $('#sheet').close();
+}
+
+// Settings → App: the version you're on, and Check for updates (switches right away when one is there).
+async function checkUpdates(check) {
+  const U = await import('/js/updates.js');
+  const { app } = await import('/js/state.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  U.__resetUpdates(); U.updateState().reg = null; app.updateNote = ''; app.appVersion = 'v78';
+  let reloads = 0; window.__reload = () => { reloads++; };
+  await go('#settings');
+  check('App section: the version and Check for updates', has(undefined, 'app', 'version v78', 'check for updates') && !!$('[data-act="check-updates"]'), text());
+  $('[data-act="check-updates"]').click(); await until(() => app.updateNote);
+  check('no service worker here: it says so', /aren’t available/.test(app.updateNote) && has(undefined, 'aren’t available'), app.updateNote);
+  const posted = [];
+  const fake = { postMessage: (m, ports) => { posted.push(m.type); if (m.type === 'INFO' && ports && ports[0]) ports[0].postMessage({ version: 'v99', min: 'v1' }); } };
+  U.updateState().reg = { update: async () => { U.onWaiting(fake); } };
+  app.updateNote = ''; $('[data-act="check-updates"]').click(); await until(() => reloads > 0);
+  check('a new version found: switches right away', reloads === 1 && posted.includes('SKIP_WAITING') && /Updating/.test(app.updateNote), `${reloads} ${posted} ${app.updateNote}`);
+  U.updateState().reg = { update: async () => {} }; U.__resetUpdates(); app.updateNote = '';
+  $('[data-act="check-updates"]').click(); await until(() => app.updateNote, 10000);
+  check('nothing new: says you’re current', /latest version/.test(app.updateNote), app.updateNote);
+  U.__resetUpdates(); U.updateState().reg = null; window.__reload = undefined; app.updateNote = ''; app.appVersion = null;
 }
 
 // Behaviour that existed before the feature phases; must never regress.

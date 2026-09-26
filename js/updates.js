@@ -88,13 +88,15 @@ function showReady() {
   const b = $('#nav-update');
   if (b) b.hidden = false;
 }
+// What version is a worker? ({ version, min } from sw.js, or null)
+const ask = (w) => new Promise((res) => { if (!w) return res(null); try { const ch = new MessageChannel(); ch.port1.onmessage = (e) => res(e.data); w.postMessage({ type: 'INFO' }, [ch.port2]); setTimeout(() => res(null), 3000); } catch { res(null); } });
+const controller = () => (navigator.serviceWorker && navigator.serviceWorker.controller) || null;
+
 export function onWaiting(worker) {
   U.waiting = worker;
   showReady();
   // Must this page switch soon? (the new version's minimum vs the version running now)
-  const running = navigator.serviceWorker && navigator.serviceWorker.controller;
-  const ask = (w) => new Promise((res) => { try { const ch = new MessageChannel(); ch.port1.onmessage = (e) => res(e.data); w.postMessage({ type: 'INFO' }, [ch.port2]); setTimeout(() => res(null), 3000); } catch { res(null); } });
-  Promise.all([ask(worker), running ? ask(running) : null]).then(([next, cur]) => {
+  Promise.all([ask(worker), ask(controller())]).then(([next, cur]) => {
     if (next && cur && num(cur.version) < num(next.min)) {
       U.force = true;
       toast('An important update is ready: switching in a moment');
@@ -106,6 +108,21 @@ export function onWaiting(worker) {
 function check() {
   U.lastCheck = Date.now();
   if (U.reg) U.reg.update().catch(() => {});
+}
+
+// Settings → App → Check for updates: ask right now and, if a new version is there, switch right away.
+// → { version, result: 'updated' | 'waiting' | 'up_to_date' | 'unavailable' }
+export async function checkNow() {
+  const cur = await ask(controller());
+  const version = (cur && cur.version) || app.appVersion || null;
+  const apply = () => ({ version, result: tryApply('manual') ? 'updated' : 'waiting' });
+  if (U.waiting || U.controllerChanged) return apply();
+  if (!U.reg) return { version, result: 'unavailable' };
+  U.lastCheck = Date.now();
+  try { await U.reg.update(); } catch { return { version, result: 'unavailable' }; }
+  // A new worker installs in the background; give it a few seconds to reach "waiting".
+  const found = await new Promise((res) => { const t0 = Date.now(); const tick = () => { if (U.waiting) return res(true); if (Date.now() - t0 > 8000) return res(false); setTimeout(tick, 150); }; tick(); });
+  return found ? apply() : { version, result: 'up_to_date' };
 }
 
 // ---------- wiring ----------
@@ -133,6 +150,7 @@ export function initUpdates({ importBusy } = {}) {
   const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
   if (!('serviceWorker' in navigator) || isLocal) return;
   U.hadController = !!navigator.serviceWorker.controller;
+  ask(controller()).then((i) => { if (i && i.version) app.appVersion = i.version; }); // shown in Settings → App
   navigator.serviceWorker.register('sw.js').then((reg) => {
     U.reg = reg;
     U.lastCheck = Date.now();

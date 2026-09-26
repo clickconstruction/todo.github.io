@@ -1148,7 +1148,7 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 @media (max-width: 520px) { .st-four { grid-template-columns: repeat(2, 1fr); } .st-four kbd { display: none; } }
 .st-folder { margin-top: 10px; }
 .import-row .st-btns { flex-shrink: 0; }
-a.btn { text-decoration: none; }
+a.btn { display: inline-block; text-decoration: none; } /* inline, an anchor's padding would paint over the line above it */
 
 /* What do I gain? */
 .gain-field { margin: 4px 0 8px; }
@@ -1484,3 +1484,4 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .ev-past > summary::before { content: '▸ '; }
 .ev-past[open] > summary::before { content: '▾ '; }
 @media (max-width: 560px) { .ev-list .cal-event { flex-wrap: wrap; } .ev-list .cal-time { flex-basis: 100%; } }
+.set-inline { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 8px; }

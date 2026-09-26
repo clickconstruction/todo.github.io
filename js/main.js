@@ -30,7 +30,7 @@ import { dailyAction, dailySubmit } from './views/daily.js';
 import { settleAction, settleKey } from './views/settle.js';
 import { fullReviewAction, fullReviewKey, startFullReview, activeSession } from './views/fullreview.js';
 import { moreSheetHtml, openCustomize } from './sidebar.js';
-import { initUpdates, resumeAfterUpdate, tryApply } from './updates.js';
+import { initUpdates, resumeAfterUpdate, tryApply, checkNow } from './updates.js';
 import { slipAction, slipSubmit, slipInput } from './views/slipbox.js';
 import { readingAction, readingSubmit } from './views/reading.js';
 import { matrixAction, matrixChange } from './views/matrix.js';
@@ -90,6 +90,14 @@ const ACTIONS = {
   'hide-nudge': hideNudge,
   'test-alert': testAlert,
   'toggle-archived-places': () => { app.showArchivedPlaces = !app.showArchivedPlaces; render(); },
+  'check-updates': async () => {
+    app.updateChecking = true; app.updateNote = ''; render();
+    const r = await checkNow();
+    app.updateChecking = false;
+    if (r.version) app.appVersion = r.version;
+    app.updateNote = { updated: 'Updating…', waiting: 'Update ready: it switches as soon as this is saved', up_to_date: `You’re on the latest version${r.version ? ` (${r.version})` : ''}`, unavailable: 'Updates aren’t available here (no service worker)' }[r.result];
+    render();
+  },
   'new-token': createToken,
   'new-capture-key': newCaptureKey,
   'capture-guide': captureGuide,
