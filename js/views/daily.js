@@ -6,6 +6,7 @@ import { startOfToday, addDays, atDefaultTime, endOfToday, fmtDate } from '../da
 import { isAvailable } from '../availability.js';
 import { rankNow } from '../whatnow.js';
 import { calendarEvents, liveCalendars, fmtEventTime } from '../calendars.js';
+import { ownEvents, distanceText, leaveByText } from '../events.js';
 import { dayKey, followUpDue, isWaiting, waitingPerson, messageLink, returnedFromTickler, isTickled } from '../gtd.js';
 import { openLink } from '../editors/gtd.js';
 import { openSchedule, slotsFor } from '../editors/schedule.js';
@@ -43,16 +44,16 @@ const hasCal = () => liveCalendars().some((c) => c.enabled);
 
 // The day: timed events and time blocks in order, plus free time left (7am–7pm).
 function dayHtml(key, { freeLine = true } = {}) {
-  const events = hasCal() ? calendarEvents(key, key) : [];
+  const events = [...(hasCal() ? calendarEvents(key, key) : []), ...ownEvents(key, key)]; // subscribed calendars and your own events
   const blocks = db.tasks.filter((t) => t.scheduled_at && dayKey(new Date(t.scheduled_at)) === key && !t.dropped_at);
   const rows = [
-    ...events.map((e) => ({ at: e.allDay ? '' : e.start, html: `<div class="dv-row"><span class="dv-t">${esc(fmtEventTime(e))}</span><span class="dv-bar" style="--cal:${esc(e.color)}"></span><span class="dv-x">${esc(e.title)}</span></div>` })),
+    ...events.map((e) => ({ at: e.allDay ? '' : e.start, html: `<div class="dv-row"${e.own ? ` data-event="${e.id}"` : ''}><span class="dv-t">${esc(fmtEventTime(e))}</span><span class="dv-bar" style="--cal:${esc(e.color)}"></span><span class="dv-x">${esc(e.title)}${e.own && (distanceText(e.raw) || leaveByText(e.raw)) ? ` <span class="hint">${esc([distanceText(e.raw), leaveByText(e.raw)].filter(Boolean).join(' · '))}</span>` : ''}</span></div>` })),
     ...blocks.map((t) => ({ at: t.scheduled_at, html: `<div class="dv-row" data-task="${t.id}"><span class="dv-t">${esc(fmtHM(t.scheduled_at))}</span><span class="dv-bar block"></span><span class="dv-x ${t.completed_at ? 'done' : ''}">${esc(t.title)} <span class="hint">scheduled</span></span></div>` })),
   ].sort((a, b) => String(a.at).localeCompare(String(b.at)));
   const free = slotsFor(key, { id: null }, 15).reduce((n, s) => n + s.minutes, 0);
   const meetings = events.filter((e) => !e.allDay).length;
   const line = [meetings && `${meetings} meeting${meetings === 1 ? '' : 's'}`, blocks.length && `${blocks.length} time block${blocks.length === 1 ? '' : 's'}`, free && `${fmtLen(free)} free`].filter(Boolean).join(' · ');
-  return { html: rows.map((r) => r.html).join('') || `<p class="hint">${hasCal() ? 'Nothing on your calendar.' : 'No calendars connected (Settings → Calendars).'}</p>`, line: freeLine ? line : '', free, meetings };
+  return { html: rows.map((r) => r.html).join('') || `<p class="hint">${hasCal() ? 'Nothing on your calendar.' : 'No calendars connected (Settings → Calendars), and no events of your own today.'}</p>`, line: freeLine ? line : '', free, meetings };
 }
 
 // Must-dos: due today or overdue, follow-ups due, back from the tickler.

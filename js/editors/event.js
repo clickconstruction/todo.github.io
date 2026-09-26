@@ -2,7 +2,7 @@
 // (+ Event, or tap one of your events). Remove archives it, with Undo in the toast.
 import { db, $, esc, openSheet, bySort } from '../state.js';
 import { toDateInput } from '../dates.js';
-import { insertEvent, updateEvent, archiveEvent, cardOf, geocodeText } from '../events.js';
+import { insertEvent, updateEvent, archiveEvent, cardOf, geocodeText, distanceText, directionsUrl } from '../events.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const timeOf = (iso) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
@@ -27,6 +27,7 @@ export function openEventEditor(event = null, { day = null } = {}) {
       <label>Ends<span class="ev-dt"><input type="date" name="end_day" value="${endDay}" required><input type="time" name="end_time" value="${endTime}" ${allDay ? 'hidden' : ''}></span></label>
     </div>
     <input type="text" name="location" value="${esc(e ? e.location : '')}" placeholder="Where (optional)" autocomplete="off" aria-label="Location">
+    <p class="hint ev-geo" data-geo ${e && e.location ? '' : 'hidden'}>${e && e.lat != null ? `📍 ${esc(distanceText(e) || 'On the map')} · <a href="${esc(directionsUrl(e))}" target="_blank" rel="noopener">Directions</a>` : e && e.location ? 'Not found on the map yet' : ''}</p>
     <label>Project<select name="project_id"><option value="">None</option>${projects.map((p) => `<option value="${p.id}" ${e && e.project_id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
     <input type="url" name="url" value="${esc(e ? e.url : '')}" placeholder="Link (optional)" autocomplete="off" spellcheck="false" aria-label="Link">
     <label>Notes<textarea name="notes" placeholder="Tickets, gate times, who’s going…">${esc(e ? e.notes : '')}</textarea></label>
@@ -46,6 +47,25 @@ export function openEventEditor(event = null, { day = null } = {}) {
   let endTouched = !!e;
   f.end_day.addEventListener('input', () => { endTouched = true; });
   f.start_day.addEventListener('input', () => { if (!endTouched || f.end_day.value < f.start_day.value) f.end_day.value = f.start_day.value; });
+  // Look the location up as soon as it's typed, so you see where it landed (and how far) before saving.
+  const looked = { text: e ? e.location : '', geo: e && e.lat != null ? { lat: e.lat, lng: e.lng } : null };
+  const geoLine = $('[data-geo]', form);
+  const lookUp = async () => {
+    const text = f.location.value.trim();
+    if (text === looked.text) return;
+    looked.text = text; looked.geo = null;
+    geoLine.hidden = !text;
+    if (!text) return;
+    geoLine.textContent = 'Looking it up…';
+    const g = await geocodeText(text);
+    if (f.location.value.trim() !== text) return; // typed on
+    looked.geo = g ? { lat: g.lat, lng: g.lng } : null;
+    if (!g) { geoLine.textContent = 'Couldn’t find that on the map. Try a street address or the airport code.'; return; }
+    const probe = { lat: g.lat, lng: g.lng, all_day: true };
+    geoLine.innerHTML = `✓ ${esc(g.address || text)}${distanceText(probe) ? ` · ${esc(distanceText(probe))}` : ''} · <a href="${esc(directionsUrl(probe))}" target="_blank" rel="noopener">Directions</a>`;
+  };
+  f.location.addEventListener('change', lookUp);
+  f.location.addEventListener('blur', lookUp);
   $('[data-cancel]', form).onclick = () => sheet.close();
   const rm = $('[data-remove]', form);
   if (rm) rm.onclick = async () => { sheet.close(); await archiveEvent(e); };
@@ -66,7 +86,7 @@ export function openEventEditor(event = null, { day = null } = {}) {
     // Where it is, as coordinates: looked up when the location is new or changed; a change resets the drive time.
     if (!fields.location) { if (!e || e.lat != null) Object.assign(fields, { lat: null, lng: null, drive_minutes: null, drive_from: null }); }
     else if (!e || fields.location !== e.location || e.lat == null) {
-      const g = await geocodeText(fields.location);
+      const g = looked.text === fields.location ? looked.geo : await geocodeText(fields.location); // already looked up on blur, usually
       Object.assign(fields, { lat: g ? g.lat : null, lng: g ? g.lng : null, drive_minutes: null, drive_from: null });
     }
     sheet.close();

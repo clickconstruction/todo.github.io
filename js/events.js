@@ -68,7 +68,7 @@ export async function geocodeText(text) {
   try {
     const { results } = await new maps.Geocoder().geocode({ address: text });
     const r = results && results[0];
-    return r ? { lat: r.geometry.location.lat(), lng: r.geometry.location.lng() } : null;
+    return r ? { lat: r.geometry.location.lat(), lng: r.geometry.location.lng(), address: r.formatted_address || '' } : null;
   } catch { return null; }
 }
 // Driving minutes from an origin to an event (Routes API; the browser key allows it for this site).
@@ -87,6 +87,21 @@ async function routeMinutes(origin, dest) {
     return routes && routes[0] && routes[0].duration ? Math.round(parseInt(routes[0].duration, 10) / 60) : null;
   } catch { return null; }
 }
+// Directions to an event, in the maps app this device has.
+export const directionsUrl = (e) => (e.lat == null ? '' : (/iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1))
+  ? `https://maps.apple.com/?daddr=${e.lat},${e.lng}` : `https://www.google.com/maps/dir/?api=1&destination=${e.lat},${e.lng}`);
+// When to leave for a timed event today, from its cached drive time (null when unknown, past, or not today).
+export function leaveBy(e) {
+  if (e.all_day || e.drive_minutes == null) return null;
+  const o = distanceOrigin();
+  if (!o || e.drive_from !== originKey(o)) return null;
+  const start = new Date(e.starts_at);
+  const now = new Date();
+  if (start < now || start.toDateString() !== now.toDateString()) return null;
+  return new Date(start.getTime() - e.drive_minutes * 60000);
+}
+export const leaveByText = (e) => { const t = leaveBy(e); return t ? `leave by ${t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(/\s/g, '').toLowerCase()}` : ''; };
+
 // After a render: events with a location but no coordinates yet (added by an agent whose lookup
 // didn't find them, or before this existed) are geocoded here, a few at a time, and saved.
 const locating = new Set();

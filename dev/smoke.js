@@ -1738,6 +1738,28 @@ async function events(check) {
   await go('#forecast'); await go('#events'); await wait(300);
   const filled = T().events.find((e) => e.id === bare.id);
   check('location without coordinates: geocoded on render, distance shown', filled.lat != null && has(undefined, 'bare location') && $(`[data-event="${bare.id}"]`).textContent.includes(' mi'), JSON.stringify([filled.lat, filled.lng]));
+  // The editor shows what a location resolved to, how far, and Directions; leave-by for a timed event today.
+  A.here = { lat: 29.7610, lng: -95.3705, accuracy: 20 };
+  window.__geocode = async (t) => ({ lat: 29.6073, lng: -95.1588, address: `${t} (resolved)` });
+  await go('#events');
+  $(`[data-event="${woh.id}"]`).click(); await wait(80);
+  f = $('#event-form');
+  check('editor: where it is, how far, Directions', !!$('[data-geo]', f) && has('#event-form', '📍', ' mi', 'directions') && $('[data-geo] a', f).href.includes('29.6073'), $('[data-geo]', f) && $('[data-geo]', f).textContent);
+  f.elements.location.value = 'Hobby Airport'; fire(f.elements.location, 'change'); await wait(120);
+  check('a new location is looked up as you go', has('#event-form', '✓ hobby airport (resolved)', ' mi', 'directions'), $('[data-geo]', f).textContent);
+  $('#event-form [data-cancel]').click();
+  const t0 = new Date(Date.now() + 2 * 3600000);
+  if (t0.getDate() === new Date().getDate()) {
+    const t1 = new Date(t0.getTime() + 3600000);
+    const timed = await insertEvent({ title: 'Gate talk', all_day: false, starts_at: t0.toISOString(), ends_at: t1.toISOString(), location: 'Ellington', url: '', notes: '', project_id: null, task_id: null, lat: 29.6073, lng: -95.1588, drive_minutes: 35, drive_from: '29.76,-95.37' });
+    const leave = new Date(t0.getTime() - 35 * 60000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(/\s/g, '').toLowerCase();
+    await go('#forecast');
+    check('Forecast today: leave by, from the drive time', has('.cal-list', 'gate talk', `leave by ${leave}`), text('.cal-list'));
+    await go('#daily');
+    check('Daily review: the event in your day with distance and leave by', has('.dv-day', 'gate talk', ' mi', `leave by ${leave}`) && !!$(`.dv-row[data-event="${timed.id}"]`), text('.dv-day'));
+  } else check('leave-by checks skipped this close to midnight', true);
+  await go('#nearby');
+  check('Nearby: events near here, nearest first, with a link to all', has(undefined, 'events near here', 'woh distance test', 'all events'), text());
   window.__geocode = undefined; window.__routeMinutes = undefined; A.here = null;
 }
 

@@ -42,7 +42,7 @@ export function eventOf(t, { project = null, appUrl = 'https://todotooling.com/'
 export function ownEventOf(ev, { project = null, dayKey, appUrl = 'https://todotooling.com/' } = {}) {
   const link = `${appUrl}#forecast/${dayKey(ev.starts_at)}`;
   return { uid: `${ev.id}@todotooling.com`, allDay: !!ev.all_day, start: ev.all_day ? dayKey(ev.starts_at) : ev.starts_at, end: ev.all_day ? dayKey(ev.ends_at) : ev.ends_at,
-    title: ev.title, location: ev.location || '', details: [project && `Project: ${project}`, ev.notes && ev.notes.slice(0, 500), ev.url, link].filter(Boolean).join('\n\n'), link: ev.url || link, updated: ev.updated_at || ev.created_at };
+    title: ev.title, location: ev.location || '', lat: ev.lat ?? null, lng: ev.lng ?? null, details: [project && `Project: ${project}`, ev.notes && ev.notes.slice(0, 500), ev.url, link].filter(Boolean).join('\n\n'), link: ev.url || link, updated: ev.updated_at || ev.created_at };
 }
 
 export function icsCalendar(events, { name = 'Todo Tooling' } = {}) {
@@ -51,7 +51,10 @@ export function icsCalendar(events, { name = 'Todo Tooling' } = {}) {
   for (const e of events) {
     const when = (k, v) => (e.allDay ? `${k};VALUE=DATE:${String(v).replace(/-/g, '')}` : `${k}:${icsDate(v)}`);
     lines.push('BEGIN:VEVENT', `UID:${e.uid}`, `DTSTAMP:${icsDate(e.updated)}`, when('DTSTART', e.start), when('DTEND', e.end),
-      `SUMMARY:${icsText(e.title)}`, `DESCRIPTION:${icsText(e.details)}`, ...(e.location ? [`LOCATION:${icsText(e.location)}`] : []), `URL:${e.link}`, 'END:VEVENT');
+      `SUMMARY:${icsText(e.title)}`, `DESCRIPTION:${icsText(e.details)}`, ...(e.location ? [`LOCATION:${icsText(e.location)}`] : []),
+      // Coordinates: GEO for everyone, and Apple's structured location so Calendar shows the map, offers Directions and can alert "time to leave".
+      ...(e.lat != null && e.lng != null ? [`GEO:${e.lat};${e.lng}`, `X-APPLE-STRUCTURED-LOCATION;VALUE=URI;X-APPLE-RADIUS=200;X-TITLE="${String(e.location || e.title).replace(/["\r\n]/g, ' ')}":geo:${e.lat},${e.lng}`] : []),
+      `URL:${e.link}`, 'END:VEVENT');
   }
   lines.push('END:VCALENDAR');
   return `${lines.map(fold).join('\r\n')}\r\n`;

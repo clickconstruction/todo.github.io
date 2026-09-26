@@ -1456,6 +1456,9 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(lrow.drive_minutes === null && lrow.drive_from === null && lrow.lat !== null, 'a new location is geocoded again and the drive time is reset');
   const near = (await tool('events', { action: 'list', from: '2026-10-20', to: '2026-10-26', from_lat: 29.7610, from_lng: -95.3705 })).events.find((e) => e.id === located.id);
   assert(near.miles > 5 && near.miles < 7, `list with a position: miles (${near.miles})`);
+  const ics2 = await (await worker.fetch(new Request(`https://mcp.todotooling.com/feed/${FEED}.ics`), env, ctx)).text();
+  assert(ics2.includes('GEO:29.7351;-95.471') && /X-APPLE-STRUCTURED-LOCATION;VALUE=URI;X-APPLE-RADIUS=200;X-TITLE="Ellington Airport, Houston":geo:29\.7351,-95\.471/.test(ics2.replace(/\r\n /g, '')), 'feed: coordinates as GEO and Apple\'s structured location (map, Directions, time to leave)');
+  assert(!/SUMMARY:Somewhere vague[\s\S]*?GEO:/.test(ics2.split('SUMMARY:Somewhere vague')[1].split('END:VEVENT')[0]), 'feed: no GEO for an event without coordinates');
   db.events.length = 0;
 }
 

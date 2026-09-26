@@ -9,6 +9,8 @@ import { activePlaces, activePlace, placeFor, placeDistance, isInside, actionsAt
 import { loadMaps, makeMap, pinEl, youEl, circle, fitTo } from '../maps.js';
 import { errandCandidates } from './errands.js';
 import { alertsNudge } from './alerts.js';
+import { upcomingEvents, eventRow } from './events.js';
+import { eventDistanceM } from '../events.js';
 
 const WITHIN_KEY = 'todo.nearby.within';
 const WITHIN = [[0, 'Any distance'], [1609, 'Within 1 mi'], [8047, 'Within 5 mi'], [40234, 'Within 25 mi']];
@@ -59,6 +61,10 @@ export function viewNearby(focusId) {
       ${taskList(tasks, { showPlace: false }) || '<p class="empty small">Nothing matches this filter.</p>'}</section>`;
   }).join('');
 
+  // Your own events coming up within reach (the distance filter, else 25 miles), nearest first.
+  const reach = within || 40234;
+  const near = focus ? [] : upcomingEvents().map((e) => ({ e, d: eventDistanceM(e) })).filter((x) => x.d != null && x.d <= reach).sort((a, b) => a.d - b.d).slice(0, 8);
+  const eventsNear = near.length ? `<section class="place-section"><h2 class="section-title">🗓️ Events near here · ${near.length} <a class="btn small" href="#events">All events</a></h2><ul class="list cal-list ev-list">${near.map((x) => eventRow(x.e)).join('')}</ul></section>` : '';
   const noPlace = db.tasks.filter((t) => isOpen(t) && !placeFor(t)).length;
   const hasMap = !!window.GOOGLE_MAPS_KEY && !window.__noMaps && places.length > 0;
   return `${focus ? '<a class="back" href="#nearby">‹ All nearby</a>' : alertsNudge()}
@@ -69,6 +75,7 @@ export function viewNearby(focusId) {
     ${hasMap ? '<div class="nearby-map" id="nearby-map-slot"></div>' : ''}
     ${!focus && app.here && errandCandidates().length > 1 ? '<button class="btn errand-btn" data-act="errand-run">Plan an errand run</button>' : ''}
     ${filterBar(focus || !app.here ? '' : `<label><span aria-hidden="true">📏</span><select data-within aria-label="Distance">${WITHIN.map(([m, l]) => `<option value="${m}" ${within === m ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`)}
+    ${eventsNear}
     ${filterNote(all)}
     ${sections || (places.length
       ? `<p class="empty">No actions at ${within && app.here ? 'places this close' : 'your places'} yet. Give an action a place in its Location field, or give a tag a place so everything tagged inherits it.</p>`
