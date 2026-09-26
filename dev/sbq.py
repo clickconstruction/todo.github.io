@@ -6,22 +6,41 @@
 #   python3 dev/sbq.py supabase/migrations/<file>.sql
 #   python3 dev/sbq.py supabase/tests/<file>.sql          (every row of the result should say ok: true)
 #   python3 dev/sbq.py -c "<sql>"
-import json, os, subprocess, sys, urllib.request
+# The login is looked up the way the CLI does: SUPABASE_ACCESS_TOKEN, then the macOS keychain
+# ("Supabase CLI", account = the profile, default "supabase"), then ~/.supabase/access-token.
+import base64, json, os, subprocess, sys, urllib.request
 
 REF = 'cgssdelgtxlrfgozchps'
 
+def keychain(service, account=None):
+    cmd = ['security', 'find-generic-password', '-s', service] + (['-a', account] if account else []) + ['-w']
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    v = r.stdout.strip() if r.returncode == 0 else ''
+    if v.startswith('go-keyring-base64:'):  # go-keyring wraps values it can't store as-is
+        v = base64.b64decode(v[len('go-keyring-base64:'):]).decode()
+    return v
+
 def token():
+    tried = []
+    def ok(v, source):
+        if not v: return None
+        if v.startswith('sbp_'): return v
+        tried.append(f'{source} (not an sbp_ token, {len(v)} chars)')
+        return None
+    env = ok(os.environ.get('SUPABASE_ACCESS_TOKEN', ''), 'SUPABASE_ACCESS_TOKEN')
+    if env: return env
+    profile = os.environ.get('SUPABASE_PROFILE', 'supabase')
+    for svc, acct in (('Supabase CLI', profile), ('Supabase CLI', None), ('supabase', None)):
+        v = ok(keychain(svc, acct), f'keychain {svc}/{acct or "*"}')
+        if v: return v
     p = os.path.expanduser('~/.supabase/access-token')
     if os.path.exists(p):
-        return open(p).read().strip()
-    for svc in ('Supabase CLI', 'supabase'):
-        r = subprocess.run(['security', 'find-generic-password', '-s', svc, '-w'], capture_output=True, text=True)
-        if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip()
-    sys.exit('no saved Supabase CLI login found (run: supabase login)')
+        v = ok(open(p).read().strip(), p)
+        if v: return v
+    sys.exit('No usable Supabase CLI login found. Tried: ' + ('; '.join(tried) or 'nothing stored') + '. Run `supabase login`, or set SUPABASE_ACCESS_TOKEN.')
 
 if len(sys.argv) < 2:
-    sys.exit(__doc__ or 'usage: sbq.py <file.sql> | -c "<sql>"')
+    sys.exit('usage: sbq.py <file.sql> | -c "<sql>"')
 sql = sys.argv[2] if sys.argv[1] == '-c' else open(sys.argv[1]).read()
 req = urllib.request.Request(
     f'https://api.supabase.com/v1/projects/{REF}/database/query',
