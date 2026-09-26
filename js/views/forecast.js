@@ -10,7 +10,7 @@ import { weeklyBanner } from './weekly.js';
 import { dailyBanner } from './daily.js';
 import { followUpDue, isWaiting, livePeople, agendaFor, mentions } from '../gtd.js';
 import { calendarEvents, calendarErrors, liveCalendars, fmtEventTime } from '../calendars.js';
-import { ownEvents, fromHtml } from '../events.js';
+import { ownEvents, fromHtml, distanceText } from '../events.js';
 import { upcomingEvents, eventRow as ownEventRow } from './events.js';
 
 const DAYS_AHEAD = 6;
@@ -64,7 +64,7 @@ export const forecastBadgeCount = () => {
 const fmtHM = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(/\s/g, '').toLowerCase();
 const eventRow = (e) => `<li class="cal-event ${e.busy ? '' : 'free'} ${e.own ? 'own' : ''}" style="--cal:${esc(e.color)}"${e.own ? ` data-event="${e.id}" title="Edit event"` : ''}>
   <span class="cal-time">${esc(fmtEventTime(e))}</span><span class="cal-main"><span class="cal-title">${esc(e.title)}</span>
-  ${e.location || e.calendar ? `<span class="cal-meta">${[e.location, e.calendar].filter(Boolean).map((x) => esc(x.split('\n')[0])).join(' · ')}</span>` : ''}${e.own && e.task_id ? fromHtml(e.task_id) : ''}${agendaHtml(e)}</span></li>`;
+  ${e.location || e.calendar || e.own ? `<span class="cal-meta">${[e.location, e.own ? distanceText(e.raw) : '', e.calendar].filter(Boolean).map((x) => esc(x.split('\n')[0])).join(' · ')}</span>` : ''}${e.own && e.task_id ? fromHtml(e.task_id) : ''}${agendaHtml(e)}</span></li>`;
 // A scheduled action in the day: tick it off right there, tap to open it.
 const schedRow = (t) => { const p = t.project_id && byId(db.projects, t.project_id); const end = Date.parse(t.scheduled_at) + (t.scheduled_minutes || 30) * 60000; return `<li class="cal-event sched ${t.completed_at ? 'done' : ''}" data-task="${t.id}">
   <span class="cal-time">${esc(fmtHM(Date.parse(t.scheduled_at)))}–${esc(fmtHM(end))}</span><span class="cal-main"><span class="cal-title">${esc(t.title)}</span>

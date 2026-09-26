@@ -2,7 +2,7 @@
 // folded away. Not actions: nothing to tick off. Tap one to edit; + Event adds one. Forecast shows
 // the same events by day, and its Future bucket lists the ones beyond next week.
 import { db, esc, byId } from '../state.js';
-import { liveEvents, eventDays, EVENT_COLOR, fromHtml } from '../events.js';
+import { liveEvents, eventDays, EVENT_COLOR, fromHtml, distanceText, refreshDriveTimes, distanceOrigin } from '../events.js';
 import { fmtEventTime } from '../calendars.js';
 
 const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -19,7 +19,7 @@ export function fmtWhen(e) {
 }
 export function eventRow(e) {
   const p = e.project_id && byId(db.projects, e.project_id);
-  const meta = [e.location, p && p.name].filter(Boolean);
+  const meta = [e.location, distanceText(e), p && p.name].filter(Boolean);
   return `<li class="cal-event own" style="--cal:${EVENT_COLOR}" data-event="${e.id}" title="Edit event">
     <span class="cal-time">${esc(fmtWhen(e))}</span><span class="cal-main"><span class="cal-title">${esc(e.title)}</span>
     ${meta.length ? `<span class="cal-meta">${meta.map((x) => esc(x.split('\n')[0])).join(' · ')}</span>` : ''}${fromHtml(e.task_id)}</span></li>`;
@@ -33,6 +33,9 @@ export function eventsThisWeekCount() {
   return upcomingEvents().filter((e) => eventDays(e)[0] <= key(end)).length;
 }
 
+// After the list renders: drive times for what's coming up (router AFTER hook, also used by Forecast).
+export const refreshEventDrives = () => refreshDriveTimes(upcomingEvents());
+
 export function viewEvents(section) {
   const today = todayKey();
   const upcoming = upcomingEvents(today);
@@ -44,6 +47,6 @@ export function viewEvents(section) {
   if (!upcoming.length) body = `<p class="empty">Nothing coming up. Add an event, or ask Claude to put something on your calendar.</p>`;
   if (past.length) body += `<details class="ev-past" ${section === 'past' ? 'open' : ''}><summary class="section-title">Past · ${past.length}</summary><ul class="list cal-list ev-list">${past.slice(0, 100).map(eventRow).join('')}</ul></details>`;
   return `<div class="view-head"><h1>Events</h1><span><button class="btn small primary" data-act="new-event">+ Event</button></span></div>
-    <p class="view-sub">Your own calendar entries. They show in Forecast on their days and in your calendar feed. Not actions: nothing to tick off.</p>
+    <p class="view-sub">Your own calendar entries. They show in Forecast on their days and in your calendar feed. Not actions: nothing to tick off.${(() => { const o = distanceOrigin(); return o ? ` Distances from ${o.kind === 'here' ? 'where you are' : esc(o.name)}.` : ' <a href="#nearby">Turn on location</a> to see how far each one is.'; })()}</p>
     ${body}`;
 }

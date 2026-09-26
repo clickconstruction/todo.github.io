@@ -13,7 +13,8 @@ const localAt = (iso, tz) => {
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 };
 
-export function eventsTools({ localDate, zonedToIso, OPEN }) {
+export function eventsTools({ localDate, zonedToIso, OPEN, geocode }) {
+  const distM = (a, b) => { const R = 6371000; const rad = (d) => (d * Math.PI) / 180; const h = Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
   // The local days an event covers, first to last.
   const daysOf = (e, tz) => {
     const last = localDate(new Date(Math.max(Date.parse(e.starts_at), Date.parse(e.ends_at) - 1)).toISOString(), tz);
@@ -29,7 +30,7 @@ export function eventsTools({ localDate, zonedToIso, OPEN }) {
       id: e.id, title: e.title, all_day: e.all_day,
       start: e.all_day ? days[0] : localAt(e.starts_at, tz), end: e.all_day ? days[days.length - 1] : localAt(e.ends_at, tz),
       days: days.length > 1 ? days : undefined,
-      location: e.location || undefined, project: projectName(e.project_id) || undefined, card: card ? { id: card.id, title: card.title } : undefined, url: e.url || undefined, notes: e.notes || undefined,
+      location: e.location || undefined, coordinates: e.lat != null ? { lat: e.lat, lng: e.lng } : undefined, project: projectName(e.project_id) || undefined, card: card ? { id: card.id, title: card.title } : undefined, url: e.url || undefined, notes: e.notes || undefined,
       archived: e.archived_at ? true : undefined,
     };
   };
@@ -60,11 +61,12 @@ export function eventsTools({ localDate, zonedToIso, OPEN }) {
   return [{
     name: 'events',
     description: `The user's own calendar events (an airshow, a trip, an appointment): shown in Forecast on every day they cover and sent to their phone through their calendar feed. Not actions: nothing to tick off (a time block on an action is update_task schedule).
-actions: list {from?, to?} (local dates; default today to 60 days out) · add {title, start, end?, all_day?, location?, notes?, url?, project?, task?} or add {items: [{…}, …]} for several in one call · update {id, …the same fields} · remove {id} (archived, never deleted) · restore {id}.
+actions: list {from?, to?, from_lat?, from_lng?} (local dates; default today to 60 days out; with a position each event carries miles) · add {title, start, end?, all_day?, location?, notes?, url?, project?, task?} or add {items: [{…}, …]} for several in one call · update {id, …the same fields} · remove {id} (archived, never deleted) · restore {id}.
 Dates are the user's local time: "YYYY-MM-DD" makes an all-day event (end = its last day, inclusive; omitted = one day); "YYYY-MM-DDTHH:MM" a timed one (end defaults to an hour later).`,
     inputSchema: { type: 'object', properties: {
       action: { type: 'string', enum: ['list', 'add', 'update', 'remove', 'restore'], default: 'list' },
       id: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' },
+      from_lat: { type: 'number', description: 'list: with from_lng, the user\'s position; each event then carries miles (straight line)' }, from_lng: { type: 'number' },
       title: { type: 'string' }, start: { type: 'string' }, end: { type: 'string' }, all_day: { type: 'boolean' },
       location: { type: 'string' }, notes: { type: 'string' }, url: { type: 'string' }, project: { type: ['string', 'null'], description: 'Project name or id; null clears it' },
       task: { type: ['string', 'null'], description: 'The card (action) this event comes from: id or exact title of an open task; null unlinks. Shown as a "from" link in the app.' },
@@ -109,6 +111,12 @@ Dates are the user's local time: "YYYY-MM-DD" makes an all-day event (end = its 
         return out;
       };
       const withTask = async (x, out) => { if (x.task !== undefined) out.task_id = await taskId(x.task); return out; };
+      // Where it is: the location text looked up once (Places Text Search); a new location resets the cached drive time.
+      const withGeo = async (x, out, current = null) => {
+        if (x.location === undefined || (current && out.location === current.location && current.lat != null)) return out;
+        const g = out.location ? await geocode(api.env, out.location) : null;
+        return Object.assign(out, { lat: g ? g.lat : null, lng: g ? g.lng : null, drive_minutes: null, drive_from: null });
+      };
       const get = async (id) => {
         if (!id) throw new Error('id is required');
         const [e] = await api.q(`events?${api.u}&id=eq.${encodeURIComponent(id)}&select=*`);
@@ -120,7 +128,7 @@ Dates are the user's local time: "YYYY-MM-DD" makes an all-day event (end = its 
         if (list.length > 100) throw new Error('Add up to 100 events in one call');
         // Every row is checked before anything is saved, and every row carries the same keys (a bulk insert requires it).
         const rows = [];
-        for (const x of list) rows.push(await withTask(x, { user_id: api.userId, source: 'mcp', location: '', notes: '', url: '', project_id: null, task_id: null, ...fields(x) }));
+        for (const x of list) rows.push(await withGeo(x, await withTask(x, { user_id: api.userId, source: 'mcp', location: '', notes: '', url: '', project_id: null, task_id: null, lat: null, lng: null, drive_minutes: null, drive_from: null, ...fields(x) })));
         const saved = await api.q('events', { method: 'POST', prefer: 'return=representation', body: rows });
         const cardOf = await cardsFor(saved);
         const out = saved.map((e) => shape(e, tz, projectName, cardOf));
@@ -128,7 +136,7 @@ Dates are the user's local time: "YYYY-MM-DD" makes an all-day event (end = its 
       }
       if (action === 'update') {
         const cur = await get(a.id);
-        const patch = await withTask(a, fields(a, cur));
+        const patch = await withGeo(a, await withTask(a, fields(a, cur)), cur);
         if (!Object.keys(patch).length) throw new Error('Nothing to change');
         const [e] = await api.q(`events?${api.u}&id=eq.${encodeURIComponent(cur.id)}`, { method: 'PATCH', prefer: 'return=representation', body: patch });
         return shape(e, tz, projectName, await cardsFor([e]));
@@ -147,7 +155,8 @@ Dates are the user's local time: "YYYY-MM-DD" makes an all-day event (end = its 
       const rows = await api.q(`events?${api.u}&archived_at=is.null&starts_at=lt.${encodeURIComponent(toIso)}&ends_at=gt.${encodeURIComponent(fromIso)}&order=starts_at.asc&limit=500&select=*`);
       rows.sort((x, y) => x.starts_at.localeCompare(y.starts_at));
       const cardOf = await cardsFor(rows);
-      return { from, to, events: rows.map((e) => shape(e, tz, projectName, cardOf)) };
+      const here = Number.isFinite(a.from_lat) && Number.isFinite(a.from_lng) ? { lat: a.from_lat, lng: a.from_lng } : null;
+      return { from, to, events: rows.map((e) => ({ ...shape(e, tz, projectName, cardOf), miles: here && e.lat != null ? Math.round(distM(here, e) / 160.9344) / 10 : undefined })) };
     },
   }];
 }

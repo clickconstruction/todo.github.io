@@ -2298,7 +2298,7 @@ TOOLS.push(...gainsTools({ OPEN, localDate }));
 TOOLS.push(...fullReviewTools({ OPEN, localDate, zonedToIso, tool: (name) => TOOLS.find((t) => t.name === name) }));
 TOOLS.push(...slipboxTools({ tool: (name) => TOOLS.find((t) => t.name === name) }));
 TOOLS.push(...matrixTools({ OPEN, availableTasks }));
-TOOLS.push(...eventsTools({ localDate, zonedToIso, OPEN }));
+TOOLS.push(...eventsTools({ localDate, zonedToIso, OPEN, geocode }));
 TOOLS.push(...dailyTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));

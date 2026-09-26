@@ -2,7 +2,7 @@
 // (+ Event, or tap one of your events). Remove archives it, with Undo in the toast.
 import { db, $, esc, openSheet, bySort } from '../state.js';
 import { toDateInput } from '../dates.js';
-import { insertEvent, updateEvent, archiveEvent, cardOf } from '../events.js';
+import { insertEvent, updateEvent, archiveEvent, cardOf, geocodeText } from '../events.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const timeOf = (iso) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
@@ -63,6 +63,12 @@ export function openEventEditor(event = null, { day = null } = {}) {
     if (url && !/^https?:\/\//i.test(url)) { err('Links start with https://'); return; }
     const fields = { title, all_day, starts_at, ends_at, location: f.location.value.trim(), project_id: f.project_id.value || null, url, notes: f.notes.value };
     if (e && f.unlink && f.unlink.checked) fields.task_id = null;
+    // Where it is, as coordinates: looked up when the location is new or changed; a change resets the drive time.
+    if (!fields.location) { if (!e || e.lat != null) Object.assign(fields, { lat: null, lng: null, drive_minutes: null, drive_from: null }); }
+    else if (!e || fields.location !== e.location || e.lat == null) {
+      const g = await geocodeText(fields.location);
+      Object.assign(fields, { lat: g ? g.lat : null, lng: g ? g.lng : null, drive_minutes: null, drive_from: null });
+    }
     sheet.close();
     if (e) await updateEvent(e, fields); else await insertEvent(fields);
   };

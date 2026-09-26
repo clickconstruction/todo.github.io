@@ -30,7 +30,7 @@ import { viewSettle } from './views/settle.js';
 import { viewSlipbox } from './views/slipbox.js';
 import { viewReading } from './views/reading.js';
 import { viewMatrix } from './views/matrix.js';
-import { viewEvents, eventsThisWeekCount } from './views/events.js';
+import { viewEvents, eventsThisWeekCount, refreshEventDrives } from './views/events.js';
 import { viewFullReview, stopListening, reviewNav } from './views/fullreview.js';
 import { withFocus, getFocus, focusLabel, focusedProjectIds } from './prefs.js';
 import { applySidebar } from './sidebar.js';
@@ -48,7 +48,7 @@ const VIEWS = {
   horizons: viewHorizons, area: viewArea, goal: viewGoal, now: viewNow, plan: viewPlan, share: viewShare, checklists: viewChecklists, checklist: viewChecklist, daily: viewDaily, settle: viewSettle, full: viewFullReview, slipbox: viewSlipbox, reading: viewReading, matrix: viewMatrix, events: viewEvents,
 };
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
-const AFTER = { share: mountShare, plan: mountPlan, nearby: mountNearbyMap, clarify: mountClarify, sweep: mountSweep, weekly: (step) => step === 'sweep' && mountSweep(), reference: (id) => id && mountReferenceFiles(id) };
+const AFTER = { events: refreshEventDrives, forecast: refreshEventDrives, share: mountShare, plan: mountPlan, nearby: mountNearbyMap, clarify: mountClarify, sweep: mountSweep, weekly: (step) => step === 'sweep' && mountSweep(), reference: (id) => id && mountReferenceFiles(id) };
 // Detail views highlight their parent tab.
 const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting', review: 'weekly', sweep: 'inbox', area: 'horizons', goal: 'horizons', plan: 'projects', checklist: 'checklists', settle: 'settings' };
 

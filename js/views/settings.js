@@ -2,6 +2,7 @@
 import { saveSettings, DEFAULT_SETTINGS, minutesToInput, inputToMinutes } from '../prefs.js';
 import { keyboardHtml, shortcutListHtml } from '../shortcuts.js';
 import { localTz } from '../repeat.js';
+import { activePlaces } from '../places.js';
 import { liveCalendars, maskUrl, COLORS, checkLink, addCalendar, updateCalendar, archiveCalendar, fmtEventTime } from '../calendars.js';
 import { sb, app, esc, run, toast, openSheet, $, sortedTags, tagLabel } from '../state.js';
 import { fmtDate } from '../dates.js';
@@ -313,6 +314,8 @@ document.addEventListener('change', async (e) => {
   if (time) { const m = inputToMinutes(time.value); if (m !== null) await saveSettings({ [time.dataset.settingTime]: m }); return; }
   const tag = e.target.closest && e.target.closest('[data-setting-forecast-tag]');
   if (tag) { await saveSettings({ forecast_tag_id: tag.value || null }); return; }
+  const dp = e.target.closest && e.target.closest('[data-setting-distance-place]');
+  if (dp) { await saveSettings({ distance_place_id: dp.value || null }); app.render(); return; }
   const day = e.target.closest && e.target.closest('[data-setting-review-day]');
   if (day) { await saveSettings({ review_day: Number(day.value) }); return; }
   const wdays = e.target.closest && e.target.closest('[data-setting-waiting-days]');
@@ -385,6 +388,10 @@ function calendarsSection() {
         <label class="cal-toggle" title="Show in Forecast"><input type="checkbox" data-cal-enabled="${c.id}" ${c.enabled ? 'checked' : ''}> Show</label>
         <button class="btn small" data-cal-remove="${c.id}">Remove</button></div>`).join('')}
       ${form}
+    </div>
+    <div class="settings-card">
+      <label class="set-row"><span class="set-text"><b>Distances to events</b><span class="hint">from your location when it’s on (Nearby); otherwise from this place</span></span>
+        <select data-setting-distance-place><option value="">Nowhere (no distance)</option>${activePlaces().map((p) => `<option value="${p.id}" ${(app.settings || {}).distance_place_id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
     </div>`;
 }
 

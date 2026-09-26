@@ -1443,6 +1443,19 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const todayCard = await tool('events', { action: 'add', title: 'Today with card', start: localToday(), task: card.id });
   const fc2 = await tool('forecast', { days: 1 });
   assert((fc2.days[localToday()].events || []).some((e) => e.id === todayCard.id && e.card === 'Add Texas airshows to my calendar'), 'forecast shows the card behind an event');
+  // Where it is: the location is geocoded once; list with a position gives miles.
+  const located = await tool('events', { action: 'add', title: 'Amigo Airsho', start: '2026-10-24', end: '2026-10-25', location: 'Biggs Army Airfield, El Paso' });
+  const lrow = db.events.find((e) => e.id === located.id);
+  assert(located.coordinates && Math.abs(lrow.lat - 29.7351) < 1e-4 && Math.abs(lrow.lng + 95.4710) < 1e-4, 'add: the location is geocoded into coordinates');
+  const nowhere = await tool('events', { action: 'add', title: 'Somewhere vague', start: '2026-10-24', location: 'nowhere in particular' });
+  assert(!nowhere.coordinates && db.events.find((e) => e.id === nowhere.id).lat === null, 'an unknown location leaves no coordinates');
+  Object.assign(lrow, { drive_minutes: 35, drive_from: '29.76,-95.37' });
+  const same = await tool('events', { action: 'update', id: located.id, title: 'Amigo Airsho 2026' });
+  assert(lrow.drive_minutes === 35 && lrow.lat !== null, 'an edit that keeps the location keeps its coordinates and drive time');
+  await tool('events', { action: 'update', id: located.id, location: 'Ellington Airport, Houston' });
+  assert(lrow.drive_minutes === null && lrow.drive_from === null && lrow.lat !== null, 'a new location is geocoded again and the drive time is reset');
+  const near = (await tool('events', { action: 'list', from: '2026-10-20', to: '2026-10-26', from_lat: 29.7610, from_lng: -95.3705 })).events.find((e) => e.id === located.id);
+  assert(near.miles > 5 && near.miles < 7, `list with a position: miles (${near.miles})`);
   db.events.length = 0;
 }
 

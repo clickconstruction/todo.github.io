@@ -1705,6 +1705,34 @@ async function events(check) {
   check('editor names the card, with Unlink', has('#event-form', 'from the card', 'buy fuel filter') && !!$('#event-form [name=unlink]'));
   $('#event-form [name=unlink]').checked = true; $('#event-form').requestSubmit(); await wait(200);
   check('unlinked', T().events.find((e) => e.id === withCard.id).task_id === null && !$(`[data-event="${withCard.id}"] .ev-from`));
+
+  // Distance: geocoded on save; from you when location is on, else from the Settings place; drive time fills in.
+  const { app: A } = await import('/js/state.js');
+  window.__geocode = async () => ({ lat: 29.6073, lng: -95.1588 }); // Ellington, ~14 mi from the smoke "here"
+  window.__routeMinutes = async () => 35;
+  A.here = null;
+  await go('#events');
+  check('location off, no place: a nudge to turn location on', has(undefined, 'turn on location'));
+  $('[data-act="new-event"]').click(); await wait(80);
+  f = $('#event-form'); f.elements.title.value = 'WOH distance test'; f.elements.start_day.value = day(5); fire(f.elements.start_day); f.elements.location.value = 'Ellington Airport, Houston, TX';
+  f.requestSubmit(); await wait(250);
+  const woh = T().events.find((e) => e.title === 'WOH distance test');
+  check('saved with coordinates from its location', woh && Math.abs(woh.lat - 29.6073) < 1e-6 && Math.abs(woh.lng + 95.1588) < 1e-6, JSON.stringify([woh && woh.lat, woh && woh.lng]));
+  check('no origin: no distance shown', !has(undefined, ' mi'));
+  A.here = { lat: 29.7610, lng: -95.3705, accuracy: 20 };
+  await go('#forecast'); await go('#events'); await wait(250);
+  check('location on: straight-line distance, then the drive time', has(undefined, 'distances from where you are', '17 mi', '35 min drive'), text('.cal-list'));
+  check('the drive time is cached on the event with its origin', T().events.find((e) => e.id === woh.id).drive_minutes === 35 && T().events.find((e) => e.id === woh.id).drive_from === '29.76,-95.37');
+  A.here = null; await go('#forecast'); await go('#events');
+  check('location off again: no distance', !has(undefined, ' mi'));
+  const { saveSettings } = await import('/js/prefs.js');
+  await saveSettings({ distance_place_id: 'pl2' }, { quiet: true }); // Office, 200 Travis St
+  await go('#forecast'); await go('#events'); await wait(250);
+  check('a Settings place stands in: distance from Office, drive time refetched for it', has(undefined, 'distances from office', '18 mi', '35 min drive') && T().events.find((e) => e.id === woh.id).drive_from === '29.80,-95.37', text());
+  await go('#settings');
+  check('Settings → Calendars: Distances to events picks the place', $('[data-setting-distance-place]') && $('[data-setting-distance-place]').value === 'pl2');
+  await saveSettings({ distance_place_id: null }, { quiet: true });
+  window.__geocode = undefined; window.__routeMinutes = undefined; A.here = null;
 }
 
 // Settings → App: the version you're on, and Check for updates (switches right away when one is there).
