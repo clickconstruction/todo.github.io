@@ -1888,7 +1888,7 @@ async function pullToRefresh(check) {
 // Search covers everything: the Slipbox, reference (never the secret), events, people, places, checklists, areas, goals.
 async function searchEverything(check) {
   const now = new Date().toISOString();
-  T().slipbox_notes.push({ id: 'snA', user_id: 'u1', title: 'Appleseed protocol', body: 'A farm that runs on open-source machines, one module at a time.', kind: 'permanent', source: '', archived_at: null, created_at: now, updated_at: now });
+  T().slipbox_notes.push({ id: 'snA', user_id: 'u1', title: 'Appleseed protocol', body: 'A farm that runs the Appleseed way: open-source machines, one module at a time.', kind: 'permanent', source: '', archived_at: null, created_at: now, updated_at: now });
   T().reference_items.push({ id: 'rfA', user_id: 'u1', title: 'Appleseed gate code', topic: 'Farm', body: 'The side gate by the barn.', secret_value: 'hunter2', archived_at: null, created_at: now, updated_at: now });
   T().events.push({ id: 'evA', user_id: 'u1', title: 'Appleseed farm visit', location: 'Bastrop', notes: '', all_day: true, starts_at: now, ends_at: new Date(Date.now() + 86400000).toISOString(), archived_at: null, created_at: now, updated_at: now });
   T().people.push({ id: 'ppA', user_id: 'u1', name: 'Tom Appleseed', email: null, phone: null, notes: '', sort: 0, archived_at: null, created_at: now });
@@ -1896,7 +1896,7 @@ async function searchEverything(check) {
   const { loadAll } = await import('/js/data.js'); await loadAll();
   await go('#search/appleseed'); await wait(100);
   check('one search: Slipbox, reference, events, and people and checklists as chips', has('#search-results', 'slipbox · 1', 'appleseed protocol', 'reference · 1', 'appleseed gate code', 'events · 1', 'appleseed farm visit', 'tom appleseed', 'farm opening'), text('#search-results'));
-  check('the match is marked, with the words around it', $$('#search-results mark').length > 3 && has('.sr-snip', 'farm that runs'));
+  check('the match is marked, with the words around it', $$('#search-results .sr-row mark').length === 3 && $$('.sr-snip mark').map((m) => m.textContent).join() === 'Appleseed' && has('.sr-snip', 'farm that runs the appleseed way'));
   check('never the secret value', !text('#search-results').includes('hunter2') && has('#search-results', '🔑'));
   const si = $('#search-input'); si.value = 'appleseed barn'; si.dispatchEvent(new Event('input', { bubbles: true })); await wait(120);
   check('every word must match', has('#search-results', 'appleseed gate code') && !has('#search-results', 'appleseed protocol', 'farm visit'));
