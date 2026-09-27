@@ -1232,6 +1232,16 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(ns[0] === 'North Pole' && ns[1].title === 'Kilimanjaro' && ns[1].in_order === true && ns[1].steps[0] === 'Book the guide' && ns[1].steps[1].steps.join('|') === 'Weekly long hike' && ns[2] === 'Everest', 'suggest steps can nest: plain titles stay strings, objects keep their steps, blanks skipped');
   let bad5 = ''; try { await tool('full_review', { action: 'suggest', decision: 'keep', steps: [{ title: 'A', steps: [{ title: 'B', steps: [{ title: 'C', steps: ['D'] }] }] }] }); } catch (e) { bad5 = e.message; }
   assert(/three levels/.test(bad5), 'a fourth level under the card is refused');
+  await tool('full_review', { action: 'suggest', decision: 'keep', checklist: { name: 'Companies check-in', items: ['# Active', 'ARC Equity', 'Rune PBC', '# On hold', 'WYHF'], reflect: true, complete_action: false } });
+  const sc = s1.suggestion.checklist;
+  assert(sc.name === 'Companies check-in' && sc.items.length === 3 && sc.items[0].section === 'Active' && sc.items[2].section === 'On hold' && sc.items.every((i) => i.id) && sc.reflect && sc.complete_action === false && !db.checklists.some((c) => c.name === 'Companies check-in'), 'suggest checklist: parsed with sections and ids, nothing made until Submit');
+  db.checklists.push({ id: 'ckEx', user_id: UID, name: 'Month-end', items: [{ id: 'q', text: 'Invoice' }], reflect: false, archived_at: null });
+  await tool('full_review', { action: 'suggest', decision: 'keep', checklist: 'month-end' });
+  assert(s1.suggestion.checklist.id === 'ckEx' && s1.suggestion.checklist.count === 1, 'suggest checklist by name: an existing one');
+  let bad6 = ''; try { await tool('full_review', { action: 'suggest', decision: 'keep', checklist: 'Nope' }); } catch (e) { bad6 = e.message; }
+  let bad7 = ''; try { await tool('full_review', { action: 'suggest', decision: 'drop', checklist: { name: 'X', items: ['a'] } }); } catch (e) { bad7 = e.message; }
+  assert(/No checklist called/.test(bad6) && /keep or someday/.test(bad7), 'an unknown checklist, or a checklist with drop, is refused');
+  db.checklists.splice(db.checklists.findIndex((c) => c.id === 'ckEx'), 1);
   await tool('full_review', { action: 'suggest', decision: 'keep', mac_folder: '~/_SYNC/MAGA/_Todo/Gate latch' });
   assert(s1.suggestion.folder === '~/_SYNC/MAGA/_Todo/Gate latch', 'suggest mac_folder');
   await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Fix the gate latch before winter', gain: 'Goats stay in', project: 'Estate and legacy', planned: '2026-10-05', flagged: false, add_tags: ['Brand new tag'], note: 'You said before the cold snap' });

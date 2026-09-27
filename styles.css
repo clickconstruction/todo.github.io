@@ -1507,3 +1507,5 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .chk-note-text { margin: -2px 0 6px 42px; color: var(--muted); font-size: 14px; }
 .ck-run-lines { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; font-size: 14px; }
 .ck-run-lines .on { color: var(--accent); }
+.sg-check { list-style: '☐ '; }
+.sg-check .sg-sec { list-style: none; margin: 4px 0 0 -18px; font-weight: 600; color: var(--muted); font-size: 13px; }

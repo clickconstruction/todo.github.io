@@ -208,6 +208,14 @@ function suggestionBar(it, t) {
       const n = countSteps(s.steps);
       row('🪜', `Break it down: ${n} step${n === 1 ? '' : 's'}${s.steps_in_order ? ', in order' : ''}${n > s.steps.length ? ' <span class="hint">(nested)</span>' : ''}${stepsOf(t).length ? ` <span class="hint">(after the ${stepsOf(t).length} it has)</span>` : ''}${stepsHtml(s.steps)}`);
     }
+    if (s.checklist && ['keep', 'someday'].includes(s.decision)) {
+      const ck = s.checklist;
+      const list = Array.isArray(ck.items) ? ck.items : [];
+      let sec = null;
+      const lis = list.map((i) => `${(i.section || '') !== sec ? (sec = i.section || '', i.section ? `<li class="sg-sec">${esc(i.section)}</li>` : '') : ''}<li>${esc(i.text)}</li>`).join('');
+      const n = ck.id ? ck.count : list.length;
+      row('☑', `Checklist: <b>${esc(ck.name)}</b> · ${n} item${n === 1 ? '' : 's'}${ck.reflect ? ', a line on each every run' : ''}${ck.id ? ' <span class="hint">(your existing one)</span>' : ''}${ck.complete_action === false ? ' <span class="hint">· ticking all doesn’t complete it</span>' : ''}${lis ? `<ul class="sg-steps sg-check">${lis}</ul>` : ''}`);
+    }
     row('✓', `<b>${esc(DECISION_LABEL[s.decision] || s.decision)}</b>${s.decision === 'keep' ? ` in ${esc(s.project_name || (p ? p.name : 'no project'))}` : ''}`);
   }
   return `<div class="sg-bar" role="group" aria-label="Suggested by Claude">
@@ -393,8 +401,9 @@ async function act(a, el) {
     if (!sug) return;
     const r = await run(sb.rpc('review_apply', { item: cur.id }));
     const bulk = cur.kind === 'group' && sug.decision === 'accept';
-    f.undo.push({ id: cur.id, kind: cur.kind, task_id: cur.task_id, bulk: bulk || !!(sug.add_tag_names && sug.add_tag_names.length) });
-    if (bulk || (sug.add_tag_names && sug.add_tag_names.length)) await loadAll(); else if (cur.kind === 'task') await refreshCard(cur);
+    const reload = bulk || !!(sug.add_tag_names && sug.add_tag_names.length) || !!sug.checklist; // new tags or a new checklist: load them
+    f.undo.push({ id: cur.id, kind: cur.kind, task_id: cur.task_id, bulk: reload });
+    if (reload) await loadAll(); else if (cur.kind === 'task') await refreshCard(cur);
     if (sug.decision === 'one_by_one' || bulk) { await loadSession(s.id); return; }
     cur.status = sug.decision === 'skip' ? 'skipped' : 'reviewed'; cur.decision = sug.decision; cur.suggestion = { ...sug, applied_at: new Date().toISOString() };
     f.session = { ...s, current_item: r.next, status: r.next ? 'active' : 'done' };

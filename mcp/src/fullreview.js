@@ -2,17 +2,19 @@
 // Read the card, talk it through with the user, annotate it (gain, project, dates, tags, a one-line
 // note) and decide it; the app updates live. Every decision can be undone; nothing is deleted.
 import { buildQueue, priorityReason, proposalText } from '../../js/review.js';
+import { parseItemLines } from './checklists.js';
 
 export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
   // ---------- suggestions: Claude proposes, the user Submits in the app ----------
   const TASK_DECISIONS = ['keep', 'someday', 'done', 'drop', 'skip', 'reading', 'slipbox'];
   const GROUP_DECISIONS = ['accept', 'one_by_one', 'keep_all', 'skip'];
-  async function lookups(api) {
-    const [projects, tags] = await Promise.all([
+  async function lookups(api, { checklists: needChecklists = false } = {}) {
+    const [projects, tags, checklists] = await Promise.all([
       api.q(`projects?${api.u}&status=in.(active,on_hold)&select=id,name`), api.q(`tags?${api.u}&status=neq.dropped&select=id,name,parent_id`),
+      needChecklists ? api.q(`checklists?${api.u}&archived_at=is.null&select=id,name,items,reflect`) : [],
     ]);
     const label = (g) => { const p = g.parent_id && tags.find((x) => x.id === g.parent_id); return p ? `${p.name} : ${g.name}` : g.name; };
-    return { projects, tags, label };
+    return { projects, tags, checklists, label };
   }
   // One suggestion from tool arguments; throws on anything that doesn't resolve (nothing is saved then).
   function suggestionFrom(api, a, kind, L) {
@@ -63,6 +65,21 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
     }
     if (a.steps_in_order !== undefined) s.steps_in_order = !!a.steps_in_order;
     if (a.mac_folder !== undefined) s.folder = String(a.mac_folder || '').trim().slice(0, 500) || null;
+    if (a.checklist !== undefined && a.checklist !== null) { // attached on Submit (keep / someday only)
+      if (!['keep', 'someday'].includes(a.decision)) throw new Error('A checklist goes with keep or someday.');
+      if (typeof a.checklist === 'string') {
+        const r = a.checklist.trim().toLowerCase();
+        const c = L.checklists.find((x) => x.id === a.checklist) || L.checklists.find((x) => x.name.toLowerCase() === r);
+        if (!c) throw new Error(`No checklist called “${a.checklist}”. Pass {name, items} to make a new one, or use list_checklists.`);
+        s.checklist = { id: c.id, name: c.name, count: (c.items || []).length, reflect: !!c.reflect };
+      } else {
+        const name = String(a.checklist.name || '').trim().slice(0, 200);
+        const items = parseItemLines(Array.isArray(a.checklist.items) ? a.checklist.items : []);
+        if (!name) throw new Error('checklist.name is required');
+        if (!items.length) throw new Error('checklist.items needs at least one line');
+        s.checklist = { name, items, reflect: !!a.checklist.reflect, complete_action: a.checklist.complete_action === undefined ? true : !!a.checklist.complete_action };
+      }
+    }
     const find = (name) => { const n = String(name).trim().toLowerCase(); return L.tags.find((g) => g.id === name) || L.tags.find((g) => L.label(g).toLowerCase() === n) || L.tags.find((g) => g.name.toLowerCase() === n); };
     if (Array.isArray(a.add_tags) && a.add_tags.length) {
       s.add_tag_ids = []; s.add_tag_names = []; s.add_tag_labels = [];
@@ -136,7 +153,7 @@ Draft ahead: call "upcoming" and "suggest" with items [...] for the next few car
 actions:
   start {import_id | project | all:true, min_age_days?, title?} → a new session (give the user app_link)
   status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
-  suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down; a step can be {title, steps: [...], in_order?} to nest), steps_in_order?, mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
+  suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down; a step can be {title, steps: [...], in_order?} to nest), steps_in_order?, checklist? ({name, items: [lines; "# Section" starts a section], reflect?, complete_action?} to make one, or an existing checklist's name: attached on Submit; use it for routines the card repeats), mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
   submit {item_id? (default current)} → apply the pending suggestion as the app's Submit does (only when the user says "submit"), then the next card
   upcoming {count? ≤10} → the next cards in full, for drafting ahead
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
@@ -157,6 +174,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
         gain: { type: 'string' }, gain_suggested: { type: 'boolean' },
         tags: { type: 'array', items: { type: 'string' } }, add_tags: { type: 'array', items: { type: 'string' } }, remove_tags: { type: 'array', items: { type: 'string' } },
         steps: { type: 'array', items: { type: ['string', 'object'], properties: { title: { type: 'string' }, steps: { type: 'array' }, in_order: { type: 'boolean' } } }, description: 'suggest: break the action down: step titles, first to last (added on Submit). A step can be {title, steps: [...], in_order?} to carry its own steps, three levels under the card.' },
+        checklist: { type: ['object', 'string', 'null'], description: 'suggest: a checklist for the action, attached on Submit (keep / someday). {name, items: [lines, "# Section" starts a section], reflect?: a line per item each run, complete_action?: last tick completes the action (default true)} makes a new one; a string is an existing checklist’s name or id.', properties: { name: { type: 'string' }, items: { type: 'array', items: { type: 'string' } }, reflect: { type: 'boolean' }, complete_action: { type: 'boolean' } } },
         mac_folder: { type: ['string', 'null'], description: 'suggest: a folder on the user\'s Mac for the action\'s files (e.g. ~/_SYNC/MAGA/_Todo/<action>); null to clear' }, steps_in_order: { type: 'boolean', description: 'suggest: only the first open step is available' },
         planned: { type: ['string', 'null'] }, due: { type: ['string', 'null'] }, defer: { type: ['string', 'null'] },
         flagged: { type: 'boolean' }, note: { type: 'string', description: 'One line: why you changed or decided it, shown on the card' },
@@ -214,7 +232,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
       if (action === 'suggest') {
         // One card (item_id, default the current one) or several: items [{item_id, decision, …}].
         const wanted = Array.isArray(a.items) && a.items.length ? a.items.slice(0, 25) : [{ ...a, item_id: a.item_id || (cur && cur.id) }];
-        const L = await lookups(api);
+        const L = await lookups(api, { checklists: wanted.some((w) => typeof w.checklist === 'string') });
         const rows = await api.q(`review_items?${api.u}&session_id=eq.${s.id}&id=in.(${wanted.map((w) => `"${w.item_id}"`).join(',')})&select=id,kind,status`);
         const planned = wanted.map((w) => {
           const row = rows.find((r) => r.id === w.item_id);

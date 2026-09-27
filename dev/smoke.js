@@ -445,6 +445,16 @@ async function fullReview(check) {
   key('u'); await until(() => !!$('.sg-bar') && has(undefined, 'update my will'));
   check('Undo drops the steps (not deleted) and the card shows none', fwSteps.every((x) => x.dropped_at) && t.tasks.filter((x) => x.parent_id === 'fW').length === 3 && !$('.fr-steps') && !t.tasks.find((x) => x.id === 'fW').steps_in_order);
   $('[data-fr="dismiss"]').click(); await until(() => !$('.sg-bar'));
+  // A checklist in a suggestion: shown on the card; Submit makes it and attaches it; Undo takes it back (archived).
+  Object.assign(cur, { suggestion: { decision: 'keep', checklist: { name: 'Companies check-in', items: [{ id: 'ca', text: 'ARC Equity', section: 'Active' }, { id: 'cb', text: 'WYHF', section: 'On hold' }], reflect: true, complete_action: false }, at: new Date().toISOString() }, updated_at: new Date().toISOString() });
+  await until(() => !!$('.sg-bar .sg-check'));
+  check('a checklist in a suggestion: name, items by section, a line each', has('.sg-bar', 'checklist: companies check-in', '2 items', 'a line on each every run', 'active', 'arc equity', 'on hold', 'wyhf'));
+  key('Enter'); await until(() => !!t.tasks.find((x) => x.id === 'fW').checklist_id && has(undefined, 'group · 14 actions'));
+  const madeCk = t.checklists.find((c) => c.name === 'Companies check-in');
+  check('Submit makes the checklist and attaches it', !!madeCk && madeCk.reflect && !madeCk.complete_action && t.tasks.find((x) => x.id === 'fW').checklist_id === madeCk.id);
+  key('u'); await until(() => !!$('.sg-bar') && has(undefined, 'update my will'));
+  check('Undo detaches it and archives the checklist it made', !t.tasks.find((x) => x.id === 'fW').checklist_id && !!madeCk.archived_at);
+  $('[data-fr="dismiss"]').click(); await until(() => !$('.sg-bar'));
   // Nested steps in a suggestion: shown as a tree; Submit builds the tree; Undo drops all of it.
   Object.assign(cur, { suggestion: { decision: 'keep', steps: ['North Pole', { title: 'Kilimanjaro', in_order: true, steps: ['Book the guide', { title: 'Train', steps: ['Weekly long hike'] }] }], at: new Date().toISOString() }, updated_at: new Date().toISOString() });
   await until(() => !!$('.sg-bar .sg-steps .sg-steps'));

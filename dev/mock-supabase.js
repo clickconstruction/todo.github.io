@@ -570,7 +570,7 @@
           if (it.status !== 'pending') return { data: null, error: { message: 'That card was already decided (undo it first).' } };
           const s = it.suggestion;
           if (!s || !s.decision) return { data: null, error: { message: 'No suggestion to submit on this card.' } };
-          let snap = null; let stepsSnap = null;
+          let snap = null; let stepsSnap = null; let ckSnap = null;
           if (it.kind === 'group') { if (s.proposal) it.grp = { ...it.grp, proposal: s.proposal }; }
           else {
             const t = tables.tasks.find((x) => x.id === it.task_id);
@@ -589,10 +589,16 @@
               stepsSnap = { t: 'steps', id: t.id, ids, steps_in_order: !!t.steps_in_order };
               if ('steps_in_order' in s) t.steps_in_order = !!s.steps_in_order;
             }
+            if (s.checklist && typeof s.checklist === 'object' && ['keep', 'someday'].includes(s.decision)) { // mirrors 20261030000001
+              let made = null; let ckid = s.checklist.id || null;
+              if (!ckid) { const c = { ...DEFAULTS.checklists(), id: id(), user_id: uid, name: s.checklist.name, items: s.checklist.items || [], reflect: !!s.checklist.reflect, complete_action: s.checklist.complete_action !== false, created_at: now(), updated_at: now() }; tables.checklists.push(c); made = ckid = c.id; }
+              ckSnap = { t: 'checklist', id: t.id, prev: t.checklist_id || null, made };
+              t.checklist_id = ckid;
+            }
           }
           const res = await this.rpc('review_decide', { item: it.id, decision: s.decision, by: 'user', note: s.note });
           if (res.error) return res;
-          if (snap) it.before = [...(it.before || []), snap, ...(stepsSnap ? [stepsSnap] : [])];
+          if (snap) it.before = [...(it.before || []), snap, ...(stepsSnap ? [stepsSnap] : []), ...(ckSnap ? [ckSnap] : [])];
           it.suggestion = { ...s, applied_at: now() };
           return res;
         }
@@ -612,6 +618,7 @@
               if (e.t === 'project') tables.projects.find((p) => p.id === e.id).status = e.status;
               if (e.t === 'reading') { Object.assign(tables.tasks.find((t) => t.id === e.id), { reading_state: e.reading_state, reading_type: e.reading_type }); if (e.someday_added) { const g = somedayOf(false); if (g) tables.task_tags = tables.task_tags.filter((l) => !(l.task_id === e.id && l.tag_id === g.id)); } }
               if (e.t === 'slipbox') { const n = tables.slipbox_notes.find((x) => x.id === e.note); if (n) n.archived_at = now(); tables.tasks.find((t) => t.id === e.id).dropped_at = e.dropped_at; }
+              if (e.t === 'checklist') { const tk = tables.tasks.find((x) => x.id === e.id); if (tk) tk.checklist_id = e.prev || null; const mc = e.made && tables.checklists.find((c) => c.id === e.made); if (mc) mc.archived_at = now(); }
               if (e.t === 'steps') { tables.tasks.forEach((c) => { if (e.ids.includes(c.id) && !c.completed_at && !c.dropped_at) c.dropped_at = now(); }); const p0 = tables.tasks.find((t) => t.id === e.id); if (p0) p0.steps_in_order = !!e.steps_in_order; }
               if (e.t === 'fields') { Object.assign(tables.tasks.find((t) => t.id === e.id), { folder_path: e.folder_path ?? null, title: e.title, gain: e.gain, gain_by: e.gain_by, project_id: e.project_id, in_inbox: e.in_inbox, planned_at: e.planned_at, due_at: e.due_at, defer_at: e.defer_at, flagged: e.flagged });
                 tables.task_tags = tables.task_tags.filter((l) => l.task_id !== e.id).concat(e.tags.map((g) => ({ task_id: e.id, tag_id: g, user_id: uid }))); }
