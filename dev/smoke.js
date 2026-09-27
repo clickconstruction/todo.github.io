@@ -418,6 +418,7 @@ async function dailies(check) {
   await go('#full/sD');
   await until(() => has(undefined, 'read twenty pages') && !!$('.sg-bar'));
   check('Full Review: the suggestion says it becomes daily, and what goes', has('.sg-bar', 'make it daily', 'have to, every day', 'every day') && has('.fr-card', 'repeats'), text('.sg-bar'));
+  check('Full Review: the suggestion previews the checkbox and says where it goes', !!$('.sg-bar [data-dly-preview="must"] .dly-box') && has('.sg-bar .sg-dly', 'read twenty pages', 'starts today') && $$('.sg-bar .sg-dly .dly-dot').length === 7 && has('.sg-bar .sg-dly-where', 'forecast → today', 'have to, every day', 'must-dos') && !$('.sg-bar .sg-dly [data-dly-tick]'), text('.sg-bar .sg-dly-where'));
   $('[data-fr="submit"]').click();
   await until(() => task('dF').daily);
   check('Submit: the action is daily, its repeat and due date gone', task('dF').daily && task('dF').daily.tier === 'must' && task('dF').repeat_rule === null && task('dF').due_at === null);

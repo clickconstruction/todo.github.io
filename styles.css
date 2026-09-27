@@ -1534,3 +1534,7 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .dly-missed { color: var(--due, #d33); }
 .dly-field select { width: 100%; }
 .dv-row .dly-box { margin-right: 8px; }
+.sg-dly { display: flex; align-items: flex-start; gap: 10px; margin: 8px 0 4px; padding: 10px 12px; border: 1px dashed var(--muted); border-radius: 10px; }
+.sg-dly .dly-box { cursor: default; pointer-events: none; }
+.sg-dly-main { display: grid; gap: 2px; min-width: 0; }
+.sg-dly-where { display: block; }

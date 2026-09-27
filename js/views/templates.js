@@ -324,7 +324,7 @@ document.addEventListener('change', async (e) => {
   }
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter' || !e.target.classList.contains('tpl-title')) return;
+  if (e.key !== 'Enter' || !e.target.classList || !e.target.classList.contains('tpl-title')) return; // a key pressed on the document itself has no classes
   const t = current(); if (!t) return;
   e.preventDefault();
   const i = +e.target.dataset.row;

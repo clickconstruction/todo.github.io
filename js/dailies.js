@@ -51,6 +51,21 @@ export function dailyRow(t, today = dayKey()) {
       <div class="row-meta dly-meta">${dots(t, today)}${line ? `<span class="${/^missed/.test(line) ? 'dly-missed' : ''}">${esc(line)}</span>` : ''}</div></div>
   </li>`;
 }
+// How an action would look as a daily one, before it is one (a Full Review suggestion): the row as Today
+// will show it, not clickable, starting today, and where it goes. Days before today are off: nothing to miss yet.
+export function dailyPreview(title, daily, today = dayKey()) {
+  const d = { ...daily, since: today };
+  const asked = R.onDay(d, today);
+  const next = asked ? null : Array.from({ length: 7 }, (_, i) => { const x = new Date(`${today}T12:00`); x.setDate(x.getDate() + i + 1); return x; }).find((x) => R.onDay(d, dayKey(x)));
+  const line = asked ? 'starts today' : `first on ${next ? WD[next.getDay()] : 'its next day'}`;
+  return `<div class="sg-dly" data-dly-preview="${esc(d.tier)}" role="img" aria-label="How it will look in Today: a checkbox, ${esc(title)}, ${esc(line)}">
+    <span class="dly-box" aria-hidden="true">✓</span>
+    <span class="sg-dly-main"><span class="row-title">${esc(title)}</span>
+      <span class="row-meta dly-meta"><span class="dly-dots" aria-hidden="true">${R.week(d, () => false, today).map((x) => `<i class="dly-dot ${x.state}"></i>`).join('')}</span><span>${esc(line)}</span></span></span>
+  </div>
+  <span class="hint sg-dly-where">→ Forecast → Today, under “${esc(tierLabel(d.tier))}”${d.tier === 'must' ? ', and the Daily review’s must-dos' : ''}</span>`;
+}
+
 // Forecast → Today: the two tiers, above Due.
 export function dailyBlock(today = dayKey()) {
   const { must, should } = todaysDailies(today);

@@ -2,7 +2,7 @@
 // Claude in another window; it reads the same current card over the MCP (full_review), annotates it and
 // decides it with you, and the card here updates live (Realtime, with a polling fallback). Keys 1–4
 // decide, s skips, u undoes. Every decision can be undone; nothing is deleted.
-import { describeDaily, isDaily, summary as dailySummary } from '../dailies.js';
+import { describeDaily, isDaily, summary as dailySummary, dailyPreview } from '../dailies.js';
 import { describe } from '../repeat.js';
 import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen, openSheet } from '../state.js';
 import { loadAll, refreshTasks } from '../data.js';
@@ -215,7 +215,7 @@ function suggestionBar(it, t) {
       const n = countSteps(s.steps);
       row('🪜', `Break it down: ${n} step${n === 1 ? '' : 's'}${s.steps_in_order ? ', in order' : ''}${n > s.steps.length ? ' <span class="hint">(nested)</span>' : ''}${stepsOf(t).length ? ` <span class="hint">(after the ${stepsOf(t).length} it has)</span>` : ''}${stepsHtml(s.steps)}`);
     }
-    if (s.daily && s.decision === 'keep') row('🔂', `Make it daily: <b>${esc(describeDaily(s.daily))}</b> <span class="hint">a checkbox that starts fresh each day</span>${t.repeat_rule || t.due_at || t.planned_at ? ` <span class="sg-old">${esc([t.repeat_rule && describe(t.repeat_rule), t.due_at && `due ${when(t.due_at)}`, t.planned_at && `planned ${when(t.planned_at)}`].filter(Boolean).join(' · '))}</span>` : ''}`);
+    if (s.daily && s.decision === 'keep') row('🔂', `Make it daily: <b>${esc(describeDaily(s.daily))}</b> <span class="hint">a checkbox that starts fresh each day</span>${t.repeat_rule || t.due_at || t.planned_at ? ` <span class="sg-old">${esc([t.repeat_rule && describe(t.repeat_rule), t.due_at && `due ${when(t.due_at)}`, t.planned_at && `planned ${when(t.planned_at)}`].filter(Boolean).join(' · '))}</span>` : ''}${dailyPreview(s.title || t.title, s.daily)}`);
     if (s.checklist && ['keep', 'someday'].includes(s.decision)) {
       const ck = s.checklist;
       const list = Array.isArray(ck.items) ? ck.items : [];
