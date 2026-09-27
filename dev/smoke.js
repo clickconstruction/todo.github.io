@@ -580,7 +580,11 @@ async function techTree(check) {
   const toastBtn = (re) => $$('#toast button').find((b) => re.test(b.textContent));
 
   await go('#horizons');
-  check('Horizons has a Tech tree level', !!$('.hz-link[href="#horizons/tree"]') && has('.hz-link[href="#horizons/tree"]', 'tech tree'));
+  const trow = $('.hz-tree-row'); const lvl = $('.hz-level');
+  const box = (el) => el.getBoundingClientRect();
+  check('Horizons has a Tech tree row under the six levels', !!trow && has('.hz-tree-row', 'tech tree') && $$('.hz-level').length === 6 && has(undefined, 'across the levels'));
+  check('the row is laid out like a level: icon, words, arrow on one line, same height and colours', getComputedStyle(trow).display === 'flex' && Math.abs(box(trow).height - box(lvl).height) < 12 && box($('.hz-go', trow)).left > box($('.hz-main', trow)).left + 100 && Math.abs(box($('.hz-alt', trow)).top - box($('.hz-main', trow)).top) < 30
+    && getComputedStyle($('b', trow)).color === getComputedStyle($('b', lvl)).color && box($('.hz-main', trow)).left === box($('.hz-main', lvl)).left, `${Math.round(box(trow).height)} vs ${Math.round(box(lvl).height)}`);
   await go('#horizons/tree');
   check('a destination shows before anything is linked, with no path yet', has('.tt-dest', 'significant physical assets', 'no path yet') && !!$('.tt-loose [data-tt-node="goal:tgD"]') && has(undefined, 'not linked yet') && links().length === 0);
   proj('tpC').status = 'on_hold';
@@ -659,7 +663,7 @@ async function techTree(check) {
   await wait(100);
   check('dismissed and removed links are archived, never deleted', t.tree_links.length === 6 && t.tree_links.filter((l) => l.archived_at).length === 2 && node('project:tp3').classList.contains('tt-open') && has('#toast', 'link removed', 'undo'));
   await go('#horizons');
-  check('the ladder sums the tree up', has('.hz-link[href="#horizons/tree"]', 'tech tree', 'open', 'achieved', 'locked'), text('.hz-link[href="#horizons/tree"]'));
+  check('the ladder sums the tree up', has('.hz-tree-row', 'tech tree', 'open', 'achieved', 'locked'), text('.hz-tree-row'));
 }
 
 // Dailies: a checkbox that starts fresh each day, in two tiers (js/dailies.js, migration 20261101000001).

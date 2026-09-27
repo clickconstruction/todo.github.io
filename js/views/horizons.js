@@ -73,7 +73,8 @@ export function viewHorizons(sub, id) {
       ${row('#projects', '10k', `Projects · ${live.length} active`, noOutcome ? `${noOutcome} without a “done looks like”` : 'Every project says what done looks like.')}
       ${row('#now', 'Runway', `Actions · ${open}`, `${available} available now · What now? →`)}
     </div>
-    <div class="hz-ladder hz-across">${(() => { const t = treeSummary(); return row('#horizons/tree', '🌳', t.title, t.sub, { chips: t.chips, cls: 'hz-level-like hz-link' }); })()}</div>
+    <h2 class="section-title hz-across-h">Across the levels</h2>
+    <div class="hz-ladder hz-across">${(() => { const t = treeSummary(); return row('#horizons/tree', '<span aria-hidden="true">🌳</span>', t.title, t.sub, { chips: t.chips, cls: 'hz-level-like hz-tree-row' }); })()}</div>
     ${due ? `<p class="view-sub">${due} area${due === 1 ? '' : 's'} or goal${due === 1 ? '' : 's'} due for review. They’re a step in the <a href="#weekly/horizons">Weekly Review</a>.</p>` : ''}
     <p class="view-sub">Every quarter: <a href="#horizons/quarterly">the quarterly check-in</a>${s.horizons_quarter_at ? ` (last ${esc(fmtDate(s.horizons_quarter_at))})` : ''}. Every year: read your purpose and vision.</p>`;
 }
