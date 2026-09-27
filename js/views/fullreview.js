@@ -140,8 +140,12 @@ async function refreshCard(it) {
     db.taskTags = db.taskTags.filter((x) => x.task_id !== it.task_id).concat(links);
   }
 }
-// Re-render unless you're typing somewhere.
-function redraw() { if (!/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) app.render(); }
+// Re-render unless you're typing somewhere (a field left focused in a sheet that has closed isn't typing).
+function redraw() {
+  const el = document.activeElement || {};
+  const sheet = el.closest && el.closest('dialog');
+  if (!/INPUT|TEXTAREA|SELECT/.test(el.tagName || '') || (sheet && !sheet.open)) app.render();
+}
 
 // The prompt that starts (or, after a break, resumes) this review with Claude in any chat that has the
 // Todo Tooling tools: the session, the link, and how you work together.
@@ -197,6 +201,7 @@ function suggestionBar(it, t) {
   } else if (t) {
     const p = t.project_id && byId(db.projects, t.project_id);
     if (s.title && s.title !== t.title) row('✎', `Title: “${esc(s.title)}” <span class="sg-old">${esc(t.title)}</span>`);
+    if (s.task_notes && s.task_notes !== (t.notes || '')) row('📝', `Notes${t.notes ? ' <span class="hint">(in place of the ones it has)</span>' : ''}<span class="sg-notes">${esc(s.task_notes)}</span>`);
     if ('gain' in s && s.gain !== (t.gain || '')) row('✦', `Gain: <span class="gain-text">${esc(s.gain || 'none')}</span>${s.gain_suggested ? ' <span class="chip sug">Claude’s words</span>' : ''}`);
     if ('project_id' in s && s.project_id !== t.project_id) row('🗂', `Project: ${esc(s.project_name || 'none')}${p ? ` <span class="sg-old">${esc(p.name)}</span>` : ''}`);
     [['planned', 'planned_at', 'Planned'], ['due', 'due_at', 'Due'], ['defer', 'defer_at', 'Defer until']].forEach(([k, col, l]) => { if (k in s && s[k] !== t[col]) row('🗓', `${l}: ${s[k] ? esc(when(s[k])) : 'clear'}${t[col] ? ` <span class="sg-old">${esc(when(t[col]))}</span>` : ''}`); });
@@ -257,7 +262,7 @@ function taskCard(it) {
     ${t.flagged ? row('Flag', 'flagged', '<span class="chip flagged-chip">⚑ Flagged</span>') : ''}
     ${t.folder_path ? row('Folder', 'folder', `<span class="fr-folder">${esc(shortPath(t.folder_path))}</span>${folderButton(t.folder_path)}`) : ''}
     ${stepsRow(t, row)}
-    ${t.notes ? `<details class="fr-notes" ${t.notes.length <= 600 ? 'open' : ''}><summary>Notes</summary><p>${esc(t.notes.slice(0, 1200))}${t.notes.length > 1200 ? '…' : ''}</p></details>` : ''}
+    ${t.notes ? `<details class="fr-notes" ${t.notes.length <= 600 || fresh(it, 'notes') ? 'open' : ''}><summary>Notes</summary><p>${mark(it, 'notes', esc(t.notes))}</p></details>` : ''}
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
     ${suggestionBar(it, t)}
     <div class="fr-btns ${pending(it) ? 'fr-btns-quiet' : ''}">${[['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
@@ -385,7 +390,7 @@ export async function fullReviewAction(el) {
       // Open the action with Claude's values filled in; saving applies them, then you decide the card.
       const t = byId(db.tasks, cur.task_id);
       const { openEditor } = await import('../editors/task.js');
-      openEditor({ ...t, ...(sug.title ? { title: sug.title } : {}), ...('gain' in sug ? { gain: sug.gain, gain_by: sug.gain_suggested ? 'agent' : null } : {}),
+      openEditor({ ...t, ...(sug.title ? { title: sug.title } : {}), ...(sug.task_notes ? { notes: sug.task_notes } : {}), ...('gain' in sug ? { gain: sug.gain, gain_by: sug.gain_suggested ? 'agent' : null } : {}),
         ...('project_id' in sug ? { project_id: sug.project_id } : {}), ...('planned' in sug ? { planned_at: sug.planned } : {}), ...('due' in sug ? { due_at: sug.due } : {}),
         ...('defer' in sug ? { defer_at: sug.defer } : {}), ...('flagged' in sug ? { flagged: sug.flagged } : {}) });
     }

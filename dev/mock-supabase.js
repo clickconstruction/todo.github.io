@@ -574,8 +574,9 @@
           if (it.kind === 'group') { if (s.proposal) it.grp = { ...it.grp, proposal: s.proposal }; }
           else {
             const t = tables.tasks.find((x) => x.id === it.task_id);
-            snap = { t: 'fields', id: t.id, title: t.title, gain: t.gain, gain_by: t.gain_by, project_id: t.project_id, in_inbox: t.in_inbox, folder_path: t.folder_path ?? null, planned_at: t.planned_at, due_at: t.due_at, defer_at: t.defer_at, flagged: t.flagged, tags: tables.task_tags.filter((l) => l.task_id === t.id).map((l) => l.tag_id) };
+            snap = { t: 'fields', id: t.id, title: t.title, notes: t.notes ?? '', gain: t.gain, gain_by: t.gain_by, project_id: t.project_id, in_inbox: t.in_inbox, folder_path: t.folder_path ?? null, planned_at: t.planned_at, due_at: t.due_at, defer_at: t.defer_at, flagged: t.flagged, tags: tables.task_tags.filter((l) => l.task_id === t.id).map((l) => l.tag_id) };
             if (s.title) t.title = s.title;
+            if (String(s.task_notes || '').trim()) t.notes = String(s.task_notes).slice(0, 6000); // mirrors 20261031000001
             if ('gain' in s) { t.gain = s.gain || ''; t.gain_by = s.gain_suggested ? 'agent' : null; }
             if ('project_id' in s) { t.project_id = s.project_id; if (s.project_id) t.in_inbox = false; }
             if ('folder' in s) t.folder_path = String(s.folder || '').trim() || null; if ('planned' in s) t.planned_at = s.planned; if ('due' in s) t.due_at = s.due; if ('defer' in s) t.defer_at = s.defer; if ('flagged' in s) t.flagged = !!s.flagged;
@@ -620,7 +621,7 @@
               if (e.t === 'slipbox') { const n = tables.slipbox_notes.find((x) => x.id === e.note); if (n) n.archived_at = now(); tables.tasks.find((t) => t.id === e.id).dropped_at = e.dropped_at; }
               if (e.t === 'checklist') { const tk = tables.tasks.find((x) => x.id === e.id); if (tk) tk.checklist_id = e.prev || null; const mc = e.made && tables.checklists.find((c) => c.id === e.made); if (mc) mc.archived_at = now(); }
               if (e.t === 'steps') { tables.tasks.forEach((c) => { if (e.ids.includes(c.id) && !c.completed_at && !c.dropped_at) c.dropped_at = now(); }); const p0 = tables.tasks.find((t) => t.id === e.id); if (p0) p0.steps_in_order = !!e.steps_in_order; }
-              if (e.t === 'fields') { Object.assign(tables.tasks.find((t) => t.id === e.id), { folder_path: e.folder_path ?? null, title: e.title, gain: e.gain, gain_by: e.gain_by, project_id: e.project_id, in_inbox: e.in_inbox, planned_at: e.planned_at, due_at: e.due_at, defer_at: e.defer_at, flagged: e.flagged });
+              if (e.t === 'fields') { Object.assign(tables.tasks.find((t) => t.id === e.id), { folder_path: e.folder_path ?? null, title: e.title, ...('notes' in e ? { notes: e.notes ?? '' } : {}), gain: e.gain, gain_by: e.gain_by, project_id: e.project_id, in_inbox: e.in_inbox, planned_at: e.planned_at, due_at: e.due_at, defer_at: e.defer_at, flagged: e.flagged });
                 tables.task_tags = tables.task_tags.filter((l) => l.task_id !== e.id).concat(e.tags.map((g) => ({ task_id: e.id, tag_id: g, user_id: uid }))); }
               if (e.t === 'expanded') tables.review_items.filter((x) => x.session_id === it.session_id && x.sort > it.sort && x.sort < it.sort + 1 && x.kind === 'task' && x.status === 'pending').forEach((x) => { x.status = 'void'; });
             });

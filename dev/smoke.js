@@ -484,6 +484,22 @@ async function fullReview(check) {
   (await import('/js/state.js')).db.tasks.push({ ...t.tasks.find((x) => x.id === 'fWs1') }); app.render(); await wait(30);
   check('the card lists its open steps, with a progress bar', has('.fr-card', 'steps', '1 to go', 'find the old will') && !!$('.fr-card .step-progress[role="progressbar"]'));
   { const drop = new Date().toISOString(); t.tasks.find((x) => x.id === 'fWs1').dropped_at = drop; (await import('/js/state.js')).db.tasks.find((x) => x.id === 'fWs1').dropped_at = drop; app.render(); await wait(30); }
+  // New notes in a suggestion: shown whole, line breaks kept; Submit replaces the notes; Undo puts the old ones back; Edit carries them into the editor.
+  const fw = t.tasks.find((x) => x.id === 'fW');
+  const oldNotes = fw.notes || '';
+  const newNotes = 'Send the letter about the land.\nTom signs and returns it.\n\nEvery January.';
+  Object.assign(cur, { suggestion: { decision: 'keep', title: 'Send to Tom once a year', task_notes: newNotes, at: new Date().toISOString() }, updated_at: new Date().toISOString() });
+  await until(() => !!$('.sg-bar .sg-notes'));
+  check('suggested notes on the bar: the whole text, line breaks kept, easy to copy', $('.sg-bar .sg-notes').textContent === newNotes && getComputedStyle($('.sg-bar .sg-notes')).whiteSpace === 'pre-wrap' && has('.sg-bar', 'send to tom once a year'));
+  check('nothing changed yet (notes)', (fw.notes || '') === oldNotes);
+  key('Enter'); await until(() => has(undefined, 'group · 14 actions'));
+  check('Submit replaced the title and the notes', fw.title === 'Send to Tom once a year' && fw.notes === newNotes);
+  key('u'); await until(() => !!$('.sg-bar') && has(undefined, 'update my will'));
+  check('Undo put the old notes back', (fw.notes || '') === oldNotes && fw.title === 'Update my will' && !!$('.sg-bar .sg-notes'));
+  $('[data-fr="edit-suggestion"]').click(); await until(() => $('#sheet').open && !!$('#sheet [name=notes]'));
+  check('Edit opens the action with the suggested title and notes filled in, yours to change', $('#sheet [name=notes]').value === newNotes && $('#sheet [name=title]').value === 'Send to Tom once a year' && cur.suggestion === null);
+  $('#sheet').close(); await until(() => !$('#sheet').open);
+  check('closing the editor without saving changes nothing', (fw.notes || '') === oldNotes && fw.title === 'Update my will' && !$('.sg-bar'));
   // A folder in a suggestion: shown on the bar; Submit sets it (card shows it with 📂); Undo clears it.
   Object.assign(cur, { suggestion: { decision: 'keep', folder: '~/_SYNC/MAGA/_Todo/Will', at: new Date().toISOString() }, updated_at: new Date().toISOString() });
   await until(() => !!$('.sg-bar') && has('.sg-bar', 'folder'));

@@ -1263,6 +1263,15 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   let bad7 = ''; try { await tool('full_review', { action: 'suggest', decision: 'drop', checklist: { name: 'X', items: ['a'] } }); } catch (e) { bad7 = e.message; }
   assert(/No checklist called/.test(bad6) && /keep or someday/.test(bad7), 'an unknown checklist, or a checklist with drop, is refused');
   db.checklists.splice(db.checklists.findIndex((c) => c.id === 'ckEx'), 1);
+  const notesBefore = db.tasks.find((t) => t.id === S1).notes;
+  await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Send to Tom once a year', task_notes: '\r\nThe letter about the land,\r\nand what we agreed.\n\n  Send it every January.\n\n', note: 'Short title, the whole text in the notes' });
+  assert(s1.suggestion.task_notes === 'The letter about the land,\nand what we agreed.\n\n  Send it every January.' && s1.suggestion.note === 'Short title, the whole text in the notes' && !('notes' in s1.suggestion) && db.tasks.find((t) => t.id === S1).notes === notesBefore, 'suggest task_notes: line breaks kept, edges trimmed, apart from the reason; nothing changes until Submit');
+  await tool('full_review', { action: 'suggest', decision: 'keep', task_notes: 'x'.repeat(7000) });
+  assert(s1.suggestion.task_notes.length === 6000, 'suggest task_notes: at most 6000 characters');
+  await tool('full_review', { action: 'suggest', decision: 'keep', task_notes: null });
+  const sn1 = 'task_notes' in s1.suggestion;
+  await tool('full_review', { action: 'suggest', decision: 'keep', task_notes: '  \n ' });
+  assert(!sn1 && !('task_notes' in s1.suggestion), 'suggest task_notes: null or blank leaves the notes unchanged');
   await tool('full_review', { action: 'suggest', decision: 'keep', mac_folder: '~/_SYNC/MAGA/_Todo/Gate latch' });
   assert(s1.suggestion.folder === '~/_SYNC/MAGA/_Todo/Gate latch', 'suggest mac_folder');
   await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Fix the gate latch before winter', gain: 'Goats stay in', project: 'Estate and legacy', planned: '2026-10-05', flagged: false, add_tags: ['Brand new tag'], note: 'You said before the cold snap' });
@@ -1283,8 +1292,9 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(Array.isArray(up.cards), 'upcoming: the next cards in one go');
   const nextTask = db.review_items.find((x) => x.kind === 'task' && x.status === 'pending' && x.id !== s1.id && x.task_id !== W);
   if (nextTask) {
-    const ah = await tool('full_review', { action: 'suggest', items: [{ item_id: nextTask.id, decision: 'someday', note: 'Like the other movies' }] });
+    const ah = await tool('full_review', { action: 'suggest', items: [{ item_id: nextTask.id, decision: 'someday', task_notes: 'Seen the trailer.\nAsk Sam first.', note: 'Like the other movies' }] });
     assert(ah.items[0].ahead === true && nextTask.suggestion.ahead === true, 'drafted ahead: marked as such');
+    assert(nextTask.suggestion.task_notes === 'Seen the trailer.\nAsk Sam first.', 'suggest items [...]: task_notes on each card');
   }
   const before2 = db.review_items.length;
   const ad = await tool('full_review', { action: 'add', title: 'Ask the bank about a HELOC', gain: 'Cash for the barn without selling' });

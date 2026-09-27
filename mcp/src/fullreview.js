@@ -4,6 +4,10 @@
 import { buildQueue, priorityReason, proposalText } from '../../js/review.js';
 import { parseItemLines } from './checklists.js';
 
+const MAX_NOTES = 6000; // as everywhere notes are taken
+// New notes for a card's action: plain text with its line breaks; blank means "leave the notes alone".
+const taskNotes = (v) => (v === undefined || v === null ? '' : String(v).replace(/\r\n?/g, '\n').replace(/^\s*\n/, '').trimEnd().slice(0, MAX_NOTES));
+
 export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
   // ---------- suggestions: Claude proposes, the user Submits in the app ----------
   const TASK_DECISIONS = ['keep', 'someday', 'done', 'drop', 'skip', 'reading', 'slipbox'];
@@ -29,6 +33,7 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
       return s;
     }
     if (a.title !== undefined && String(a.title).trim()) s.title = String(a.title).trim().slice(0, 1000);
+    if (taskNotes(a.task_notes)) s.task_notes = taskNotes(a.task_notes); // replaces the action's notes on Submit
     if (a.gain !== undefined) { s.gain = String(a.gain || '').trim().slice(0, 500); if (a.gain_suggested) s.gain_suggested = true; }
     if (a.project !== undefined) {
       if (a.project === null || a.project === '') s.project_id = null;
@@ -124,7 +129,7 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
     const p = projects[0] || null;
     const day = (iso) => (iso ? localDate(iso, api.tz) : undefined);
     return { ...base, priority: it.priority || undefined, why_first: it.priority ? priorityReason(raw, p) || undefined : undefined,
-      task: { id: raw.id, title: raw.title, notes: raw.notes ? String(raw.notes).slice(0, 2000) : undefined, project: p ? p.name : undefined, project_gain: p && p.purpose ? p.purpose : undefined,
+      task: { id: raw.id, title: raw.title, notes: raw.notes ? String(raw.notes).slice(0, MAX_NOTES) : undefined, project: p ? p.name : undefined, project_gain: p && p.purpose ? p.purpose : undefined,
         tags: tags.map((g) => g.name), gain: raw.gain || undefined, gain_suggested: raw.gain_by === 'agent' || undefined, flagged: raw.flagged || undefined,
         due: day(raw.due_at), planned: day(raw.planned_at), defer: day(raw.defer_at), in_inbox: raw.in_inbox || undefined, repeating: raw.repeat_rule ? true : undefined,
         added: day(raw.created_at), age_days: raw.created_at ? Math.floor((Date.now() - Date.parse(raw.created_at)) / 86400000) : undefined },
@@ -147,13 +152,14 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
   return [{
     name: 'full_review',
     description: `Full Review: go through the user's actions one card at a time WITH them while they watch the same card in the app.
-Default way of working: SUGGEST, the user approves. When the user tells you what to do with a card, turn it into a suggestion ("suggest": decision plus any title/gain/project/dates/flag/tags and a one-line note). It appears on the card in the app as "Suggested by Claude" with Submit / Edit / Dismiss; nothing changes until they Submit. When the user says "submit" (e.g. "submit, next card"), call "submit": it presses Submit for them, exactly like the app's button, and moves to the next card. (If they say "submitted", they pressed it themselves: just check status.) Only use "annotate" + "decide" (which apply immediately) when the user says to just do it.
+Default way of working: SUGGEST, the user approves. When the user tells you what to do with a card, turn it into a suggestion ("suggest": decision plus any title/notes/gain/project/dates/flag/tags and a one-line note). It appears on the card in the app as "Suggested by Claude" with Submit / Edit / Dismiss; nothing changes until they Submit. When the user says "submit" (e.g. "submit, next card"), call "submit": it presses Submit for them, exactly like the app's button, and moves to the next card. (If they say "submitted", they pressed it themselves: just check status.) Only use "annotate" + "decide" (which apply immediately) when the user says to just do it.
 Big actions: when the user describes the parts ("cut the spot, run power, then…"), put them in the suggestion as steps (in order if they said so) rather than applying break_down; Submit adds them.
+Notes: task_notes in a suggestion REPLACES the action's whole notes on Submit (Undo puts the old ones back), so write the full text you want kept, as plain text with line breaks, ready to copy and paste (no Markdown). Use it to tidy an import whose text was split across the title and the notes: a short title, and the whole text in task_notes. "note" is something else: your one-line reason, shown on the card.
 Draft ahead: call "upcoming" and "suggest" with items [...] for the next few cards from the user's patterns; these show as "drafted ahead" so the user can Submit quickly and only talk to you when they disagree. Never suggest drop/done for something the user hasn't clearly let go of; the gain should be the user's words (set gain_suggested when it's yours).
 actions:
   start {import_id | project | all:true, min_age_days?, title?} → a new session (give the user app_link)
   status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
-  suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down; a step can be {title, steps: [...], in_order?} to nest), steps_in_order?, checklist? ({name, items: [lines; "# Section" starts a section], reflect?, complete_action?} to make one, or an existing checklist's name: attached on Submit; use it for routines the card repeats), mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
+  suggest {decision, title?, task_notes? (the action's new notes, replacing the old; ≤6000 characters; omitted or null = unchanged), gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down; a step can be {title, steps: [...], in_order?} to nest), steps_in_order?, checklist? ({name, items: [lines; "# Section" starts a section], reflect?, complete_action?} to make one, or an existing checklist's name: attached on Submit; use it for routines the card repeats), mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
   submit {item_id? (default current)} → apply the pending suggestion as the app's Submit does (only when the user says "submit"), then the next card
   upcoming {count? ≤10} → the next cards in full, for drafting ahead
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
@@ -165,12 +171,13 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
       properties: {
         action: { type: 'string', enum: ['start', 'status', 'suggest', 'submit', 'upcoming', 'add', 'annotate', 'decide', 'prioritize', 'goto', 'undo', 'list'], default: 'status' },
         notes: { type: 'string', description: 'add: notes for the new idea' },
-        items: { type: 'array', description: 'suggest: several cards at once, each {item_id, decision, title?, gain?, project?, planned?, due?, defer?, flagged?, add_tags?, remove_tags?, steps?, steps_in_order?, proposal?, note?}', items: { type: 'object' } },
+        items: { type: 'array', description: 'suggest: several cards at once, each {item_id, decision, title?, task_notes?, gain?, project?, planned?, due?, defer?, flagged?, add_tags?, remove_tags?, steps?, steps_in_order?, proposal?, note?}', items: { type: 'object' } },
         ahead: { type: 'boolean', description: 'suggest: drafted before talking it through (shown as “drafted ahead”)' },
         count: { type: 'integer', description: 'upcoming: how many cards (max 10)' },
         session_id: { type: 'string' },
         import_id: { type: 'string' }, project: { type: 'string', description: 'Project name or id (start: review that project; annotate: move the action there)' },
         all: { type: 'boolean' }, min_age_days: { type: 'integer' }, title: { type: 'string' },
+        task_notes: { type: ['string', 'null'], maxLength: MAX_NOTES, description: 'suggest / annotate: new notes for the card\'s action, replacing its current notes (on Submit for suggest). Plain text, line breaks kept, at most 6000 characters; omitted, null or blank leaves the notes unchanged. Not the one-line reason (note), and not add\'s notes.' },
         gain: { type: 'string' }, gain_suggested: { type: 'boolean' },
         tags: { type: 'array', items: { type: 'string' } }, add_tags: { type: 'array', items: { type: 'string' } }, remove_tags: { type: 'array', items: { type: 'string' } },
         steps: { type: 'array', items: { type: ['string', 'object'], properties: { title: { type: 'string' }, steps: { type: 'array' }, in_order: { type: 'boolean' } } }, description: 'suggest: break the action down: step titles, first to last (added on Submit). A step can be {title, steps: [...], in_order?} to carry its own steps, three levels under the card.' },
@@ -247,7 +254,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
       }
       if (action === 'submit') {
         // The app's Submit button, pressed for the user: the same database function applies the suggestion
-        // (title, gain, project, dates, flag, tags, steps, folder) and decides the card. Undo works as usual.
+        // (title, notes, gain, project, dates, flag, tags, steps, folder) and decides the card. Undo works as usual.
         const it = a.item_id ? await itemFull(api, a.item_id) : cur;
         if (!it || it.session_id !== s.id) throw new Error('No such card in this review.');
         if (it.status !== 'pending') throw new Error('That card is already decided.');
@@ -294,10 +301,12 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
           const f = {};
           ['title', 'gain', 'gain_suggested', 'tags', 'add_tags', 'remove_tags', 'planned', 'due', 'defer', 'flagged'].forEach((k) => { if (a[k] !== undefined) f[k] = a[k]; });
           if (a.project !== undefined) f.project = a.project;
+          if (taskNotes(a.task_notes)) f.notes = taskNotes(a.task_notes);
           if (Object.keys(f).length) {
             await touch(api, s.id, { agent_status: 'editing' });
             await tool('update_task').run(api, { id: cur.task_id, ...f });
             if (f.title !== undefined) changed.title = stamp;
+            if (f.notes !== undefined) changed.notes = stamp;
             if (f.gain !== undefined) changed.gain = stamp;
             if (f.project !== undefined) changed.project = stamp;
             if (['planned', 'due', 'defer'].some((k) => f[k] !== undefined)) changed.dates = stamp;
