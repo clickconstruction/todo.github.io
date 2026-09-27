@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, dailies, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, dailies, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -418,6 +418,61 @@ async function reviewUndo(check) {
   $('.fr-look [data-fr="undo"]').click(); await until(() => item(looking).status === 'pending' && !$('.fr-look'));
   check('Undo this card: the one you were looking at is undecided and current', item(looking).status === 'pending' && t.review_sessions.find((x) => x.id === 'sU').current_item === looking && item('iuC').status === 'reviewed' && !$('.fr-look'));
   app.fr = null;
+}
+
+// Horizons: checkboxes in the purpose and vision text. Tick as you read; "Mark as read today" clears them.
+async function horizonChecks(check) {
+  const { app } = await import('/js/state.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const row = () => T().user_settings[0] || {};
+  app.hzEdit = null;
+  await go('#horizons/purpose');
+  check('nothing written yet: the page opens ready to write, with a Checkbox button', !!$('textarea[data-hz-field="purpose"]') && !!$('[data-hz="add-check"]') && !$('.hz-read'));
+  const ta = () => $('textarea[data-hz-field="purpose"]');
+  ta().value = 'PURPOSE\nSurvive and replicate.\nAm I making kids\nAm I making businesses\n- Live, love, learn'; ta().dispatchEvent(new Event('input', { bubbles: true }));
+  ta().focus(); const at = ta().value.indexOf('Am I making kids'); ta().setSelectionRange(at + 3, at + 3);
+  $('[data-hz="add-check"]').click();
+  check('☐ Checkbox makes the line you are on a checkbox', ta().value.includes('\n[ ] Am I making kids\n') && !ta().value.includes('[ ] Am I making businesses'), ta().value);
+  const from = ta().value.indexOf('Am I making businesses'); ta().setSelectionRange(from, ta().value.length);
+  $('[data-hz="add-check"]').click();
+  check('several lines at once; a bullet becomes a checkbox', ta().value.endsWith('[ ] Am I making businesses\n[ ] Live, love, learn'), ta().value);
+  ta().setSelectionRange(ta().value.length, ta().value.length);
+  $('[data-hz="add-check"]').click();
+  check('pressed on a checkbox line, it is a plain line again', ta().value.endsWith('[ ] Am I making businesses\nLive, love, learn'), ta().value);
+  $('[data-hz="add-check"]').click();
+  await until(() => (row().purpose || '').endsWith('[ ] Live, love, learn'));
+  check('it saves as typing does', (row().purpose || '').split('[ ]').length === 4, row().purpose);
+
+  $('[data-hz="done-text"]').click();
+  await until(() => !!$('.hz-read'));
+  check('Done: a page to read, with a heading, the text and three checkboxes', !$('textarea.hz-text') && has('.hz-read .hz-h', 'purpose') && has('.hz-read', 'survive and replicate') && $$('.hz-read [data-hz-tick]').length === 3 && !has('.hz-read', '[ ]') && !!$('[data-hz="edit-text"]'), text('.hz-read'));
+  check('the count starts at none ticked', has(undefined, '0 of 3 ticked', 'clears the ticks'));
+
+  const boxes = () => $$('.hz-read [data-hz-tick]');
+  boxes()[0].click(); await until(() => /\[x\] Am I making kids/.test(row().purpose || ''));
+  boxes()[2].click(); await until(() => /\[x\] Live, love, learn/.test(row().purpose || ''));
+  check('ticking saves in the text and shows on the page', has(undefined, '2 of 3 ticked') && boxes()[0].checked && !boxes()[1].checked && boxes()[2].checked && $$('.hz-check.on').length === 2 && /\[ \] Am I making businesses/.test(row().purpose), row().purpose);
+  boxes()[2].click(); await until(() => /\[ \] Live, love, learn/.test(row().purpose || ''));
+  check('un-ticking too', has(undefined, '1 of 3 ticked') && !boxes()[2].checked);
+
+  app.hzEdit = null; await go('#horizons'); 
+  check('the ladder shows the first line that says something, not the heading or brackets', has(undefined, 'survive and replicate') && !has(undefined, '[x]'));
+  await go('#horizons/purpose');
+  check('coming back, the ticks are still there', boxes().length === 3 && boxes()[0].checked && has(undefined, '1 of 3 ticked'));
+
+  boxes()[1].click(); await until(() => /\[x\] Am I making businesses/.test(row().purpose || ''));
+  $('[data-hz="read"]').click();
+  await until(() => !!row().purpose_read_at && !/\[x\]/i.test(row().purpose || ''));
+  await wait(150);
+  check('Mark as read today clears the ticks and records the read', !!row().purpose_read_at && (row().purpose || '').split('[ ]').length === 4 && boxes().length === 3 && boxes().every((b) => !b.checked) && has(undefined, '0 of 3 ticked') && has('#toast', 'marked as read', '2 ticks cleared'), text('#toast'));
+  check('the words are as they were', (row().purpose || '').startsWith('PURPOSE\nSurvive and replicate.\n[ ] Am I making kids'));
+
+  $('[data-hz="edit-text"]').click(); await until(() => !!ta());
+  check('Edit: the same text, brackets and all', ta().value === row().purpose && ta().value.includes('[ ] Am I making kids'));
+  $('[data-hz="done-text"]').click(); await until(() => !!$('.hz-read'));
+  await go('#horizons/vision');
+  check('vision works the same way (and starts ready to write)', !!$('textarea[data-hz-field="vision"]') && !!$('[data-hz="add-check"][data-kind="vision"]'));
+  app.hzEdit = null;
 }
 
 // Dailies: a checkbox that starts fresh each day, in two tiers (js/dailies.js, migration 20261101000001).

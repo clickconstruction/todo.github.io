@@ -170,7 +170,8 @@ globalThis.fetch = async (url, init = {}) => {
   if (m === 'PATCH' && table === 'tasks') for (const r of rows.filter(match)) { const b = { ...body }; const e = guard(r, b); if (e) return res({ message: e }, 400); Object.assign(r, b); follow(r); }
   if (m === 'POST' && Array.isArray(body) && body.some((b) => Object.keys(b).sort().join() !== Object.keys(body[0]).sort().join())) return res({ code: 'PGRST102', message: 'All object keys must match' }, 400); // as PostgREST does
   if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...(table === 'checklists' ? { complete_action: true, archived_at: null } : {}), ...(table === 'review_items' ? { status: 'pending', note: '', changed: {}, priority: false } : {}), ...(table === 'checklist_runs' ? { started_at: new Date().toISOString(), finished_at: null } : {}), ...(table === 'daily_ticks' ? { state: 'done' } : {}), ...b })); if (table === 'tasks') add.forEach((r) => dailyGuard(r)); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
-  if (m === 'PATCH') { const hit = rows.filter((r) => match(r) && orMatch(r)); hit.forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); if (table === 'tasks') hit.forEach((r) => { if (!r.waiting_on) r.follow_up_at = null; dailyGuard(r, r.__was); delete r.__was; }); return init.headers.Prefer ? res(hit) : res(null, 204); }
+  if (m === 'PATCH') { const hit = rows.filter((r) => match(r) && orMatch(r)); hit.forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); if (table === 'user_settings') hit.forEach((r) => ['purpose', 'vision'].forEach((k) => { if (body[`${k}_read_at`]) r[k] = String(r[k] || '').replace(/^([ \t]*(?:[-*][ \t]+)?)\[[xX]\]/gm, '$1[ ]'); })); // mirror of user_settings_read_clears
+  if (table === 'tasks') hit.forEach((r) => { if (!r.waiting_on) r.follow_up_at = null; dailyGuard(r, r.__was); delete r.__was; }); return init.headers.Prefer ? res(hit) : res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
 };
 const env = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SECRET_KEY: 'sb_secret_test', TIMEZONE: 'America/Chicago' };
@@ -1530,6 +1531,26 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(ics2.includes('GEO:29.7351;-95.471') && /X-APPLE-STRUCTURED-LOCATION;VALUE=URI;X-APPLE-RADIUS=200;X-TITLE="Ellington Airport, Houston":geo:29\.7351,-95\.471/.test(ics2.replace(/\r\n /g, '')), 'feed: coordinates as GEO and Apple\'s structured location (map, Directions, time to leave)');
   assert(!/SUMMARY:Somewhere vague[\s\S]*?GEO:/.test(ics2.split('SUMMARY:Somewhere vague')[1].split('END:VEVENT')[0]), 'feed: no GEO for an event without coordinates');
   db.events.length = 0;
+}
+
+// ---------- horizons: checkboxes in the purpose text ----------
+{
+  db.user_settings.length = 0;
+  db.user_settings.push({ user_id: UID, purpose: '', vision: '' });
+  const urow = db.user_settings[0];
+  const saved = await tool('save_horizon', { kind: 'purpose', text: 'PURPOSE\n[ ] Am I making kids\n[x] Am I making businesses\n- [ ] Live, love, learn\nNot a [x] box' });
+  assert(saved.checkboxes.of === 3 && saved.checkboxes.ticked === 1, 'save_horizon: counts the checkboxes in the text');
+  const hz = await tool('list_horizons', {});
+  assert(hz.purpose.checkboxes.of === 3 && hz.purpose.checkboxes.left.join('|') === 'Am I making kids|Live, love, learn', 'list_horizons: which checkboxes are still to tick');
+  await tool('save_horizon', { kind: 'purpose', tick: 'am i making kids' });
+  assert(/\[x\] Am I making kids/.test(urow.purpose) && /Not a \[x\] box/.test(urow.purpose), 'save_horizon tick: by the line’s text, nothing else touched');
+  await tool('save_horizon', { kind: 'purpose', untick: 'businesses' });
+  assert(/\[ \] Am I making businesses/.test(urow.purpose), 'save_horizon untick: a part of the line is enough when only one matches');
+  let none = ''; try { await tool('save_horizon', { kind: 'purpose', tick: 'am i' }); } catch (e) { none = e.message; }
+  assert(/No one checkbox matches/.test(none), 'a tick that matches several checkboxes (or none) is refused');
+  const read = await tool('save_horizon', { kind: 'purpose', read: true });
+  assert(read.ticks === 'cleared' && !/\[x\] /.test(urow.purpose.replace('Not a [x] box', '')) && /Not a \[x\] box/.test(urow.purpose) && urow.purpose_read_at, 'save_horizon read: the ticks clear, the rest of the text stays');
+  db.user_settings.length = 0;
 }
 
 // ---------- dailies: a checkbox that starts fresh each day, have to and should ----------

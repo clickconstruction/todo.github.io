@@ -349,6 +349,7 @@
         hit.forEach((r) => {
           const before = { ...r };
           Object.assign(r, st.payload, { updated_at: now() });
+          if (table === 'user_settings') ['purpose', 'vision'].forEach((k) => { if (r[`${k}_read_at`] && r[`${k}_read_at`] !== before[`${k}_read_at`]) r[k] = String(r[k] || '').replace(/^([ \t]*(?:[-*][ \t]+)?)\[[xX]\]/gm, '$1[ ]'); }); // mirrors user_settings_read_clears (20261102000001)
           if (table === 'projects') { reviewSchedule(r, before); projectStatusChange(r, before.status); }
           if (table === 'tasks') taskRules(r, before);
           if (table === 'tasks' && r.project_id !== before.project_id) follow(r);

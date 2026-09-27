@@ -1546,3 +1546,17 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .fr-back-undo { display: inline-flex; gap: 8px; min-width: 0; }
 .fr-back-undo [data-fr="undo"] { max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 520px) { .fr-back-undo [data-fr="undo"] { max-width: 11em; } }
+/* Horizons: purpose and vision as a page to read and tick (js/horizon-text.js) */
+.hz-read { padding: 14px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); margin: 8px 0; overflow-wrap: anywhere; }
+.hz-read p { margin: 4px 0; line-height: 1.5; }
+.hz-read .hz-h { font-size: 12px; font-weight: 700; letter-spacing: .6px; color: var(--muted); margin: 14px 0 4px; }
+.hz-read .hz-h:first-child { margin-top: 0; }
+.hz-read .hz-li { padding-left: 18px; position: relative; }
+.hz-read .hz-li::before { content: "•"; position: absolute; left: 4px; color: var(--muted); }
+.hz-gap { height: 8px; }
+.hz-checks { display: grid; gap: 2px; margin: 4px 0; }
+.hz-check { display: flex; align-items: flex-start; gap: 10px; padding: 6px 4px; border-radius: 8px; cursor: pointer; line-height: 1.45; }
+.hz-check:hover { background: var(--surface-2); }
+.hz-check input { flex: none; width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--accent); }
+.hz-check.on span { color: var(--muted); text-decoration: line-through; }
+.hz-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 6px; }

@@ -7,6 +7,7 @@ import { projectRow } from '../rows.js';
 import { saveSettings } from '../prefs.js';
 import { isAvailable } from '../availability.js';
 import { areaBalance, isDueForReview, bigReviewsDue } from '../whatnow.js';
+import { parseText, counts, setTick, clearTicks, toggleBoxes } from '../horizon-text.js';
 
 export const liveAreas = () => (db.areas || []).filter((a) => !a.archived_at).sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
 export const activeGoals = () => (db.goals || []).filter((g) => g.status === 'active').sort((a, b) => String(a.target_date || '9').localeCompare(String(b.target_date || '9')) || a.title.localeCompare(b.title));
@@ -34,10 +35,12 @@ function completedRecently(area) {
 const balanceOf = (a) => areaBalance(a, { projects: db.projects, tasks: db.tasks, completedSince: completedRecently(a) });
 
 const readAgo = (iso) => (iso ? `read ${fmtDate(iso)}` : 'not read yet');
-const firstLine = (s) => String(s || '').split('\n').find((l) => l.trim()) || '';
+// The first line that says something: past a heading, and without a checkbox's brackets.
+const firstLine = (s) => { const l = parseText(s).filter((x) => x.text); return ((l.find((x) => x.kind !== 'heading') || l[0] || {}).text) || ''; };
 
 // ---------- the ladder ----------
 export function viewHorizons(sub) {
+  if (sub !== app.hzEdit) app.hzEdit = null; // editing is for the page you are on
   if (sub === 'purpose' || sub === 'vision') return textPage(sub);
   if (sub === 'areas') return areasList();
   if (sub === 'goals') return goalsList();
@@ -68,16 +71,46 @@ export function viewHorizons(sub) {
     <p class="view-sub">Every quarter: <a href="#horizons/quarterly">the quarterly check-in</a>${s.horizons_quarter_at ? ` (last ${esc(fmtDate(s.horizons_quarter_at))})` : ''}. Every year: read your purpose and vision.</p>`;
 }
 
+// Purpose and vision: a page to read and tick, and the same text to edit. A line that starts with [ ] is a
+// checkbox (js/horizon-text.js); ticking saves in the text, and "Mark as read today" clears the ticks.
+const editing = (kind) => app.hzEdit === kind;
+function readHtml(kind, text) {
+  let open = false;
+  const out = [];
+  const close = () => { if (open) { out.push('</div>'); open = false; } };
+  parseText(text).forEach((l) => {
+    if (l.kind === 'check') {
+      if (!open) { out.push('<div class="hz-checks">'); open = true; }
+      out.push(`<label class="hz-check ${l.on ? 'on' : ''}"><input type="checkbox" data-hz-tick="${l.i}" data-kind="${kind}" ${l.on ? 'checked' : ''}><span>${esc(l.text) || '&nbsp;'}</span></label>`);
+      return;
+    }
+    close();
+    if (l.kind === 'heading') out.push(`<h2 class="hz-h">${esc(l.text)}</h2>`);
+    else if (l.kind === 'bullet') out.push(`<p class="hz-li">${esc(l.text)}</p>`);
+    else if (l.kind === 'blank') out.push('<div class="hz-gap"></div>');
+    else out.push(`<p>${esc(l.text)}</p>`);
+  });
+  close();
+  return out.join('');
+}
 function textPage(kind) {
   const s = app.settings || {};
   const isP = kind === 'purpose';
+  const text = s[kind] || '';
+  if (!text.trim() && !editing(kind)) app.hzEdit = kind; // nothing written yet: start writing
+  const edit = editing(kind);
+  const c = counts(text);
+  const ticks = c.total ? ` · ${c.on} of ${c.total} ticked` : '';
   return `<a class="back" href="#horizons">‹ Horizons</a>
-    <div class="view-head"><h1 class="horizons">${isP ? 'Purpose and principles' : 'Vision'}</h1></div>
+    <div class="view-head"><h1 class="horizons">${isP ? 'Purpose and principles' : 'Vision'}</h1>${edit ? '<button class="btn small primary" data-hz="done-text">Done</button>' : `<button class="btn small" data-hz="edit-text" data-kind="${kind}">Edit</button>`}</div>
     <p class="view-sub">${isP ? 'Why you do what you do, and the standards you hold yourself to. Read it once a year, or whenever a decision is hard.' : 'Where you want to be in 3 to 5 years: your work, family, health, money. Read it once a year.'}</p>
     ${isP ? '' : `<label class="set-row hz-year"><span class="set-text"><b>By</b></span><input type="number" min="2000" max="2200" data-hz-field="vision_year" value="${esc(s.vision_year || new Date().getFullYear() + 3)}" inputmode="numeric"></label>`}
-    <textarea class="hz-text" data-hz-field="${kind}" rows="14" placeholder="${isP ? 'I build things that last and treat people fairly…' : 'Two crews running without me on the phone at night…'}">${esc(s[kind] || '')}</textarea>
-    <p class="hint">${readAgo(s[`${kind}_read_at`])} · saves as you type</p>
-    <p><button class="btn" data-hz="read" data-kind="${kind}">Mark as read today</button></p>`;
+    ${edit ? `<div class="hz-tools"><button type="button" class="btn small" data-hz="add-check" data-kind="${kind}" title="Make the line you are on a checkbox (or plain again)">☐ Checkbox</button><span class="hint">A line that starts with [ ] is a checkbox you can tick when you read.</span></div>
+    <textarea class="hz-text" data-hz-field="${kind}" rows="16" placeholder="${isP ? 'I build things that last and treat people fairly…' : 'Two crews running without me on the phone at night…'}">${esc(text)}</textarea>
+    <p class="hint">${readAgo(s[`${kind}_read_at`])} · saves as you type</p>`
+    : `<div class="hz-read" data-hz-read="${kind}">${readHtml(kind, text)}</div>
+    <p class="hint">${readAgo(s[`${kind}_read_at`])}${ticks}</p>`}
+    <p><button class="btn ${!edit && c.total && c.on === c.total ? 'primary' : ''}" data-hz="read" data-kind="${kind}">Mark as read today</button>${c.total ? ' <span class="hint">clears the ticks</span>' : ''}</p>`;
 }
 
 // The quarterly check-in: goals and areas as a whole.
@@ -250,7 +283,31 @@ export async function horizonsAction(el) {
   else if (a === 'drop-goal' && goal) { await saveGoal(goal, { status: 'dropped' }); toast(`Dropped: ${goal.title}`, [{ label: 'Undo', run: async () => { await saveGoal(goal, { status: 'active' }); app.render(); } }]); }
   else if (a === 'reopen-goal' && goal) await saveGoal(goal, { status: 'active' });
   else if (a === 'areas-from-folders') { const n = await areasFromFolders(); toast(`Made ${n} area${n === 1 ? '' : 's'}`); }
-  else if (a === 'read') { await saveSettings({ [`${el.dataset.kind}_read_at`]: now }); }
+  else if (a === 'read') {
+    // The database clears the ticks when the read time changes; the screen shows the same at once.
+    const kind = el.dataset.kind; const ta = $(`textarea[data-hz-field="${kind}"]`);
+    clearTimeout(textTimer);
+    const text = ta ? ta.value : (app.settings || {})[kind] || '';
+    const had = counts(text).on;
+    await saveSettings({ ...(ta ? { [kind]: text } : {}), [`${kind}_read_at`]: now }, { quiet: true });
+    app.settings = { ...app.settings, [kind]: clearTicks((app.settings || {})[kind] || text) };
+    toast(had ? `Marked as read · ${had} tick${had === 1 ? '' : 's'} cleared` : 'Marked as read');
+  }
+  else if (a === 'edit-text') { app.hzEdit = el.dataset.kind; app.render(); const ta = $(`textarea[data-hz-field="${el.dataset.kind}"]`); if (ta) ta.focus(); return; }
+  else if (a === 'done-text') {
+    const ta = $('textarea.hz-text');
+    clearTimeout(textTimer);
+    if (ta) await saveSettings({ [ta.dataset.hzField]: ta.value }, { quiet: true });
+    app.hzEdit = null;
+  }
+  else if (a === 'add-check') {
+    const ta = $(`textarea[data-hz-field="${el.dataset.kind}"]`);
+    if (!ta) return;
+    const r = toggleBoxes(ta.value, ta.selectionStart, ta.selectionEnd);
+    ta.value = r.text; ta.focus(); ta.setSelectionRange(r.end, r.end);
+    ta.dispatchEvent(new Event('input', { bubbles: true })); // saves as any typing does
+    return;
+  }
   else if (a === 'quarter-done') { await saveSettings({ horizons_quarter_at: now }); toast('Quarterly check-in done · next in three months'); }
   app.render();
 }
@@ -267,6 +324,15 @@ export function horizonsInput(e) {
   return true;
 }
 export async function horizonsChange(e) {
+  const box = e.target.closest && e.target.closest('[data-hz-tick]');
+  if (box) { // a tick is kept in the text itself
+    const kind = box.dataset.kind;
+    const text = setTick((app.settings || {})[kind] || '', Number(box.dataset.hzTick), box.checked);
+    app.settings = { ...app.settings, [kind]: text };
+    app.render();
+    await saveSettings({ [kind]: text }, { quiet: true });
+    return true;
+  }
   const la = e.target.closest && e.target.closest('[data-hz-link-area]');
   const lg = e.target.closest && e.target.closest('[data-hz-link-goal]');
   if (!la && !lg) return false;

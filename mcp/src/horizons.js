@@ -1,5 +1,6 @@
 // Horizons of Focus and "What now?" for agents (same rules as the app: js/whatnow.js).
 import { rankNow, areaBalance, isDueForReview, bigReviewsDue } from '../../js/whatnow.js';
+import { parseText, counts, setTick, findTick } from '../../js/horizon-text.js';
 
 export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, calendar }) {
   // Link many projects in two requests (one lookup, one batched update): a per-project loop ran past
@@ -30,9 +31,11 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
         const s = api.settings || {};
         const big = bigReviewsDue({ settings: s, goals, areas, projects });
         const text = (v) => (include_text ? v || '' : String(v || '').split('\n')[0].slice(0, 200));
+        // Checkboxes in the text (lines that start with [ ]): how many, and which are still to tick.
+        const boxes = (v) => { const c = counts(v); return c.total ? { ticked: c.on, of: c.total, left: parseText(v).filter((l) => l.kind === 'check' && !l.on).map((l) => l.text).slice(0, 30) } : undefined; };
         return {
-          purpose: { text: text(s.purpose) || null, last_read: localDate(s.purpose_read_at, api.tz) },
-          vision: { year: s.vision_year || null, text: text(s.vision) || null, last_read: localDate(s.vision_read_at, api.tz) },
+          purpose: { text: text(s.purpose) || null, last_read: localDate(s.purpose_read_at, api.tz), checkboxes: boxes(s.purpose) },
+          vision: { year: s.vision_year || null, text: text(s.vision) || null, last_read: localDate(s.vision_read_at, api.tz), checkboxes: boxes(s.vision) },
           goals: goals.filter((g) => g.status === 'active').map((g) => {
             const ps = projects.filter((p) => p.goal_id === g.id && p.status !== 'dropped');
             return { id: g.id, title: g.title, why: g.why || undefined, target: g.target_date, area: (areas.find((a) => a.id === g.area_id) || {}).name || null, projects: ps.map((p) => p.name), done: ps.filter((p) => p.status === 'completed').length, review_due: isDueForReview(g) || undefined };
@@ -105,19 +108,31 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
     },
     {
       name: 'save_horizon',
-      description: 'Write the user\'s purpose and principles or their vision (3-5 years), in their words. read: true records that they read it today (the yearly read). kind quarterly with read: true records the quarterly check-in on goals and areas as done.',
-      inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['purpose', 'vision', 'quarterly'] }, text: { type: 'string' }, year: { type: 'integer', description: 'vision: the year it looks ahead to' }, read: { type: 'boolean' } }, required: ['kind'] },
+      description: 'Write the user\'s purpose and principles or their vision (3-5 years), in their words. In the text, a line that starts with [ ] is a checkbox the user ticks as they read ([x] = ticked); put one on the lines they want to check themselves against. tick / untick: the text of one checkbox, to tick it for them. read: true records that they read it today (the yearly read) and clears every tick, so the next read starts fresh. kind quarterly with read: true records the quarterly check-in on goals and areas as done.',
+      inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['purpose', 'vision', 'quarterly'] }, text: { type: 'string' }, year: { type: 'integer', description: 'vision: the year it looks ahead to' }, read: { type: 'boolean' }, tick: { type: 'string', description: 'The text of the checkbox to tick' }, untick: { type: 'string', description: 'The text of the checkbox to un-tick' } }, required: ['kind'] },
       async run(api, a) {
         const body = {};
         if (a.kind === 'quarterly') { if (!a.read) throw new Error('For the quarterly check-in, pass read: true once it is done'); body.horizons_quarter_at = new Date().toISOString(); }
         else if (a.text !== undefined) body[a.kind] = String(a.text);
         if (a.kind === 'vision' && a.year !== undefined) body.vision_year = a.year;
+        if ((a.tick !== undefined || a.untick !== undefined) && a.kind !== 'quarterly') {
+          await api.loadSettings();
+          let t = body[a.kind] !== undefined ? body[a.kind] : (api.settings || {})[a.kind] || '';
+          for (const [needle, on] of [[a.tick, true], [a.untick, false]]) {
+            if (needle === undefined) continue;
+            const i = findTick(t, needle);
+            if (i < 0) throw new Error(`No one checkbox matches “${needle}”. list_horizons (include_text) shows them; pass the line’s text.`);
+            t = setTick(t, i, on);
+          }
+          body[a.kind] = t;
+        }
         if (a.read && a.kind !== 'quarterly') body[`${a.kind}_read_at`] = new Date().toISOString();
-        if (!Object.keys(body).length) throw new Error('Pass text, year or read');
+        if (!Object.keys(body).length) throw new Error('Pass text, year, tick, untick or read');
         const had = (await api.q(`user_settings?${api.u}&select=user_id`)).length;
         if (had) await api.q(`user_settings?${api.u}`, { method: 'PATCH', body });
         else await api.q('user_settings', { method: 'POST', body: { user_id: api.userId, ...body } });
-        return { saved: Object.keys(body) };
+        const kept = a.kind !== 'quarterly' && body[a.kind] !== undefined ? counts(a.read ? '' : body[a.kind]) : null;
+        return { saved: Object.keys(body), ...(kept && kept.total ? { checkboxes: { ticked: kept.on, of: kept.total } } : {}), ...(a.read && a.kind !== 'quarterly' ? { ticks: 'cleared' } : {}) };
       },
     },
     {

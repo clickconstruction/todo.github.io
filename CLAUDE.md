@@ -43,6 +43,7 @@ Each call gets **50 outgoing requests** and **about 10 ms of CPU**, and the libr
 - `config.js` is committed and holds only the public publishable key. Never put a secret key in it. Local overrides go in `config.local.js` (gitignored, localhost only).
 - In SQL, `only` is a reserved word; don't use it as a parameter name.
 - Dailies (`tasks.daily`, `daily_ticks`, js/dailies.js, mcp/src/dailies.js): the rules both sides share (which days are asked for, the week, the summary line) live in `js/daily-rules.js`, which has no imports so the Worker can use it. A daily action has no dates or repeat rule (a trigger clears them), is never "available", and is ticked per day; un-ticking sets the tick to `cleared`, it is never deleted. *Have to* (`must`) may show a miss and appears in must-dos; *Should* (`should`) must never nag.
+- Horizons checkboxes (`js/horizon-text.js`, no imports, shared with the Worker): in the purpose and vision text a line starting with `[ ]` / `[x]` is a checkbox, and the ticks live in the text itself. A trigger clears them when `purpose_read_at` / `vision_read_at` changes; the JS pattern and the SQL pattern must match.
 - Events (`events` table, js/events.js, mcp/src/events.js): an all-day event is stored from local midnight of its first day to local midnight *after* its last day (end exclusive, as iCalendar does it), in the user's time zone. The app and the Worker both follow this; the feed emits `VALUE=DATE` for them.
 
 ## Full Review with the user
