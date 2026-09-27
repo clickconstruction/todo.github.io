@@ -73,6 +73,7 @@ export function viewSettings() {
     <a class="btn" href="#import">Import from OmniFocus</a>
     <h2 class="section-title">App</h2>
     <p class="view-sub" style="margin-bottom:8px">${app.appVersion ? `Version ${esc(app.appVersion)}. ` : ''}New versions install in the background and switch at a quiet moment. Check now to switch right away.</p>
+    <p class="hint" data-screen-info>${esc(screenInfo())}</p>
     <p class="set-inline"><button class="btn" data-act="check-updates" ${app.updateChecking ? 'disabled' : ''}>${app.updateChecking ? 'Checking…' : 'Check for updates'}</button>${app.updateNote ? `<span class="hint">${esc(app.updateNote)}</span>` : ''}</p>
     <h2 class="section-title">Account</h2>
     <button class="btn" data-act="sign-out">Sign out</button>`;
@@ -358,6 +359,24 @@ export async function newFeedLink() {
     <div class="actions"><div class="right"><button class="btn primary">Done</button></div></div></form>`);
   sheet.querySelectorAll('[data-copy-value]').forEach((b) => { b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copyValue); toast('Copied'); } catch { toast('Couldn’t copy'); } }; });
   sheet.showModal();
+}
+
+// This device, for support: viewport, safe-area insets, where the tab bar ends, and how the app is opened.
+function screenInfo() {
+  let inset = { top: 0, bottom: 0 };
+  try {
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)';
+    document.body.append(el);
+    const cs = getComputedStyle(el);
+    inset = { top: Math.round(parseFloat(cs.paddingTop) || 0), bottom: Math.round(parseFloat(cs.paddingBottom) || 0) };
+    el.remove();
+  } catch { /* fine */ }
+  const tabs = document.querySelector('.tabs');
+  const gap = tabs && getComputedStyle(tabs).position === 'fixed' ? Math.round(window.innerHeight - tabs.getBoundingClientRect().bottom) : null;
+  const vv = window.visualViewport ? Math.round(window.visualViewport.height) : null;
+  const how = navigator.standalone ? 'Home Screen app' : window.matchMedia('(display-mode: standalone)').matches ? 'installed app' : 'browser';
+  return `This device: ${window.innerWidth}×${window.innerHeight}${vv && vv !== window.innerHeight ? ` (visible ${vv})` : ''} · safe area top ${inset.top}, bottom ${inset.bottom}${gap != null ? ` · tab bar ends ${gap} px above the bottom` : ''} · ${how}.`;
 }
 
 // ---------- Calendars: private iCal links shown in Forecast ----------
