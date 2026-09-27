@@ -1575,3 +1575,10 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .hz-page .hz-h1:not(:first-child) { margin-top: 16px; }
 .hz-page strong { font-weight: 700; }
 .hz-page em { font-style: italic; }
+/* Horizons ladder: chips sit beside the level's name and never break across lines; the line under it is one line */
+.hz-title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.hz-ladder .chip { display: inline-block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.hz-sub { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+.hz-clip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hz-more { color: var(--muted); }
+.hz-meta { flex: none; white-space: nowrap; }

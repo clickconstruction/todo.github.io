@@ -56,14 +56,18 @@ export function viewHorizons(sub) {
   const due = horizonsDue().length;
   const big = bigDue();
   const g0 = goals[0];
-  const row = (href, alt, title, sub2) => `<a class="hz-level" href="${href}"><span class="hz-alt">${alt}</span><span class="hz-main"><b>${title}</b>${sub2 ? `<span class="hint">${sub2}</span>` : ''}</span><span class="hz-go">›</span></a>`;
+  // A level: its name with what needs you beside it (chips never break across lines), then one line under it:
+  // the words, cut with … when long, and what stays readable at any width (when it was read).
+  const row = (href, alt, title, sub2, { chips = '', meta = '' } = {}) => `<a class="hz-level" href="${href}"><span class="hz-alt">${alt}</span><span class="hz-main"><span class="hz-title"><b>${title}</b>${chips}</span>${sub2 ? `<span class="hint hz-sub"><span class="hz-clip">${sub2}</span>${meta ? `<span class="hz-meta">${meta}</span>` : ''}</span>` : ''}</span><span class="hz-go">›</span></a>`;
+  const yearly = (k) => (big.yearly.includes(k) ? '<span class="chip warn">yearly read due</span>' : '');
   return `<div class="view-head"><h1 class="horizons">Horizons</h1></div>
     <p class="view-sub">From why you do it down to what’s next. The higher levels change slowly; look at them monthly and yearly.</p>
     <div class="hz-ladder">
-      ${row('#horizons/purpose', '50k', 'Purpose and principles', s.purpose ? `${esc(firstLine(s.purpose).slice(0, 80))} · ${readAgo(s.purpose_read_at)}${big.yearly.includes('purpose') ? ' <span class="chip warn">yearly read due</span>' : ''}` : 'Why you do what you do. Write it once.')}
-      ${row('#horizons/vision', '40k', `Vision${s.vision_year ? ` · ${s.vision_year}` : ''}`, s.vision ? `“${esc(firstLine(s.vision).slice(0, 80))}” · ${readAgo(s.vision_read_at)}${big.yearly.includes('vision') ? ' <span class="chip warn">yearly read due</span>' : ''}` : 'What success looks like in 3 to 5 years.')}
-      ${row(big.quarterly ? '#horizons/quarterly' : '#horizons/goals', '30k', `Goals · ${goals.length} active${big.quarterly ? ' <span class="chip warn">quarterly check-in due</span>' : ''}`, g0 ? `${esc(g0.title)} <span class="chip">${goalProgress(g0).done} of ${goalProgress(g0).total}</span>` : '1–2 year objectives your projects serve.')}
-      ${row('#horizons/areas', '20k', `Areas of focus · ${areas.length}`, quiet.length ? quiet.slice(0, 2).map((a) => `<span class="chip warn">${esc(a.name)}: ${esc(balanceOf(a).warnings[0])}</span>`).join(' ') : areas.length ? 'All in balance.' : 'Responsibilities you keep up: work, health, family, home.')}
+      ${s.purpose ? row('#horizons/purpose', '50k', 'Purpose and principles', esc(firstLine(s.purpose).slice(0, 200)), { chips: yearly('purpose'), meta: `· ${esc(readAgo(s.purpose_read_at))}` }) : row('#horizons/purpose', '50k', 'Purpose and principles', 'Why you do what you do. Write it once.')}
+      ${s.vision ? row('#horizons/vision', '40k', `Vision${s.vision_year ? ` · ${s.vision_year}` : ''}`, `“${esc(firstLine(s.vision).slice(0, 200))}”`, { chips: yearly('vision'), meta: `· ${esc(readAgo(s.vision_read_at))}` }) : row('#horizons/vision', '40k', `Vision${s.vision_year ? ` · ${s.vision_year}` : ''}`, 'What success looks like in 3 to 5 years.')}
+      ${row(big.quarterly ? '#horizons/quarterly' : '#horizons/goals', '30k', `Goals · ${goals.length} active`, g0 ? esc(g0.title) : '1–2 year objectives your projects serve.', { chips: big.quarterly ? '<span class="chip warn">quarterly check-in due</span>' : '', meta: g0 ? `· ${goalProgress(g0).done} of ${goalProgress(g0).total} projects` : '' })}
+      ${row('#horizons/areas', '20k', `Areas of focus · ${areas.length}`, quiet.length ? esc(quiet[0].name) : areas.length ? 'All in balance.' : 'Responsibilities you keep up: work, health, family, home.',
+        quiet.length ? { meta: `<span class="chip warn">${esc(balanceOf(quiet[0]).warnings[0])}</span>${quiet.length > 1 ? ` <span class="hz-more">+${quiet.length - 1} more</span>` : ''}` } : {})}
       ${row('#projects', '10k', `Projects · ${live.length} active`, noOutcome ? `${noOutcome} without a “done looks like”` : 'Every project says what done looks like.')}
       ${row('#now', 'Runway', `Actions · ${open}`, `${available} available now · What now? →`)}
     </div>

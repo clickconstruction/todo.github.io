@@ -457,6 +457,13 @@ async function horizonChecks(check) {
 
   app.hzEdit = null; await go('#horizons'); 
   check('the ladder shows the first line that says something, not the heading or brackets', has(undefined, 'survive and replicate') && !has(undefined, '[x]'));
+  const oneLine = (el) => !!el && el.getClientRects().length === 1 && el.getBoundingClientRect().height < 34;
+  const lvl = $('.hz-level[href="#horizons/purpose"]');
+  check('the ladder: "yearly read due" sits beside the name, whole, and the line under it is one line', oneLine($('.chip.warn', lvl)) && $('.hz-title', lvl).contains($('.chip.warn', lvl)) && oneLine($('.hz-clip', lvl)) && has('.hz-level[href="#horizons/purpose"] .hz-meta', 'not read yet') && $('.hz-sub', lvl).getBoundingClientRect().height < 30, lvl.innerText);
+  const long = T().user_settings[0].purpose; (await import('/js/prefs.js')).saveSettings({ purpose: `Survive and replicate: to have as many successful kids as possible, and extend my life as much as possible, for as long as possible.\n${long}` }, { quiet: true }); await wait(200); (await import('/js/router.js')).render(); await wait(100);
+  const lvl2 = $('.hz-level[href="#horizons/purpose"]');
+  check('a long first line is cut with …, and nothing wraps or spills', $('.hz-clip', lvl2).scrollWidth > $('.hz-clip', lvl2).clientWidth && oneLine($('.chip.warn', lvl2)) && oneLine($('.hz-meta', lvl2)) && $('.hz-sub', lvl2).getBoundingClientRect().height < 30 && lvl2.scrollWidth <= lvl2.clientWidth + 1, lvl2.innerText);
+  (await import('/js/prefs.js')).saveSettings({ purpose: long }, { quiet: true }); await wait(200);
   await go('#horizons/purpose');
   check('coming back, the ticks are still there', boxes().length === 3 && boxes()[0].checked && has(undefined, '1 of 3 ticked'));
 
