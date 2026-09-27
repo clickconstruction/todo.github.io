@@ -584,8 +584,8 @@
             tables.task_tags = tables.task_tags.filter((l) => !(l.task_id === t.id && (s.remove_tag_ids || []).includes(l.tag_id)));
             t.updated_at = now();
             if (Array.isArray(s.steps) && s.steps.length && ['keep', 'someday'].includes(s.decision)) { // mirrors migration 20261020000001
-              const base = Math.max(-1, ...tables.tasks.filter((c) => c.parent_id === t.id).map((c) => c.sort || 0)) + 1;
-              const ids = s.steps.map((x) => String(x).trim()).filter(Boolean).map((title, i) => { const row = { ...DEFAULTS.tasks(), id: id(), user_id: uid, title, parent_id: t.id, project_id: t.project_id, in_inbox: false, sort: base + i, created_at: now(), updated_at: now() }; tables.tasks.push(row); return row.id; });
+              const addSteps = (parent, list) => { const base = Math.max(-1, ...tables.tasks.filter((c) => c.parent_id === parent.id).map((c) => c.sort || 0)) + 1; let i = 0; return list.flatMap((x) => { const o = x && typeof x === 'object' ? x : { title: x }; const title = String(o.title || '').trim(); if (!title) return []; const row = { ...DEFAULTS.tasks(), id: id(), user_id: uid, title, parent_id: parent.id, project_id: parent.project_id, in_inbox: false, sort: base + i++, steps_in_order: !!o.in_order, created_at: now(), updated_at: now() }; tables.tasks.push(row); return [row.id, ...(Array.isArray(o.steps) ? addSteps(row, o.steps) : [])]; }); }; // mirrors 20261028000001 (nested)
+              const ids = addSteps(t, s.steps);
               stepsSnap = { t: 'steps', id: t.id, ids, steps_in_order: !!t.steps_in_order };
               if ('steps_in_order' in s) t.steps_in_order = !!s.steps_in_order;
             }

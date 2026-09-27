@@ -40,9 +40,24 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
     const hours = { planned: api.hours.planned, due: api.hours.due, defer: api.hours.defer };
     ['planned', 'due', 'defer'].forEach((k) => { if (a[k] !== undefined) s[k] = a[k] === null || a[k] === '' ? null : zonedToIso(a[k], hours[k], api.tz); });
     if (a.flagged !== undefined) s.flagged = !!a.flagged;
-    if (a.steps !== undefined) { // break it down: added under the action on Submit (keep / someday only)
-      const steps = (Array.isArray(a.steps) ? a.steps : []).map((x) => String(x || '').trim().slice(0, 500)).filter(Boolean);
-      if (steps.length > 40) throw new Error('At most 40 steps in one suggestion.');
+    if (a.steps !== undefined) { // break it down: added under the action on Submit (keep / someday only); a step can carry its own steps
+      let count = 0;
+      const norm = (list, depth) => (Array.isArray(list) ? list : []).map((x) => {
+        const o = x && typeof x === 'object' ? x : { title: x };
+        const title = String(o.title || '').trim().slice(0, 500);
+        if (!title) return null;
+        count += 1;
+        const out = { title };
+        if (o.in_order !== undefined) out.in_order = !!o.in_order;
+        if (Array.isArray(o.steps) && o.steps.length) {
+          if (depth >= 3) throw new Error('Steps can nest three levels under the card (four levels in all).');
+          const kids = norm(o.steps, depth + 1);
+          if (kids.length) out.steps = kids;
+        }
+        return Object.keys(out).length === 1 ? title : out; // a plain title stays a string
+      }).filter(Boolean);
+      const steps = norm(a.steps, 1);
+      if (count > 80) throw new Error('At most 80 steps in one suggestion.');
       if (steps.length && !['keep', 'someday'].includes(a.decision)) throw new Error('Steps go with keep or someday.');
       if (steps.length) s.steps = steps;
     }
@@ -121,7 +136,7 @@ Draft ahead: call "upcoming" and "suggest" with items [...] for the next few car
 actions:
   start {import_id | project | all:true, min_age_days?, title?} → a new session (give the user app_link)
   status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
-  suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down), steps_in_order?, mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
+  suggest {decision, title?, gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down; a step can be {title, steps: [...], in_order?} to nest), steps_in_order?, mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
   submit {item_id? (default current)} → apply the pending suggestion as the app's Submit does (only when the user says "submit"), then the next card
   upcoming {count? ≤10} → the next cards in full, for drafting ahead
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
@@ -141,7 +156,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
         all: { type: 'boolean' }, min_age_days: { type: 'integer' }, title: { type: 'string' },
         gain: { type: 'string' }, gain_suggested: { type: 'boolean' },
         tags: { type: 'array', items: { type: 'string' } }, add_tags: { type: 'array', items: { type: 'string' } }, remove_tags: { type: 'array', items: { type: 'string' } },
-        steps: { type: 'array', items: { type: 'string' }, description: 'suggest: break the action down: step titles, first to last (added on Submit)' },
+        steps: { type: 'array', items: { type: ['string', 'object'], properties: { title: { type: 'string' }, steps: { type: 'array' }, in_order: { type: 'boolean' } } }, description: 'suggest: break the action down: step titles, first to last (added on Submit). A step can be {title, steps: [...], in_order?} to carry its own steps, three levels under the card.' },
         mac_folder: { type: ['string', 'null'], description: 'suggest: a folder on the user\'s Mac for the action\'s files (e.g. ~/_SYNC/MAGA/_Todo/<action>); null to clear' }, steps_in_order: { type: 'boolean', description: 'suggest: only the first open step is available' },
         planned: { type: ['string', 'null'] }, due: { type: ['string', 'null'] }, defer: { type: ['string', 'null'] },
         flagged: { type: 'boolean' }, note: { type: 'string', description: 'One line: why you changed or decided it, shown on the card' },

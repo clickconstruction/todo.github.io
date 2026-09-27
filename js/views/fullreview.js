@@ -205,7 +205,8 @@ function suggestionBar(it, t) {
     if (s.add_tag_labels && s.add_tag_labels.length) row('🏷', `Add tags: ${s.add_tag_labels.map(esc).join(', ')}`);
     if (s.remove_tag_labels && s.remove_tag_labels.length) row('🏷', `Remove tags: ${s.remove_tag_labels.map(esc).join(', ')}`);
     if (Array.isArray(s.steps) && s.steps.length && ['keep', 'someday'].includes(s.decision)) {
-      row('🪜', `Break it down: ${s.steps.length} step${s.steps.length === 1 ? '' : 's'}${s.steps_in_order ? ', in order' : ''}${stepsOf(t).length ? ` <span class="hint">(after the ${stepsOf(t).length} it has)</span>` : ''}<ol class="sg-steps">${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>`);
+      const n = countSteps(s.steps);
+      row('🪜', `Break it down: ${n} step${n === 1 ? '' : 's'}${s.steps_in_order ? ', in order' : ''}${n > s.steps.length ? ' <span class="hint">(nested)</span>' : ''}${stepsOf(t).length ? ` <span class="hint">(after the ${stepsOf(t).length} it has)</span>` : ''}${stepsHtml(s.steps)}`);
     }
     row('✓', `<b>${esc(DECISION_LABEL[s.decision] || s.decision)}</b>${s.decision === 'keep' ? ` in ${esc(s.project_name || (p ? p.name : 'no project'))}` : ''}`);
   }
@@ -215,6 +216,10 @@ function suggestionBar(it, t) {
     <div class="sg-btns"><button class="btn primary" data-fr="submit">Submit <kbd>⏎</kbd></button><button class="btn" data-fr="edit-suggestion">Edit</button><button class="btn" data-fr="dismiss">Dismiss</button></div>
   </div>`;
 }
+
+// A suggestion's steps: titles, or {title, steps, in_order} that nest.
+const countSteps = (list) => list.reduce((n, x) => n + 1 + (x && typeof x === 'object' && Array.isArray(x.steps) ? countSteps(x.steps) : 0), 0);
+const stepsHtml = (list) => `<ol class="sg-steps">${list.map((x) => { const o = x && typeof x === 'object' ? x : { title: x }; return `<li>${esc(o.title)}${o.in_order ? ' <span class="hint">in order</span>' : ''}${Array.isArray(o.steps) && o.steps.length ? stepsHtml(o.steps) : ''}</li>`; }).join('')}</ol>`;
 
 // Steps (a task's own open steps, in order), shown on the card; done ones counted.
 const stepsOf = (t) => db.tasks.filter((c) => c.parent_id === t.id && isOpen(c)).sort((a, b) => (a.sort - b.sort) || String(a.created_at).localeCompare(String(b.created_at)));

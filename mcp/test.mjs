@@ -1221,6 +1221,11 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(s1.suggestion.steps.join('|') === 'Cut out the spot|Run power|Insulate' && s1.suggestion.steps_in_order === true && !db.tasks.some((t) => t.parent_id === S1 && t.title === 'Run power'), 'suggest steps: blanks skipped, in order, nothing added until Submit');
   let bad4 = ''; try { await tool('full_review', { action: 'suggest', decision: 'drop', steps: ['x'] }); } catch (e) { bad4 = e.message; }
   assert(/Steps go with keep or someday/.test(bad4), 'steps only with keep / someday');
+  await tool('full_review', { action: 'suggest', decision: 'keep', steps: ['North Pole', { title: 'Kilimanjaro', in_order: true, steps: ['Book the guide', { title: 'Train', steps: ['Weekly long hike', ' '] }] }, { title: 'Everest' }] });
+  const ns = s1.suggestion.steps;
+  assert(ns[0] === 'North Pole' && ns[1].title === 'Kilimanjaro' && ns[1].in_order === true && ns[1].steps[0] === 'Book the guide' && ns[1].steps[1].steps.join('|') === 'Weekly long hike' && ns[2] === 'Everest', 'suggest steps can nest: plain titles stay strings, objects keep their steps, blanks skipped');
+  let bad5 = ''; try { await tool('full_review', { action: 'suggest', decision: 'keep', steps: [{ title: 'A', steps: [{ title: 'B', steps: [{ title: 'C', steps: ['D'] }] }] }] }); } catch (e) { bad5 = e.message; }
+  assert(/three levels/.test(bad5), 'a fourth level under the card is refused');
   await tool('full_review', { action: 'suggest', decision: 'keep', mac_folder: '~/_SYNC/MAGA/_Todo/Gate latch' });
   assert(s1.suggestion.folder === '~/_SYNC/MAGA/_Todo/Gate latch', 'suggest mac_folder');
   await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Fix the gate latch before winter', gain: 'Goats stay in', project: 'Estate and legacy', planned: '2026-10-05', flagged: false, add_tags: ['Brand new tag'], note: 'You said before the cold snap' });

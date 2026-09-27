@@ -1500,3 +1500,4 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .ptr.busy { color: var(--text); }
 .ptr.busy::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-right: 8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; animation: ptr-spin .8s linear infinite; }
 @keyframes ptr-spin { to { transform: rotate(360deg); } }
+.sg-steps .sg-steps { margin: 2px 0 2px 16px; padding-left: 18px; }

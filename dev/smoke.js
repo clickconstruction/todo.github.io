@@ -445,6 +445,17 @@ async function fullReview(check) {
   key('u'); await until(() => !!$('.sg-bar') && has(undefined, 'update my will'));
   check('Undo drops the steps (not deleted) and the card shows none', fwSteps.every((x) => x.dropped_at) && t.tasks.filter((x) => x.parent_id === 'fW').length === 3 && !$('.fr-steps') && !t.tasks.find((x) => x.id === 'fW').steps_in_order);
   $('[data-fr="dismiss"]').click(); await until(() => !$('.sg-bar'));
+  // Nested steps in a suggestion: shown as a tree; Submit builds the tree; Undo drops all of it.
+  Object.assign(cur, { suggestion: { decision: 'keep', steps: ['North Pole', { title: 'Kilimanjaro', in_order: true, steps: ['Book the guide', { title: 'Train', steps: ['Weekly long hike'] }] }], at: new Date().toISOString() }, updated_at: new Date().toISOString() });
+  await until(() => !!$('.sg-bar .sg-steps .sg-steps'));
+  check('nested steps: counted and shown as a tree', has('.sg-bar', 'break it down: 5 steps', '(nested)', 'kilimanjaro', 'in order') && $$('.sg-bar .sg-steps .sg-steps .sg-steps li').map((li) => li.textContent).join() === 'Weekly long hike');
+  key('Enter'); await until(() => t.tasks.some((x) => x.title === 'Weekly long hike') && has(undefined, 'group · 14 actions'));
+  const kili = t.tasks.find((x) => x.title === 'Kilimanjaro' && x.parent_id === 'fW');
+  const train = t.tasks.find((x) => x.title === 'Train' && kili && x.parent_id === kili.id);
+  check('Submit builds the tree: step, its steps (in order), and a step under those', !!kili && kili.steps_in_order && !!train && t.tasks.some((x) => x.title === 'Weekly long hike' && x.parent_id === train.id) && t.tasks.some((x) => x.title === 'North Pole' && x.parent_id === 'fW'));
+  key('u'); await until(() => !!$('.sg-bar') && has(undefined, 'update my will'));
+  check('Undo drops the whole tree', ['North Pole', 'Kilimanjaro', 'Book the guide', 'Train', 'Weekly long hike'].every((title) => t.tasks.find((x) => x.title === title && x.dropped_at)));
+  $('[data-fr="dismiss"]').click(); await until(() => !$('.sg-bar'));
   key('b'); await until(() => $('#sheet2').open && has('#sheet2', 'break it down'));
   check('B opens Break it down on the card', $('#sheet2').open && has('#sheet2', 'break it down'));
   $('#sheet2').close(); await wait(30);
