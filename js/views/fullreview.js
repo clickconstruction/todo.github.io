@@ -10,7 +10,7 @@ import { fmtDate } from '../dates.js';
 import { buildQueue, priorityReason, proposalText } from '../review.js';
 import { folderButton, shortPath } from '../folders.js';
 
-const F = () => (app.fr ||= { id: null, session: null, items: [], byId: new Map(), undo: [], loading: false });
+const F = () => (app.fr ||= { id: null, session: null, items: [], byId: new Map(), peek: null, loading: false });
 
 // "Which one?": a line per choice under the buttons; the one you hover or tab to lights up.
 // Shown until you hide it (remembered on this device); "? Which one" brings it back.
@@ -128,9 +128,12 @@ async function onSession(row, { quiet = false } = {}) {
   const f = F();
   if (!row) return;
   const moved = f.session && f.session.current_item !== row.current_item;
+  const left = moved ? f.session.current_item : null;
   const before = f.session && `${f.session.agent_seen_at}|${f.session.agent_status}|${f.session.status}`;
   f.session = row;
   if (moved) { const it = f.byId.get(row.current_item); if (it) await refreshCard(it); }
+  // The card just left was decided somewhere (here, another device, Claude): fetch it, so Undo and Back know.
+  if (left) { const [was] = await run(sb.from('review_items').select('*').eq('id', left)); if (was) { const old = f.byId.get(was.id); if (old) Object.assign(old, was); } }
   if (moved || !quiet || before !== `${row.agent_seen_at}|${row.agent_status}|${row.status}`) redraw();
 }
 async function refreshCard(it) {
@@ -156,6 +159,86 @@ export const resumePrompt = (s) => `Let's continue my Full Review in Todo Toolin
 Use the full_review tool (Todo Tooling MCP). Start with action "status" and tell me the current card.
 
 How we work: I tell you what to do with each card in a few words. You turn it into a suggestion (action "suggest") on the current card, and I press Submit in the app. When I say "submit" (for example "submit, next card"), press Submit for me (action "submit"). Only apply changes directly if I say "just do it". Name the card in every reply, because I may have moved on in the app. Draft ahead with "upcoming" and "suggest" when I ask. Nothing gets deleted; drop means drop.`;
+
+// ---------- undo and looking back ----------
+// Undo follows the review, not this tab: it takes back the card decided last, whoever decided it (you here,
+// you on another device, Claude pressing Submit for you), and it still knows after a reload. Pressed again it
+// takes back the one before. Back looks at decided cards without changing anything.
+const isDecided = (x) => (x.status === 'reviewed' || x.status === 'skipped') && !!x.reviewed_at;
+const decidedList = () => F().items.filter(isDecided).sort((a, b) => String(b.reviewed_at).localeCompare(String(a.reviewed_at)));
+const short = (text, max = 38) => { const t = String(text || '').replace(/\s+/g, ' ').trim(); return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t; };
+function cardTitle(it) {
+  if (!it) return '';
+  if (it.kind === 'group') return (it.grp && it.grp.label) || 'Similar actions';
+  const t = byId(db.tasks, it.task_id);
+  return t ? t.title : '';
+}
+// What an Undo gave back, in words, from the card's own record of how things were (review_items.before).
+function restoredText(it, t) {
+  const out = [];
+  const same = (a, b) => (a || null) === (b || null) || (a && b && Date.parse(a) === Date.parse(b));
+  (it.before || []).forEach((e) => {
+    if (e.t === 'fields' && t) {
+      if (e.title !== t.title) out.push('its title');
+      if ('notes' in e && (e.notes || '') !== (t.notes || '')) out.push('its notes');
+      if ((e.gain || '') !== (t.gain || '')) out.push('its gain');
+      if ((e.project_id || null) !== (t.project_id || null)) out.push('its project');
+      if (!same(e.due_at, t.due_at)) out.push(e.due_at ? `due ${when(e.due_at)}` : 'no due date');
+      if (!same(e.planned_at, t.planned_at)) out.push(e.planned_at ? `planned ${when(e.planned_at)}` : 'no planned date');
+      if (!same(e.defer_at, t.defer_at)) out.push(e.defer_at ? `deferred to ${when(e.defer_at)}` : 'no defer date');
+      if (!!e.flagged !== !!t.flagged) out.push(e.flagged ? 'its flag' : 'no flag');
+      const now = tagsFor(t.id).map((g) => g.id).sort().join(); if ((e.tags || []).slice().sort().join() !== now) out.push('its tags');
+    }
+    if (e.t === 'daily') out.push(e.daily ? 'its daily setting' : e.repeat_rule ? 'its repeat, not daily' : 'not daily');
+    if (e.t === 'steps') out.push(`the ${n((e.ids || []).length)} added step${(e.ids || []).length === 1 ? '' : 's'} dropped`);
+    if (e.t === 'checklist') out.push(e.prev ? 'its earlier checklist' : 'no checklist');
+    if (e.t === 'task' && (it.decision === 'done' || it.decision === 'drop')) out.push('open again');
+    if (e.t === 'someday_tag') out.push('out of Someday');
+    if (e.t === 'reading') out.push('off Reading & watching');
+    if (e.t === 'slipbox') out.push('its Slipbox note archived');
+  });
+  return [...new Set(out)];
+}
+async function undoCard(id) {
+  const f = F(); const s = f.session;
+  const [row] = await run(sb.from('review_items').select('*').eq('id', id));
+  if (!row || !isDecided(row)) { if (row && f.byId.get(id)) Object.assign(f.byId.get(id), row); f.peek = null; app.render(); toast('That card is already undecided'); return; }
+  if (f.byId.get(id)) Object.assign(f.byId.get(id), row);
+  const heavy = row.kind === 'group' || (row.before || []).some((e) => e.t === 'expanded' || (e.t === 'someday_tag' && (e.ids || []).length > 1));
+  if (!heavy) await refreshCard(row); // how it is now, to say what comes back
+  const title = cardTitle(row);
+  const back = heavy ? [] : restoredText(row, byId(db.tasks, row.task_id));
+  const label = DECISION_LABEL[row.decision] || row.decision || 'decided';
+  await run(sb.rpc('review_undo', { item: id }));
+  f.peek = null;
+  if (heavy) { await loadAll(); await loadSession(s.id); } else {
+    // Only this card changed: its row, its action, the session's place. No need to read the whole review again.
+    const [[it], [ses]] = await Promise.all([run(sb.from('review_items').select('*').eq('id', id)), run(sb.from('review_sessions').select('*').eq('id', s.id))]);
+    if (it && f.byId.get(id)) Object.assign(f.byId.get(id), it);
+    if (ses) f.session = ses;
+    await refreshCard(row);
+    if ((row.before || []).some((e) => e.t === 'checklist')) db.checklists = await run(sb.from('checklists').select('*').order('sort'));
+    if (row.decision === 'slipbox') db.slipbox = await run(sb.from('slipbox_notes').select('*').is('archived_at', null));
+    app.render();
+  }
+  toast(`Undone “${short(cardTitle(row) || title, 44)}”: ${label.replace(/^→ /, '')} taken back${back.length ? ` · ${back.slice(0, 4).join(', ')}${back.length > 4 ? '…' : ''} restored` : ''}`);
+}
+// Back / Forward through the decided cards, newest first; past the newest is the current card again.
+async function look(dir) {
+  const f = F(); const list = decidedList();
+  const i = f.peek ? list.findIndex((x) => x.id === f.peek) : -1;
+  const j = i + (dir === 'back' ? 1 : -1);
+  if (dir === 'back' && j >= list.length) { toast('That’s the first card you decided'); return; }
+  f.peek = j < 0 ? null : list[j].id;
+  if (f.peek) await refreshCard(list[j]); // it may have been closed a while ago and not be loaded
+  app.render();
+}
+function lookingBar(it, list) {
+  const i = list.findIndex((x) => x.id === it.id);
+  const groupLater = it.kind === 'group' && i > 0; // a group's Undo is only safe while nothing was decided after it
+  return `<div class="fr-look" role="status"><span><b>Looking back</b> · ${esc(DECISION_LABEL[it.decision] || it.decision || 'decided')}${it.decided_by === 'agent' ? ' by Claude' : ''} · ${esc(ago(it.reviewed_at))} <span class="hint">· ${n(i + 1)} back of ${n(list.length)}</span></span>
+    <span class="fr-look-btns"><button class="btn small" data-fr="undo" data-id="${it.id}" ${groupLater ? 'disabled title="Undo the cards decided after this group first"' : ''}>↶ Undo this card</button><button class="btn small primary" data-fr="look-now">Current card →</button></span></div>`;
+}
 
 // ---------- view ----------
 // Claude only acts when you message it, so "connected" is about the conversation, not a live socket:
@@ -321,6 +404,12 @@ export function viewFullReview(id) {
   const cur = s.current_item && f.byId.get(s.current_item);
   const pos = cur ? live.filter((x) => x.sort <= cur.sort).length : live.length;
   const seen = claudeSeen(s);
+  const decided = decidedList();
+  if (f.peek && !decided.some((x) => x.id === f.peek)) f.peek = null; // undone meanwhile
+  const peek = f.peek && f.byId.get(f.peek);
+  const last = decided[0];
+  const undoBtn = (cls = 'btn small') => `<button class="${cls}" data-fr="undo" ${last ? `title="Take back the last decision (U)"` : 'disabled'}>↶ Undo${last && cardTitle(last) ? `: ${esc(short(cardTitle(last)))}` : ''}</button>`;
+  const backBtn = `<button class="btn small" data-fr="look-back" ${decided.length && (!peek || decided[decided.length - 1].id !== peek.id) ? '' : 'disabled'} title="Look at the card before, without changing anything (←)">← Back</button>`;
   const head = `<div class="fr-head"><div><b>${esc(s.title)}</b> <span class="hint">· ${n(pos)} of ${n(live.length)} · ${n(done)} reviewed${skipped ? ` · ${n(skipped)} skipped` : ''}</span></div>
       <span class="fr-pres ${seen === 'away' ? '' : 'on'} ${seen}">${presenceHtml(s)}</span>
       <button class="btn small fr-copy${seen === 'away' ? ' primary' : ''}" data-fr="invite" title="Copy the prompt that starts or resumes this review with Claude">⧉ Prompt for Claude</button>
@@ -329,12 +418,17 @@ export function viewFullReview(id) {
   if (!cur) {
     return `<div class="fr">${head}<button class="fab fr-fab" data-fr="capture" aria-label="Capture an idea (added to this review)">+</button><div class="cl-done"><div class="cl-big">✓</div><h2>All reviewed</h2>
       <p>${n(done)} decided${skipped ? `, ${n(skipped)} skipped` : ''}.</p>
-      <p>${skipped ? '<button class="btn" data-fr="reopen-skipped">Go through the skipped ones</button> ' : ''}${f.undo.length ? '<button class="btn" data-fr="undo">↶ Undo last</button>' : ''}</p></div></div>`;
+      <p>${skipped ? '<button class="btn" data-fr="reopen-skipped">Go through the skipped ones</button> ' : ''}${last && !peek ? `${backBtn} ${undoBtn('btn')}` : ''}</p></div>${peek ? `${lookingBar(peek, decided)}<div class="fr-looking">${peek.kind === 'group' ? groupCard(peek) : taskCard(peek)}</div><div class="cl-bar">${backBtn}<span class="hint cl-keys">← back · → forward · u undo this card</span><button class="btn small" data-fr="look-forward">Forward →</button></div>` : ''}</div>`;
+  }
+  if (peek) {
+    return `<div class="fr">${head}${lookingBar(peek, decided)}
+    <div class="fr-looking">${peek.kind === 'group' ? groupCard(peek) : taskCard(peek)}</div>
+    <div class="cl-bar">${backBtn}<span class="hint cl-keys">← back · → forward · u undo this card · Esc close</span><button class="btn small" data-fr="look-forward">Forward →</button></div></div>`;
   }
   return `<div class="fr">${head}
     <button class="fab fr-fab" data-fr="capture" aria-label="Capture an idea (added to this review)" title="Capture an idea: it's added to this review as a later card (N)">+</button>
     ${cur.kind === 'group' ? groupCard(cur) : taskCard(cur)}
-    <div class="cl-bar"><button class="btn small" data-fr="undo" ${f.undo.length ? '' : 'disabled'}>↶ Undo</button><span class="hint cl-keys">1–6 decide · s skip · u undo · b break down · n capture · Esc close</span><button class="btn small" data-fr="decide" data-decision="skip">Skip →</button></div></div>`;
+    <div class="cl-bar"><span class="fr-back-undo">${backBtn}${undoBtn()}</span><span class="hint cl-keys">1–6 decide · s skip · u undo · ← back · b break down · n capture · Esc close</span><button class="btn small" data-fr="decide" data-decision="skip">Skip →</button></div></div>`;
 }
 
 // ---------- capture during the review ----------
@@ -379,6 +473,10 @@ export async function fullReviewAction(el) {
     return;
   }
   if (a === 'capture') { captureIntoReview(); return; }
+  if (a === 'look-back' || a === 'look-forward') { await look(a === 'look-back' ? 'back' : 'forward'); return; }
+  if (a === 'look-now') { f.peek = null; app.render(); return; }
+  // Looking back changes nothing: the card's own buttons belong to the current card, so they do nothing here.
+  if (f.peek && a !== 'undo') return;
   if (a === 'notes-toggle') { // remembered for this card, so a live update doesn't fold it back
     const cur = s && f.byId.get(s.current_item);
     const d = el.closest('details');
@@ -441,10 +539,10 @@ async function act(a, el) {
     const r = await run(sb.rpc('review_apply', { item: cur.id }));
     const bulk = cur.kind === 'group' && sug.decision === 'accept';
     const reload = bulk || !!(sug.add_tag_names && sug.add_tag_names.length) || !!sug.checklist; // new tags or a new checklist: load them
-    f.undo.push({ id: cur.id, kind: cur.kind, task_id: cur.task_id, bulk: reload });
     if (reload) await loadAll(); else if (cur.kind === 'task') await refreshCard(cur);
     if (sug.decision === 'one_by_one' || bulk) { await loadSession(s.id); return; }
-    cur.status = sug.decision === 'skip' ? 'skipped' : 'reviewed'; cur.decision = sug.decision; cur.suggestion = { ...sug, applied_at: new Date().toISOString() };
+    cur.status = sug.decision === 'skip' ? 'skipped' : 'reviewed'; cur.decision = sug.decision; cur.decided_by = 'user'; cur.reviewed_at = new Date().toISOString(); cur.suggestion = { ...sug, applied_at: new Date().toISOString() };
+    run(sb.from('review_items').select('*').eq('id', cur.id)).then(([row]) => { if (row) Object.assign(cur, row); }).catch(() => {}); // its record of how things were, for Undo's message
     f.session = { ...s, current_item: r.next, status: r.next ? 'active' : 'done' };
     const nx = r.next && f.byId.get(r.next);
     if (nx) await refreshCard(nx);
@@ -452,12 +550,12 @@ async function act(a, el) {
     return;
   }
   if (a === 'undo') {
-    const last = f.undo.pop();
-    if (!last) return;
-    await run(sb.rpc('review_undo', { item: last.id }));
-    if (last.bulk) await loadAll(); else await refreshCard(last);
-    await loadSession(s.id);
-    toast('Undone');
+    // The card asked for (looking back), else the one decided last: asked of the database, so a decision made
+    // on another device or by Claude a moment ago counts.
+    let id = el.dataset.id || null;
+    if (!id) { const [row] = await run(sb.from('review_items').select('*').eq('session_id', s.id).not('reviewed_at', 'is', null).order('reviewed_at', { ascending: false }).limit(1)); id = row && isDecided(row) ? row.id : null; }
+    if (!id) { toast('Nothing to undo'); return; }
+    await undoCard(id);
     return;
   }
   if (a === 'decide') {
@@ -467,12 +565,11 @@ async function act(a, el) {
     el.disabled = true;
     const r = await run(sb.rpc('review_decide', { item: cur.id, decision, by: 'user' }));
     const bulk = cur.kind === 'group' && decision === 'accept';
-    f.undo.push({ id: cur.id, kind: cur.kind, task_id: cur.task_id, bulk });
     if (bulk) await loadAll(); else if (cur.kind === 'task') await refreshCard(cur);
     if (decision === 'slipbox') db.slipbox = await run(sb.from('slipbox_notes').select('*').is('archived_at', null));
     if (decision === 'one_by_one' || bulk) await loadSession(s.id);
     else {
-      cur.status = decision === 'skip' ? 'skipped' : 'reviewed'; cur.decision = decision;
+      cur.status = decision === 'skip' ? 'skipped' : 'reviewed'; cur.decision = decision; cur.decided_by = 'user'; cur.reviewed_at = new Date().toISOString();
       f.session = { ...s, current_item: r.next, status: r.next ? 'active' : 'done' };
       const nx = r.next && f.byId.get(r.next);
       if (nx) await refreshCard(nx);
@@ -481,10 +578,12 @@ async function act(a, el) {
   }
 }
 
-// Keys on the review screen: 1–6 decide, s skip, u undo, b break down, n capture, Esc close.
+// Keys on the review screen: 1–6 decide, s skip, u undo, ← → look back and forward, b break down, n capture, Esc close.
 export function fullReviewKey(e) {
   if (!location.hash.startsWith('#full/') || e.metaKey || e.ctrlKey || e.altKey) return false;
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return false;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { const b = document.querySelector(`[data-fr="${e.key === 'ArrowLeft' ? 'look-back' : 'look-forward'}"]`); if (b && !b.disabled) { e.preventDefault(); b.click(); } return true; }
+  if (F().peek && e.key !== 'u' && e.key !== 'Escape') return true; // looking back: only Undo, the arrows and Esc (and no other shortcut)
   if (e.key === 'n') { e.preventDefault(); captureIntoReview(); return true; }
   if (e.key === 'b') { const b = document.querySelector('[data-fr="breakdown"]'); if (b) { e.preventDefault(); b.click(); return true; } }
   if (e.key === 'Enter' && !/SUMMARY|BUTTON|A/.test(document.activeElement.tagName)) { const b = document.querySelector('[data-fr="submit"]'); if (b) { e.preventDefault(); b.click(); return true; } }

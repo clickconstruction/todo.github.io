@@ -1538,3 +1538,11 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .sg-dly .dly-box { cursor: default; pointer-events: none; }
 .sg-dly-main { display: grid; gap: 2px; min-width: 0; }
 .sg-dly-where { display: block; }
+/* Full Review: looking back at decided cards (nothing changes), and Undo that names its card */
+.fr-look { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--accent); background: var(--surface-2); font-size: 14px; }
+.fr-look-btns { display: inline-flex; gap: 8px; }
+.fr-looking .fr-btns, .fr-looking .fr-btns2, .fr-looking [data-fr="breakdown"], .fr-looking .sg-bar { display: none; }
+.fr-looking .fr-card { opacity: .92; }
+.fr-back-undo { display: inline-flex; gap: 8px; min-width: 0; }
+.fr-back-undo [data-fr="undo"] { max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 520px) { .fr-back-undo [data-fr="undo"] { max-width: 11em; } }

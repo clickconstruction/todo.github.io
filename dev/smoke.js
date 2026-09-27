@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, dailies, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, dailies, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -348,6 +348,78 @@ async function slipboxReading(check) {
 }
 
 // Full Review: one card at a time, Claude alongside (simulated here by writing what the MCP writes).
+// Full Review: Undo follows the review (not this tab), names its card and says what came back; Back looks
+// at decided cards without changing anything.
+async function reviewUndo(check) {
+  const { app, sb } = await import('/js/state.js');
+  app.fr = null; window.__frPollMs = 150;
+  const until = async (fn, ms = 4000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const iso = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  const t = T();
+  const base = { ...t.tasks[0], notes: '', project_id: null, parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, daily: null, completed_at: null, dropped_at: null, gain: '', waiting_on: null, agenda_for: null, scheduled_at: null, checklist_id: null, created_at: iso(900), updated_at: iso(900) };
+  [['uA', 'Sharpen the chainsaw'], ['uB', 'Learn to weld aluminium'], ['uC', 'Renew the trailer tags'], ['uD', 'Paint the barn door']].forEach(([id, title], i) => {
+    t.tasks.push({ ...base, id, title, ...(id === 'uC' ? { due_at: iso(-20) } : {}) });
+    t.review_items.push({ id: `i${id}`, session_id: 'sU', user_id: 'u1', sort: i + 1, kind: 'task', task_id: id, grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: null, created_at: iso(0), updated_at: iso(0) });
+  });
+  t.review_sessions.push({ id: 'sU', user_id: 'u1', title: 'Full Review', scope: {}, current_item: 'iuA', status: 'active', agent_seen_at: null, agent_status: '', finished_at: null, created_at: iso(0), updated_at: iso(0) });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const item = (id) => t.review_items.find((x) => x.id === id);
+  const undoBtn = () => $('.cl-bar [data-fr="undo"]');
+  await go('#full/sU');
+  await until(() => has(undefined, 'sharpen the chainsaw'));
+  check('nothing decided yet: Undo and Back are off', undoBtn().disabled && $('[data-fr="look-back"]').disabled);
+
+  key('1'); await until(() => has(undefined, 'learn to weld'));
+  check('Undo names the card it will take back', !undoBtn().disabled && /undo: sharpen the chainsaw/i.test(undoBtn().innerText), undoBtn().innerText);
+
+  // Decided somewhere else (Claude pressed it, or another device): this tab never clicked.
+  await sb.rpc('review_decide', { item: 'iuB', decision: 'someday', by: 'agent' });
+  await until(() => has(undefined, 'renew the trailer tags') && /learn to weld/i.test(undoBtn().innerText));
+  check('a card decided elsewhere is the one Undo names', /undo: learn to weld/i.test(undoBtn().innerText) && item('iuB').status === 'reviewed', undoBtn().innerText);
+
+  app.fr = null; await go('#inbox'); await go('#full/sU');
+  await until(() => has(undefined, 'renew the trailer tags') && !!undoBtn());
+  check('after a reload Undo still knows the last card', !undoBtn().disabled && /undo: learn to weld/i.test(undoBtn().innerText), undoBtn().innerText);
+
+  // Back: look, change nothing.
+  $('[data-fr="look-back"]').click(); await until(() => !!$('.fr-look'));
+  const hidden = (sel) => $$(sel).every((el) => getComputedStyle(el).display === 'none' || getComputedStyle(el.closest('.fr-btns, .fr-btns2') || el).display === 'none');
+  check('Back shows the last decided card, marked as looking back', has('.fr-look', 'looking back', 'someday', 'by claude', '1 back of 2') && has('.fr-card', 'learn to weld') && hidden('.fr-looking [data-fr="decide"]'));
+  key('1'); key('s'); await wait(250);
+  check('looking back changes nothing: the keys don’t decide', item('iuC').status === 'pending' && item('iuB').status === 'reviewed' && t.review_sessions.find((x) => x.id === 'sU').current_item === 'iuC' && !!$('.fr-look'));
+  key('ArrowLeft'); await until(() => has('.fr-card', 'sharpen the chainsaw'));
+  check('← goes one further back; it is the first, so Back is off', has('.fr-look', 'keep', '2 back of 2') && $('[data-fr="look-back"]').disabled);
+  check('Edit details is there on a card you look back at', !!$('.fr-looking [data-task="uA"]'));
+  key('ArrowRight'); await until(() => has('.fr-card', 'learn to weld'));
+  key('ArrowRight'); await until(() => !$('.fr-look'));
+  check('→ comes forward, and past the newest is the current card', !$('.fr-look') && has('.fr-card', 'renew the trailer tags') && !!$('.fr-btns [data-fr="decide"]'));
+
+  // Undo the last card: it comes back as the current card, and the message says which and what.
+  key('u'); await until(() => item('iuB').status === 'pending' && has(undefined, 'learn to weld'));
+  check('Undo takes back the card decided elsewhere, and says so', item('iuB').status === 'pending' && t.review_sessions.find((x) => x.id === 'sU').current_item === 'iuB' && has('#toast', 'undone', 'learn to weld', 'someday taken back', 'out of someday'), text('#toast'));
+  check('Undo now names the card before it', /undo: sharpen the chainsaw/i.test(undoBtn().innerText), undoBtn().innerText);
+
+  // A Submit that changed fields: Undo says what came back.
+  key('s'); await until(() => has(undefined, 'renew the trailer tags'));
+  const due = t.tasks.find((x) => x.id === 'uC').due_at;
+  await sb.from('review_items').update({ suggestion: { decision: 'keep', title: 'Renew the trailer tags online', due: null, planned: iso(-3), at: iso(0) } }).eq('id', 'iuC');
+  await until(() => !!$('.sg-bar'));
+  $('[data-fr="submit"]').click(); await until(() => t.tasks.find((x) => x.id === 'uC').title === 'Renew the trailer tags online' && has(undefined, 'paint the barn door'));
+  check('Undo names the submitted card by its new title', /undo: renew the trailer tags online/i.test(undoBtn().innerText), undoBtn().innerText);
+  key('u'); await until(() => t.tasks.find((x) => x.id === 'uC').title === 'Renew the trailer tags');
+  await until(() => has('#toast', 'undone'));
+  check('Undo puts the fields back and lists them', t.tasks.find((x) => x.id === 'uC').due_at === due && !t.tasks.find((x) => x.id === 'uC').planned_at && has('#toast', 'renew the trailer tags', 'keep taken back', 'its title', 'due ', 'no planned date', 'restored') && !!$('.sg-bar'), text('#toast'));
+
+  // Undo a card you are looking back at (not the last one decided).
+  key('1'); await until(() => has(undefined, 'paint the barn door') && !$('.sg-bar'));
+  key('ArrowLeft'); await until(() => !!$('.fr-look'));
+  key('ArrowLeft'); await until(() => has('.fr-card', 'learn to weld') || has('.fr-card', 'sharpen the chainsaw'));
+  const looking = $('.fr-look [data-fr="undo"]').dataset.id;
+  $('.fr-look [data-fr="undo"]').click(); await until(() => item(looking).status === 'pending' && !$('.fr-look'));
+  check('Undo this card: the one you were looking at is undecided and current', item(looking).status === 'pending' && t.review_sessions.find((x) => x.id === 'sU').current_item === looking && item('iuC').status === 'reviewed' && !$('.fr-look'));
+  app.fr = null;
+}
+
 // Dailies: a checkbox that starts fresh each day, in two tiers (js/dailies.js, migration 20261101000001).
 async function dailies(check) {
   const { app } = await import('/js/state.js');
