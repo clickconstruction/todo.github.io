@@ -31,6 +31,7 @@ import { settleAction, settleKey } from './views/settle.js';
 import { fullReviewAction, fullReviewKey, startFullReview, activeSession } from './views/fullreview.js';
 import { moreSheetHtml, openCustomize } from './sidebar.js';
 import { initUpdates, resumeAfterUpdate, tryApply, checkNow } from './updates.js';
+import { initPullToRefresh } from './pull.js';
 import { slipAction, slipSubmit, slipInput } from './views/slipbox.js';
 import { readingAction, readingSubmit } from './views/reading.js';
 import { matrixAction, matrixChange } from './views/matrix.js';
@@ -331,6 +332,8 @@ document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible' && app.user && !window.__noRefresh) { await keepSession(sb); await flushOutbox(); await loadAll(); render(); } // tests pause this
 });
 window.addEventListener('online', async () => { if (app.user) { await keepSession(sb); await flushOutbox(); render(); } });
+// Phones: pull down past the title and let go for the same reload.
+initPullToRefresh({ refresh: async () => { if (!app.user) return; await keepSession(sb); await flushOutbox(); await loadAll(); render(); } });
 
 // ---------- auth ----------
 const authMsg = (m) => { $('#auth-msg').textContent = m; };

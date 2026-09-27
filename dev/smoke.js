@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, checkUpdates, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -1783,6 +1783,30 @@ async function checkUpdates(check) {
   $('[data-act="check-updates"]').click(); await until(() => app.updateNote, 10000);
   check('nothing new: says you’re current', /latest version/.test(app.updateNote), app.updateNote);
   U.__resetUpdates(); U.updateState().reg = null; window.__reload = undefined; app.updateNote = ''; app.appVersion = null;
+}
+
+// Pull to refresh (phones): drag down from the top past the title, let go, and the list reloads.
+async function pullToRefresh(check) {
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const touch = (type, y) => { const t = new Touch({ identifier: 1, target: document.body, clientX: 100, clientY: y }); document.body.dispatchEvent(new TouchEvent(type, { touches: type === 'touchend' ? [] : [t], changedTouches: [t], bubbles: true })); };
+  await go('#inbox'); window.scrollTo(0, 0);
+  touch('touchstart', 100); touch('touchmove', 130); await wait(30);
+  check('a short pull: “Pull to refresh”', !!$('.ptr') && !$('.ptr').hidden && has('.ptr', 'pull to refresh') && !$('.ptr').classList.contains('ready'), $('.ptr') && $('.ptr').textContent);
+  touch('touchmove', 200); await wait(30);
+  check('past the threshold: “Release to refresh”', $('.ptr').classList.contains('ready') && has('.ptr', 'release to refresh'));
+  T().tasks.push({ id: 'tpull', user_id: 'u1', title: 'Pulled in from another device', in_inbox: true, parent_id: null, project_id: null, notes: '', flagged: false, sort: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+  touch('touchend', 200);
+  await until(() => has('.ptr', 'updated'));
+  check('let go: reloads from the database and says so', has(undefined, 'pulled in from another device') && has('.ptr', 'updated ✓'), text('.ptr'));
+  await until(() => $('.ptr').hidden, 2000);
+  check('the pill goes away', $('.ptr').hidden);
+  touch('touchstart', 100); touch('touchmove', 104); await wait(30);
+  check('a tiny move is not a pull', $('.ptr').hidden);
+  touch('touchend', 104);
+  const { openQuickEntry } = await import('/js/editors/task.js'); openQuickEntry(); await wait(50);
+  touch('touchstart', 100); touch('touchmove', 220); await wait(30);
+  check('not while a sheet is open', $('.ptr').hidden);
+  touch('touchend', 220); $('#sheet').close();
 }
 
 // Behaviour that existed before the feature phases; must never regress.
