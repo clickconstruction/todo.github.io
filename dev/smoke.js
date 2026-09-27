@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -1849,6 +1849,24 @@ async function pullToRefresh(check) {
   touch('touchstart', 100); touch('touchmove', 220); await wait(30);
   check('not while a sheet is open', $('.ptr').hidden);
   touch('touchend', 220); $('#sheet').close();
+}
+
+// Search covers everything: the Slipbox, reference (never the secret), events, people, places, checklists, areas, goals.
+async function searchEverything(check) {
+  const now = new Date().toISOString();
+  T().slipbox_notes.push({ id: 'snA', user_id: 'u1', title: 'Appleseed protocol', body: 'A farm that runs on open-source machines, one module at a time.', kind: 'permanent', source: '', archived_at: null, created_at: now, updated_at: now });
+  T().reference_items.push({ id: 'rfA', user_id: 'u1', title: 'Appleseed gate code', topic: 'Farm', body: 'The side gate by the barn.', secret_value: 'hunter2', archived_at: null, created_at: now, updated_at: now });
+  T().events.push({ id: 'evA', user_id: 'u1', title: 'Appleseed farm visit', location: 'Bastrop', notes: '', all_day: true, starts_at: now, ends_at: new Date(Date.now() + 86400000).toISOString(), archived_at: null, created_at: now, updated_at: now });
+  T().people.push({ id: 'ppA', user_id: 'u1', name: 'Tom Appleseed', email: null, phone: null, notes: '', sort: 0, archived_at: null, created_at: now });
+  T().checklists.push({ id: 'ckA', user_id: 'u1', name: 'Farm opening', items: [{ id: 'x', text: 'Check the appleseed stock' }], complete_action: true, reflect: false, sort: 0, archived_at: null, created_at: now, updated_at: now });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  await go('#search/appleseed'); await wait(100);
+  check('one search: Slipbox, reference, events, and people and checklists as chips', has('#search-results', 'slipbox · 1', 'appleseed protocol', 'reference · 1', 'appleseed gate code', 'events · 1', 'appleseed farm visit', 'tom appleseed', 'farm opening'), text('#search-results'));
+  check('the match is marked, with the words around it', $$('#search-results mark').length > 3 && has('.sr-snip', 'farm that runs'));
+  check('never the secret value', !text('#search-results').includes('hunter2') && has('#search-results', '🔑'));
+  const si = $('#search-input'); si.value = 'appleseed barn'; si.dispatchEvent(new Event('input', { bubbles: true })); await wait(120);
+  check('every word must match', has('#search-results', 'appleseed gate code') && !has('#search-results', 'appleseed protocol', 'farm visit'));
+  check('the empty state says what it covers', (() => { si.value = ''; si.dispatchEvent(new Event('input', { bubbles: true })); return has('#search-results', 'slipbox', 'reference', 'events', 'people'); })());
 }
 
 // Behaviour that existed before the feature phases; must never regress.

@@ -26,6 +26,7 @@ import { settleTools } from './settle.js';
 import { gainsTools } from './gains.js';
 import { fullReviewTools } from './fullreview.js';
 import { eventsTools, nextDay } from './events.js';
+import { searchTools } from './search.js';
 import { slipboxTools } from './slipbox.js';
 import { matrixTools } from './matrix.js';
 import { eventOf, ownEventOf, icsCalendar } from '../../js/schedule.js';
@@ -50,6 +51,7 @@ Folders and projects are never deleted: archive a folder with update_folder (onl
 Templates: for repeated projects (a new job, a trip), list_templates then create_from_template with the blanks' values; save_as_template turns a project into one.
 Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); then settle_import walks the sort (status → recommend → apply, each with an Undo); undo_import takes a whole import back.
 Slipbox and reading: ideas to think with (not actions) go to the slipbox tool as fleeting notes (one idea, the user's words, [[links]]); things to read/watch/listen to go on the reading list (reading tool; clarify_item/full_review decisions slipbox and reading). When they finish something, offer to take notes. The Weekly Review step "notes" turns fleeting notes into permanent ones.
+Search: search finds words across actions (open and done), projects, the Slipbox, reference (never secret values), events and people; use it before asking the user where something is.
 Events: the user's own calendar entries (an airshow, a trip, an appointment) go in with the events tool (add; several at once with items; pass task to link them to the card they come from); they show in Forecast (by day) and the Events list, and reach their phone through the calendar feed. Not actions: a time block on an action is update_task schedule.
 Matrix (Eisenhower): the matrix tool sorts available actions into do / schedule / delegate / park from due dates, flags and goals; the user can override with ★/☆ (mark). Use it when they ask what matters, or to park the neither-urgent-nor-important box in Someday (only what they agree to; unpark undoes).
 Full Review (full_review): when the user wants to go through things together, start or resume a session, give them the app link, and work card by card while they watch it in the app. Turn what they tell you into a suggestion (full_review suggest) that they Submit in the app (or, when they say "submit", call full_review submit to press it for them); draft suggestions ahead for the next cards (upcoming + suggest items) so they can approve quickly. Apply directly (annotate/decide) only when they say to just do it. Important items come first; group cards need their agreement on the proposal.
@@ -2299,6 +2301,7 @@ TOOLS.push(...fullReviewTools({ OPEN, localDate, zonedToIso, tool: (name) => TOO
 TOOLS.push(...slipboxTools({ tool: (name) => TOOLS.find((t) => t.name === name) }));
 TOOLS.push(...matrixTools({ OPEN, availableTasks }));
 TOOLS.push(...eventsTools({ localDate, zonedToIso, OPEN, geocode }));
+TOOLS.push(...searchTools());
 TOOLS.push(...dailyTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));

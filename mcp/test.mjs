@@ -175,7 +175,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 74 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 74 tools, no internals leaked');
+assert(list.body.result.tools.length === 75 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 75 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -1483,4 +1483,21 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   db.events.length = 0;
 }
 
+// ---------- search everything ----------
+{
+  db.slipbox_notes.push({ id: 'snA', user_id: UID, title: 'Appleseed protocol', body: 'A farm that runs on open-source machines.', kind: 'permanent', archived_at: null });
+  db.reference_items.push({ id: 'rfA', user_id: UID, title: 'Appleseed gate code', topic: 'Farm', body: 'The side gate.', secret_value: 'hunter2', archived_at: null });
+  db.events.push({ id: 'evA', user_id: UID, title: 'Appleseed farm visit', location: 'Bastrop', notes: '', starts_at: '2026-11-01T05:00:00.000Z', ends_at: '2026-11-02T05:00:00.000Z', all_day: true, archived_at: null });
+  db.people.push({ id: 'ppA', user_id: UID, name: 'Tom', email: 'tom@example.com', notes: 'Runs the Appleseed reading group.', archived_at: null });
+  const cap = await tool('capture', { title: 'Read the Appleseed notes' });
+  const r = await tool('search', { query: 'appleseed' });
+  assert(r.actions.some((t) => t.id === cap.id && t.status === 'open') && r.slipbox[0].id === 'snA' && r.reference[0].id === 'rfA' && r.events[0].id === 'evA' && r.people[0].id === 'ppA', 'search: actions, Slipbox, reference, events and people in one call');
+  assert(!JSON.stringify(r).includes('hunter2'), 'search never returns a secret value');
+  assert(/farm that runs/.test(r.slipbox[0].snippet) && /reading group/.test(r.people[0].snippet), 'search: snippets show where it matched');
+  const two = await tool('search', { query: 'appleseed farm' });
+  assert(two.events && two.slipbox && !two.people && !(two.actions || []).length, 'search: every word must match');
+  const none = await tool('search', { query: 'zzzzqqq' });
+  assert(none.none && !none.actions, 'search: nothing matched says so');
+  ['slipbox_notes', 'reference_items', 'events', 'people'].forEach((k) => { db[k] = db[k].filter((x) => !['snA', 'rfA', 'evA', 'ppA'].includes(x.id)); });
+}
 console.log('ALL PASSED');
