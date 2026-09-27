@@ -318,6 +318,8 @@ function format(ta, what) {
   if (what === 'bold' || what === 'italic') ta.setSelectionRange(r.start, r.end); else ta.setSelectionRange(r.end, r.end);
   ta.dispatchEvent(new Event('input', { bubbles: true })); // saves, and redraws the preview, as any typing does
 }
+// Pressing a toolbar button must not take the cursor out of the text: the selection is what it works on.
+document.addEventListener('mousedown', (e) => { if (e.target.closest && e.target.closest('.hz-tool')) e.preventDefault(); });
 document.addEventListener('keydown', (e) => {
   const ta = e.target && e.target.classList && e.target.classList.contains('hz-text') ? e.target : null;
   if (!ta || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
