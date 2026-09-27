@@ -490,7 +490,8 @@ async function fullReview(check) {
   const newNotes = 'Send the letter about the land.\nTom signs and returns it.\n\nEvery January.';
   Object.assign(cur, { suggestion: { decision: 'keep', title: 'Send to Tom once a year', task_notes: newNotes, at: new Date().toISOString() }, updated_at: new Date().toISOString() });
   await until(() => !!$('.sg-bar .sg-notes'));
-  check('suggested notes on the bar: the whole text, line breaks kept, easy to copy', $('.sg-bar .sg-notes').textContent === newNotes && getComputedStyle($('.sg-bar .sg-notes')).whiteSpace === 'pre-wrap' && has('.sg-bar', 'send to tom once a year'));
+  check('suggested notes on the bar: the whole text, line breaks kept, easy to copy', $('.sg-bar .sg-notes').textContent === newNotes && getComputedStyle($('.sg-bar .sg-notes')).whiteSpace === 'pre-wrap' && getComputedStyle($('.sg-bar .sg-notes')).userSelect === 'text' && has('.sg-bar', 'send to tom once a year'));
+  check('a Notes row: where they go, how much there is, open when short', has('.sg-bar', 'notes: 4 lines', `${newNotes.length} characters`, 'this card’s notes', oldNotes ? 'replaces the notes it has' : 'it has no notes now') && $('.sg-bar .sg-notes-d').open && !!$('.sg-bar [data-fr="copy-notes"]'));
   check('nothing changed yet (notes)', (fw.notes || '') === oldNotes);
   key('Enter'); await until(() => has(undefined, 'group · 14 actions'));
   check('Submit replaced the title and the notes', fw.title === 'Send to Tom once a year' && fw.notes === newNotes);
@@ -500,6 +501,23 @@ async function fullReview(check) {
   check('Edit opens the action with the suggested title and notes filled in, yours to change', $('#sheet [name=notes]').value === newNotes && $('#sheet [name=title]').value === 'Send to Tom once a year' && cur.suggestion === null);
   $('#sheet').close(); await until(() => !$('#sheet').open);
   check('closing the editor without saving changes nothing', (fw.notes || '') === oldNotes && fw.title === 'Update my will' && !$('.sg-bar'));
+  // Long notes replacing notes the action has: folded behind the first line, sized, the old ones named once (struck through).
+  const longNotes = ['WHAT TO SEND', ...Array.from({ length: 28 }, (_, i) => `- item ${i + 1}`), '', 'WHO GETS IT', ...Array.from({ length: 28 }, (_, i) => `- person ${i + 1}`)].join('\n');
+  fw.notes = 'The old text from the import.\nSecond old line.';
+  Object.assign(cur, { suggestion: { decision: 'keep', title: 'Send to Tom once a year', task_notes: longNotes, at: new Date().toISOString() }, updated_at: new Date().toISOString() });
+  await until(() => !!$('.sg-bar .sg-notes') && has('.sg-bar', 'replaces the notes it has'));
+  check('long notes: folded, with the size and the first line as a preview', !$('.sg-bar .sg-notes-d').open && has('.sg-bar', 'notes: 59 lines', `${longNotes.length.toLocaleString()} characters`) && has('.sg-bar .sg-prev', 'what to send') && getComputedStyle($('.sg-bar .sg-prev')).display !== 'none');
+  check('the notes it has are being replaced: said once, struck through, not printed in full', has('.sg-bar .sg-replaces', 'replaces the notes it has (2 lines') && has('.sg-bar .sg-replaces .sg-old', 'the old text from the import') && !has('.sg-bar .sg-replaces', 'second old line'));
+  $('.sg-bar .sg-notes-d summary').click(); await until(() => $('.sg-bar .sg-notes-d').open);
+  check('opened: the whole text, every line', $('.sg-bar .sg-notes').textContent === longNotes && getComputedStyle($('.sg-bar .sg-notes')).display !== 'none');
+  app.render(); await wait(50);
+  check('it stays open when the card redraws', $('.sg-bar .sg-notes-d').open);
+  key('Enter'); await until(() => has(undefined, 'group · 14 actions'));
+  check('Submit put the long notes on the action', fw.notes === longNotes);
+  key('u'); await until(() => !!$('.sg-bar') && has(undefined, 'update my will'));
+  check('Undo put the notes it had back (long)', fw.notes === 'The old text from the import.\nSecond old line.');
+  $('[data-fr="dismiss"]').click(); await until(() => !$('.sg-bar'));
+  fw.notes = oldNotes;
   // A folder in a suggestion: shown on the bar; Submit sets it (card shows it with 📂); Undo clears it.
   Object.assign(cur, { suggestion: { decision: 'keep', folder: '~/_SYNC/MAGA/_Todo/Will', at: new Date().toISOString() }, updated_at: new Date().toISOString() });
   await until(() => !!$('.sg-bar') && has('.sg-bar', 'folder'));

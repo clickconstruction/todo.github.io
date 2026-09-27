@@ -1323,7 +1323,12 @@ body.fr-mode .view { margin-left: auto !important; margin-right: auto !important
 .sg-i { width: 18px; flex: none; text-align: center; color: var(--accent); }
 .sg-old { color: var(--muted); text-decoration: line-through; font-size: 13px; margin-left: 4px; }
 .sg-note { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
-.sg-notes { display: block; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; margin: 4px 0 2px; padding: 8px 10px; border-radius: 8px; background: var(--surface); font-size: 14px; line-height: 1.45; max-height: 18em; overflow: auto; }
+.sg-replaces { display: block; font-size: 13px; }
+.sg-copy { margin-left: 6px; font-size: 13px; }
+.sg-notes-d { margin-top: 4px; }
+.sg-notes-d summary { cursor: pointer; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sg-notes-d[open] .sg-notes-show, .sg-notes-d[open] .sg-prev, .sg-notes-d:not([open]) .sg-notes-hide { display: none; }
+.sg-notes { display: block; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; cursor: text; margin: 4px 0 2px; padding: 8px 10px; border-radius: 8px; background: var(--surface); font-size: 14px; line-height: 1.45; max-height: 18em; overflow: auto; }
 .sg-btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .sg-btns kbd { opacity: .7; font-size: .75rem; margin-left: 4px; }
 .fr-btns-quiet { opacity: .55; }

@@ -201,7 +201,7 @@ function suggestionBar(it, t) {
   } else if (t) {
     const p = t.project_id && byId(db.projects, t.project_id);
     if (s.title && s.title !== t.title) row('✎', `Title: “${esc(s.title)}” <span class="sg-old">${esc(t.title)}</span>`);
-    if (s.task_notes && s.task_notes !== (t.notes || '')) row('📝', `Notes${t.notes ? ' <span class="hint">(in place of the ones it has)</span>' : ''}<span class="sg-notes">${esc(s.task_notes)}</span>`);
+    if (s.task_notes && s.task_notes !== (t.notes || '')) row('📝', notesRow(it, s.task_notes, t.notes || ''));
     if ('gain' in s && s.gain !== (t.gain || '')) row('✦', `Gain: <span class="gain-text">${esc(s.gain || 'none')}</span>${s.gain_suggested ? ' <span class="chip sug">Claude’s words</span>' : ''}`);
     if ('project_id' in s && s.project_id !== t.project_id) row('🗂', `Project: ${esc(s.project_name || 'none')}${p ? ` <span class="sg-old">${esc(p.name)}</span>` : ''}`);
     [['planned', 'planned_at', 'Planned'], ['due', 'due_at', 'Due'], ['defer', 'defer_at', 'Defer until']].forEach(([k, col, l]) => { if (k in s && s[k] !== t[col]) row('🗓', `${l}: ${s[k] ? esc(when(s[k])) : 'clear'}${t[col] ? ` <span class="sg-old">${esc(when(t[col]))}</span>` : ''}`); });
@@ -228,6 +228,19 @@ function suggestionBar(it, t) {
     ${rows.join('')}${s.note ? `<p class="sg-note">${esc(s.note)}</p>` : ''}
     <div class="sg-btns"><button class="btn primary" data-fr="submit">Submit <kbd>⏎</kbd></button><button class="btn" data-fr="edit-suggestion">Edit</button><button class="btn" data-fr="dismiss">Dismiss</button></div>
   </div>`;
+}
+
+// New notes in a suggestion: where they go (the card's Notes), how much there is, what they replace, and the
+// text itself to check and copy before Submit: open when short, folded behind its first line when long.
+const sizeOf = (text) => { const l = text.split('\n').length; return `${n(l)} line${l === 1 ? '' : 's'} · ${n(text.length)} characters`; };
+const firstLine = (text, max = 70) => { const l = (text.split('\n').find((x) => x.trim()) || '').trim(); return l.length > max ? `${l.slice(0, max)}…` : l; };
+const notesAreShort = (text) => text.length <= 600 && text.split('\n').length <= 12;
+function notesRow(it, text, old) {
+  const f = F();
+  const open = f.notesOpen && f.notesOpen.id === it.id ? f.notesOpen.open : notesAreShort(text);
+  return `Notes: <b>${sizeOf(text)}</b> <span class="hint">→ this card’s Notes</span> <button class="link-btn sg-copy" data-fr="copy-notes">⧉ Copy</button>
+    <span class="sg-replaces hint">${old ? `Replaces the notes it has (${sizeOf(old)}): <span class="sg-old">${esc(firstLine(old))}</span>` : 'It has no notes now.'}</span>
+    <details class="sg-notes-d" ${open ? 'open' : ''}><summary data-fr="notes-toggle"><span class="sg-notes-show">Show the text</span><span class="sg-notes-hide">Hide the text</span><span class="sg-prev"> · ${esc(firstLine(text))}</span></summary><span class="sg-notes">${esc(text)}</span></details>`;
 }
 
 // A suggestion's steps: titles, or {title, steps, in_order} that nest.
@@ -362,6 +375,23 @@ export async function fullReviewAction(el) {
     return;
   }
   if (a === 'capture') { captureIntoReview(); return; }
+  if (a === 'notes-toggle') { // remembered for this card, so a live update doesn't fold it back
+    const cur = s && f.byId.get(s.current_item);
+    const d = el.closest('details');
+    if (cur && d) f.notesOpen = { id: cur.id, open: !d.open }; // the click comes before the toggle
+    return;
+  }
+  if (a === 'copy-notes') {
+    const cur = s && f.byId.get(s.current_item);
+    const sug = cur && pending(cur);
+    if (!sug || !sug.task_notes) return;
+    try { await navigator.clipboard.writeText(sug.task_notes); toast('Notes copied'); } catch {
+      // No clipboard here: open the text and select it, ready for ⌘C.
+      const d = document.querySelector('.sg-notes-d'); const box = document.querySelector('.sg-notes');
+      if (d && box) { d.open = true; f.notesOpen = { id: cur.id, open: true }; const r = document.createRange(); r.selectNodeContents(box); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected: copy it with ⌘C'); }
+    }
+    return;
+  }
   if (a === 'breakdown') {
     const cur = s && f.byId.get(s.current_item);
     const t = cur && cur.kind === 'task' && byId(db.tasks, cur.task_id);
@@ -453,7 +483,7 @@ export function fullReviewKey(e) {
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return false;
   if (e.key === 'n') { e.preventDefault(); captureIntoReview(); return true; }
   if (e.key === 'b') { const b = document.querySelector('[data-fr="breakdown"]'); if (b) { e.preventDefault(); b.click(); return true; } }
-  if (e.key === 'Enter') { const b = document.querySelector('[data-fr="submit"]'); if (b) { e.preventDefault(); b.click(); return true; } }
+  if (e.key === 'Enter' && !/SUMMARY|BUTTON|A/.test(document.activeElement.tagName)) { const b = document.querySelector('[data-fr="submit"]'); if (b) { e.preventDefault(); b.click(); return true; } }
   const btns = [...document.querySelectorAll('.fr-btns [data-fr="decide"], .fr-btns2 [data-fr="decide"]')];
   if (/^[1-6]$/.test(e.key) && btns[Number(e.key) - 1]) { e.preventDefault(); btns[Number(e.key) - 1].click(); return true; }
   if (e.key === 's') { const b = document.querySelector('.cl-bar [data-decision="skip"]'); if (b) { e.preventDefault(); b.click(); return true; } }
