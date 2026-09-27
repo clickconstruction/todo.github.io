@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, dailies, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, dailies, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -665,6 +665,91 @@ async function techTree(check) {
   await go('#horizons');
   check('the ladder sums the tree up', has('.hz-tree-row', 'tech tree', 'open', 'achieved', 'locked'), text('.hz-tree-row'));
 }
+
+// Tech tree, linking: two browsers side by side (folder › project › card › step), search that keeps its
+// context, the link in a sentence before you make it, and a card as what a project requires.
+async function treeLinker(check) {
+  const { app, db } = await import('/js/state.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const iso = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  const t = T();
+  const P = (id, name, extra = {}) => t.projects.push({ ...t.projects[0], id, name, status: 'active', kind: 'parallel', folder_id: 'f1', notes: '', goal_id: null, area_id: null, completed_at: null, sort: 50, created_at: iso(50), updated_at: iso(50), ...extra });
+  P('lp1', 'Real Estate Feeder (phase 1)'); P('lp2', 'RE Title Feeder (phase 2)'); P('lp3', 'Estate planning', { folder_id: null, status: 'on_hold' });
+  const base = { ...t.tasks[0], notes: '', parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, daily: null, completed_at: null, dropped_at: null, gain: '', waiting_on: null, agenda_for: null, steps_in_order: false, created_at: iso(40), updated_at: iso(40) };
+  t.tasks.push({ ...base, id: 'lc1', project_id: 'lp1', title: 'Find a title attorney', sort: 1 }, { ...base, id: 'lc2', project_id: 'lp1', parent_id: 'lc1', title: 'Ask the attorney about chain format', sort: 1 }, { ...base, id: 'lc3', project_id: 'lp1', title: 'Walk the first property', sort: 2 },
+    { ...base, id: 'lc4', project_id: 'lp2', title: 'Draft the title chain', sort: 1 }, { ...base, id: 'lc5', project_id: 'lp2', title: 'Price the title software', sort: 2 }, { ...base, id: 'lc6', project_id: 'lp3', title: 'Call the estate attorney', sort: 1 }, { ...base, id: 'lc7', project_id: 'lp1', title: 'An old finished card about an attorney', completed_at: iso(3), sort: 3 });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const links = () => t.tree_links.filter((l) => !l.archived_at);
+  const rows = (side) => $$(`#sheet [data-tl-list="${side}"] .tl-row`);
+  const labels = (side) => rows(side).map((r) => r.innerText.replace(/\s+/g, ' ').trim().toLowerCase());
+  const type = async (side, q) => { const el = $(`#sheet [data-tl-q="${side}"]`); el.value = q; el.dispatchEvent(new Event('input', { bubbles: true })); await wait(60); };
+  const row = (side, re) => rows(side).find((r) => re.test(r.innerText));
+  const out = () => ($('#sheet [data-tl-out]').innerText || '').replace(/\s+/g, ' ').toLowerCase();
+  const go = () => $('#sheet [data-tl-go]');
+  const toastBtn = (re) => $$('#toast button').find((b) => re.test(b.textContent));
+  const press = (side, key) => $(`#sheet [data-tl-q="${side}"]`).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+
+  await (async () => { location.hash = '#horizons/tree'; await wait(200); })();
+  $('[data-tt="link"]').click(); await until(() => $('#sheet').open);
+  check('+ Link opens two browsers side by side, wide', $('#sheet').classList.contains('wide') && $$('#sheet .tl-pane').length === 2 && !!$('#sheet [data-tl-q="node"]') && !!$('#sheet [data-tl-q="req"]') && go().disabled && out().includes('pick what gets unlocked'));
+  check('both sides show the library under its folders', $$('#sheet [data-tl-list="node"] .tl-head').some((h) => /clients|click|personal|work/i.test(h.innerText) || h.innerText.trim().length > 0) && labels('node').some((x) => x.includes('real estate feeder')) && labels('req').some((x) => x.includes('re title feeder')) && $$('#sheet [data-tl-list="req"] .tl-head').some((h) => /no folder/i.test(h.innerText)));
+  check('the left side offers goals and projects, never cards', !rows('node').some((r) => (r.dataset.tlPick || '').startsWith('task:')) && !$('#sheet [data-tl-list="node"] [data-tl-toggle]'));
+  check('on the right a project says how many cards it has and opens to show them', /2 cards/.test(row('req', /RE Title Feeder/).innerText) && !!$('[data-tl-toggle]', row('req', /Real Estate Feeder/)) && /on hold/.test(row('req', /Estate planning/).innerText));
+  $('[data-tl-toggle]', row('req', /Real Estate Feeder/)).click(); await wait(60);
+  check('opened: its open cards, in order; a card with steps opens too', labels('req').some((x) => x.includes('find a title attorney')) && labels('req').some((x) => x.includes('walk the first property')) && !labels('req').some((x) => x.includes('old finished card')) && !labels('req').some((x) => x.includes('ask the attorney')) && !!$('[data-tl-toggle]', row('req', /Find a title attorney/)));
+  $('[data-tl-toggle]', row('req', /Find a title attorney/)).click(); await wait(60);
+  const d = (r) => Number(getComputedStyle(r).getPropertyValue('--d'));
+  check('steps sit a level under their card', d(row('req', /Ask the attorney/)) === d(row('req', /Find a title attorney/)) + 1 && d(row('req', /Find a title attorney/)) === d(row('req', /Real Estate Feeder/)) + 1);
+
+  await type('node', 'title feeder');
+  check('search on the left narrows to what matches, with the words marked', rows('node').length === 1 && labels('node')[0].includes('re title feeder') && $$('#sheet [data-tl-list="node"] mark').length >= 2);
+  row('node', /RE Title Feeder/).click(); await wait(60);
+  check('picked: the sentence asks for the other side', row('node', /RE Title Feeder/).classList.contains('on') && out().includes('now pick what it requires') && go().disabled);
+
+  await type('req', 'attorney');
+  const heads = $$('#sheet [data-tl-list="req"] .tl-head').map((h) => h.innerText.trim().toLowerCase());
+  check('search on the right finds cards, and keeps each under its folder and project', labels('req').some((x) => x.includes('find a title attorney')) && labels('req').some((x) => x.includes('ask the attorney')) && labels('req').some((x) => x.includes('call the estate attorney'))
+    && labels('req').some((x) => x.includes('real estate feeder')) && labels('req').some((x) => x.includes('estate planning')) && heads.some((h) => h.includes('no folder')) && !labels('req').some((x) => x.includes('draft the title chain')) && !labels('req').some((x) => x.includes('old finished')), labels('req').join(' | '));
+  check('a step found by search shows the card it belongs to above it', rows('req').indexOf(row('req', /Find a title attorney/)) + 1 === rows('req').indexOf(row('req', /Ask the attorney/)) && d(row('req', /Ask the attorney/)) === 3 && $$('#sheet [data-tl-list="req"] mark').length >= 3);
+  check('and offers a new milestone from what you typed', /new milestone “attorney”/i.test(rows('req')[rows('req').length - 1].innerText));
+
+  row('req', /Find a title attorney/).click(); await wait(60);
+  check('the sentence says the link and what it would change, before you make it', out().includes('re title feeder (phase 2) requires the card find a title attorney') && out().includes('locked until that is done') && out().includes('active now, with 2 open actions') && out().includes('asked whether to put it on hold') && !go().disabled, out());
+  await type('req', 'title chain'); row('req', /Draft the title chain/).click(); await wait(60);
+  check('a card inside the project itself is refused, in words, and Link is off', out().includes('can’t require a card inside itself') && go().disabled, out());
+  await type('req', 'attorney');
+  press('req', 'ArrowDown'); press('req', 'ArrowDown'); press('req', 'Enter'); await wait(60);
+  const picked = rows('req').find((r) => r.classList.contains('on'));
+  check('keys: ↓ ↓ Enter picks a row without the mouse', !!picked && !go().disabled && out().includes('requires'), picked ? picked.innerText : 'none');
+  row('req', /Find a title attorney/).click(); await wait(60);
+  go().click();
+  await until(() => links().length === 1);
+  await wait(150);
+  check('Link: saved with the card as what it requires', links()[0].node_kind === 'project' && links()[0].node_id === 'lp2' && links()[0].requires_kind === 'task' && links()[0].requires_id === 'lc1' && !$('#sheet').open);
+  check('the tree shows the card feeding the project, and offers to hold it', !!$('[data-tt-node="task:lc1"].tt-type-card') && has('[data-tt-node="task:lc1"]', 'card', 'find a title attorney', 'in real estate feeder') && $('[data-tt-node="project:lp2"]').classList.contains('tt-locked') && has('[data-tt-node="project:lp2"]', 'needs find a title attorney') && $$('.tt-lines > path').length === 1 && has('#toast', 'locked now', 'put on hold', '2 actions step back'), text('#toast'));
+  toastBtn(/put on hold/i).click(); await until(() => t.projects.find((x) => x.id === 'lp2').status === 'on_hold');
+
+  // Finishing the little card, anywhere in the app, opens the project.
+  await go2('#project/lp1');
+  $('.row[data-task="lc1"] [data-check]').click();
+  await until(() => !!t.tasks.find((x) => x.id === 'lc1').completed_at && has('#toast', 'unlocked'));
+  check('finishing the card says what it unlocked and offers to start it', has('#toast', 'unlocked', 're title feeder (phase 2)') && !!toastBtn(/^start it$/i), text('#toast'));
+  toastBtn(/^start it$/i).click(); await until(() => t.projects.find((x) => x.id === 'lp2').status === 'active');
+  await go2('#horizons/tree');
+  check('Start it: the project is active and open on the tree; the card shows as done', $('[data-tt-node="project:lp2"]').classList.contains('tt-open') && $('[data-tt-node="task:lc1"]').classList.contains('tt-achieved'));
+
+  // From a node: "+ Requires…" opens the linker with the left side chosen; a new milestone is made in place.
+  $('[data-tt-node="project:lp2"]').click(); await until(() => $('#sheet').open);
+  $('#sheet [data-add]').click(); await until(() => !!$('#sheet [data-tl-q="req"]'));
+  check('+ Requires… opens the linker with this project already chosen', !!row('node', /RE Title Feeder/) && row('node', /RE Title Feeder/).classList.contains('on') && document.activeElement === $('#sheet [data-tl-q="req"]'));
+  await type('req', 'Title insurance licence'); rows('req')[rows('req').length - 1].click(); await wait(60);
+  check('a new milestone reads as one in the sentence', out().includes('requires the new milestone title insurance licence') && !go().disabled);
+  go().click(); await until(() => links().length === 2);
+  const ms = t.goals.find((g) => g.title === 'Title insurance licence');
+  check('made in place and linked', !!ms && ms.kind === 'milestone' && links().some((l) => l.requires_id === ms.id && l.node_id === 'lp2') && !!$(`[data-tt-node="goal:${ms.id}"]`));
+  if ($('#sheet').open) $('#sheet').close();
+}
+const go2 = async (hash) => { location.hash = hash; await wait(200); };
 
 // Dailies: a checkbox that starts fresh each day, in two tiers (js/dailies.js, migration 20261101000001).
 async function dailies(check) {

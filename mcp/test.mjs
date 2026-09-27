@@ -139,6 +139,7 @@ globalThis.fetch = async (url, init = {}) => {
   }));
   const match = (r) => filters.every(([k, v]) => {
     const [op, ...rest] = v.split('.'); const val = rest.join('.');
+    if (op === 'ilike') return new RegExp(`^${val.split('*').map((x) => x.replace(/\\(.)/g, '$1').replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, 'i').test(String(r[k] ?? '')); // as PostgREST: * is the wildcard
     if (op === 'eq') return String(r[k]) === val;
     if (op === 'is') return val === 'null' ? r[k] == null : String(r[k]) === val;
     if (op === 'in') return val.slice(1, -1).split(',').map(s => s.replace(/"/g,'')).includes(String(r[k]));
@@ -1594,11 +1595,27 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const started = await tool('tech_tree', { action: 'start', project: p2.id });
   assert(started.status === 'active' && db.projects.find((x) => x.id === p2.id).status === 'active', 'start: active again');
 
+  // A little card that opens a whole project.
+  const card = await tool('capture', { title: 'Find a tree title attorney', project: p1.id });
+  const own = await tool('capture', { title: 'Draft the tree title chain', project: p3.id });
+  db.projects.find((x) => x.id === p3.id).status = 'active';
+  const byCard = await tool('tech_tree', { action: 'link', node: p3.id, card: 'find a tree title attorney' });
+  const crow = db.tree_links.find((l) => l.requires_kind === 'task');
+  assert(byCard.linked[0].requires === 'Find a tree title attorney' && crow.requires_id === card.id && crow.node_id === p3.id && byCard.now_locked_but_active[0].project === 'Tree Mortgage (phase 3)', 'link card: a project can require a single card, found by its title');
+  assert(await refuse({ action: 'link', node: p3.id, card: own.id }, /inside itself/) && await refuse({ action: 'link', node: p3.id, card: 'No such card' }, /No open card/) && await refuse({ action: 'link', node: p1.id, card: own.id }, /loop/), 'link card: its own card, an unknown card and a loop through a card are refused in words');
+  const withCard = await tool('tech_tree', {});
+  const cnode = withCard.nodes.find((x) => x.kind === 'card');
+  assert(cnode && cnode.title === 'Find a tree title attorney' && cnode.in_project === 'Tree Estate Feeder (phase 1)' && cnode.unlocks.includes('Tree Mortgage (phase 3)') && withCard.nodes.find((x) => x.id === p3.id).needs.includes('Find a tree title attorney'), 'get: the card is on the tree, with the project it is in and what it unlocks');
+  await tool('complete_task', { id: card.id });
+  const doneCard = await tool('tech_tree', {});
+  assert(doneCard.nodes.find((x) => x.kind === 'card').state === 'achieved' && !(doneCard.nodes.find((x) => x.id === p3.id).needs || []).includes('Find a tree title attorney'), 'finishing the card meets the requirement');
+  await tool('tech_tree', { action: 'unlink', node: p3.id, card: card.id });
+  assert(db.tree_links.find((l) => l.requires_kind === 'task').archived_at, 'unlink card: archived');
   const prop = await tool('tech_tree', { action: 'propose', links: [{ node: pa.id, milestone: 'Farm 1 paid for', why: 'Every Feeder runs off Farm 1.' }] });
   assert(prop.proposed[0].state === 'proposed' && !db.goals.some((g) => g.title === 'Farm 1 paid for'), 'propose: dashed until accepted; the milestone isn’t made yet');
   await tool('tech_tree', { action: 'dismiss', id: prop.proposed[0].id });
   await tool('tech_tree', { action: 'unlink', node: 'Tree significant assets', requires: p3.id });
-  assert(db.tree_links.filter((l) => l.archived_at).length === 2 && db.tree_links.length === 6, 'dismiss and unlink archive; nothing is deleted');
+  assert(db.tree_links.filter((l) => l.archived_at).length === 3 && db.tree_links.length === 7, 'dismiss and unlink archive; nothing is deleted');
   db.tree_links.push({ id: 'theirs', user_id: 'someone-else', node_kind: 'project', node_id: p1.id, requires_kind: 'project', requires_id: p3.id, state: 'accepted', archived_at: null });
   assert(!(await tool('tech_tree', {})).nodes.find((x) => x.id === p1.id).needs, 'another user’s links are not read');
   const real = globalThis.fetch; let calls = 0; globalThis.fetch = (u, ...x) => { calls += 1; return real(u, ...x); };

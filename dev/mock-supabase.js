@@ -182,15 +182,17 @@
   // Mirrors tree_links_guard and tree_accept (migration 20261103000001).
   function linkGuard(r, id0) {
     if (r.archived_at) return null;
-    const owned = (kind, id) => (kind === 'goal' ? tables.goals : kind === 'project' ? tables.projects : []).some((x) => x.id === id && x.user_id === r.user_id);
+    const owned = (kind, id) => (kind === 'goal' ? tables.goals : kind === 'project' ? tables.projects : kind === 'task' ? tables.tasks : []).some((x) => x.id === id && x.user_id === r.user_id);
+    if (r.node_kind === 'task') return 'new row for relation "tree_links" violates check constraint "tree_links_node_kind_check"';
     if (!owned(r.node_kind, r.node_id)) return 'That goal or project isn’t yours.';
     if (!r.requires_id) return r.state === 'proposed' && String(r.requires_title || '').trim() ? null : 'new row for relation "tree_links" violates check constraint';
     if (!owned(r.requires_kind, r.requires_id)) return 'That goal or project isn’t yours.';
     if (r.node_kind === r.requires_kind && r.node_id === r.requires_id) return 'A goal or project can’t require itself.';
+    if (r.requires_kind === 'task' && r.node_kind === 'project' && tables.tasks.some((t) => t.id === r.requires_id && t.project_id === r.node_id)) return 'A project can’t require a card inside itself: on hold, it would hide the card that opens it.';
     const livel = tables.tree_links.filter((l) => !l.archived_at && l.requires_id && l.id !== id0);
     if (livel.some((l) => l.node_kind === r.node_kind && l.node_id === r.node_id && l.requires_kind === r.requires_kind && l.requires_id === r.requires_id)) return 'duplicate key value violates unique constraint "tree_links_once"';
     const seen = new Set(); const stack = [`${r.requires_kind}:${r.requires_id}`];
-    while (stack.length) { const k = stack.pop(); if (k === `${r.node_kind}:${r.node_id}`) return 'That would make a loop: it already rests on this one.'; if (seen.has(k)) continue; seen.add(k); livel.filter((l) => `${l.node_kind}:${l.node_id}` === k).forEach((l) => stack.push(`${l.requires_kind}:${l.requires_id}`)); }
+    while (stack.length) { const k = stack.pop(); if (k === `${r.node_kind}:${r.node_id}`) return 'That would make a loop: it already rests on this one.'; if (seen.has(k)) continue; seen.add(k); livel.filter((l) => `${l.node_kind}:${l.node_id}` === k).forEach((l) => stack.push(`${l.requires_kind}:${l.requires_id}`)); if (k.startsWith('task:')) { const t = tables.tasks.find((x) => x.id === k.slice(5)); if (t && t.project_id) stack.push(`project:${t.project_id}`); } }
     return null;
   }
   // Mirrors tasks_daily_guard / daily_ticks_guard (migration 20261101000001).

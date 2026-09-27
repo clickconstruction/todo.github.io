@@ -1,5 +1,7 @@
 // Tech tree, the rules (no imports: the app and the MCP Worker both use them).
 // A node is a goal or a project that takes part in a link, or a goal marked milestone or destination.
+// What a node requires can also be a card (an action or a step): finishing the card opens what waits on it.
+// A card is never the locked one: cards wait on cards through "Waits for".
 // A link says "this node requires that one" (tree_links; the database refuses loops). States:
 //   achieved  the goal is achieved / the project completed
 //   open      everything it requires is achieved (or it requires nothing)
@@ -11,16 +13,19 @@
 export const keyOf = (kind, id) => `${kind}:${id}`;
 export const live = (l) => !l.archived_at;
 
-export function buildTree({ goals = [], projects = [], links = [] }) {
+export function buildTree({ goals = [], projects = [], tasks = [], links = [] }) {
   const nodes = new Map();
   const goalById = new Map(goals.map((g) => [g.id, g]));
   const projectById = new Map(projects.map((p) => [p.id, p]));
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
   const add = (kind, id) => {
     const key = keyOf(kind, id);
     if (nodes.has(key)) return nodes.get(key);
-    const row = kind === 'goal' ? goalById.get(id) : projectById.get(id);
+    const row = kind === 'goal' ? goalById.get(id) : kind === 'task' ? taskById.get(id) : projectById.get(id);
     if (!row) return null;
-    const n = kind === 'goal'
+    const n = kind === 'task'
+      ? { key, kind, id, title: row.title, type: 'card', done: !!row.completed_at, gone: !!row.dropped_at && !row.completed_at, held: false, at: row.completed_at || null, in: (projectById.get(row.project_id) || {}).name || '' }
+      : kind === 'goal'
       ? { key, kind, id, title: row.title, type: row.kind || 'goal', done: row.status === 'achieved', gone: row.status === 'dropped', held: false, at: row.achieved_at || null }
       : { key, kind, id, title: row.name, type: 'project', done: row.status === 'completed', gone: row.status === 'dropped', held: row.status === 'on_hold', at: row.completed_at || null };
     Object.assign(n, { requires: [], proposed: [], unlocks: [], raw: row });
@@ -114,13 +119,22 @@ export function opensWith(tree, key) {
 }
 
 // Would adding "node requires req" make a loop? (The database refuses too; this is for a plain sentence first.)
-export function wouldLoop(links, node, req) {
+// tasks: the cards, so that a card is known to rest on its project.
+export function wouldLoop(links, node, req, tasks = []) {
   if (node === req) return true;
   const below = new Map();
+  tasks.filter((t) => t.project_id).forEach((t) => below.set(keyOf('task', t.id), [keyOf('project', t.project_id)]));
   links.filter((l) => live(l) && l.requires_id).forEach((l) => { const k = keyOf(l.node_kind, l.node_id); if (!below.has(k)) below.set(k, []); below.get(k).push(keyOf(l.requires_kind, l.requires_id)); });
   const seen = new Set(); const stack = [req];
   while (stack.length) { const k = stack.pop(); if (k === node) return true; if (seen.has(k)) continue; seen.add(k); (below.get(k) || []).forEach((x) => stack.push(x)); }
   return false;
+}
+
+// Why a card can't be what this node requires, in words; '' when it can.
+export function cardTrouble(node, task) {
+  if (!task) return 'That card isn’t there.';
+  if (node.kind === 'project' && task.project_id === node.id) return 'A project can’t require a card inside itself: on hold, it would hide the card that opens it.';
+  return '';
 }
 
 // ----- links already written into the library, in words -----

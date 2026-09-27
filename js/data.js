@@ -6,6 +6,7 @@ import { saveReminders, refreshReminders } from './editors/notifyField.js';
 import { uploadFiles } from './editors/attachField.js';
 import { ancestors, descendants, stepsOf } from './tree.js';
 import { isAvailable } from './availability.js';
+import { unlockedBy, startProjects } from './views/tree.js';
 
 const OUTBOX_KEY = 'todo.outbox';
 
@@ -70,6 +71,9 @@ export async function loadAll() {
   // Cards that events point at but that aren't loaded any more (completed a while ago): fetched so the link still reads.
   const linked = [...new Set(events.map((e) => e.task_id).filter((id) => id && !byId(tasks, id)))];
   db.eventTasks = linked.length ? await run(sb.from('tasks').select('*').in('id', linked.slice(0, 1000))) : [];
+  // Cards the tech tree requires that were finished a while ago: fetched so the tree can show them as done.
+  const cards = [...new Set(treeLinks.filter((l) => l.requires_kind === 'task' && l.requires_id && !byId(tasks, l.requires_id)).map((l) => l.requires_id))];
+  db.treeTasks = cards.length ? await run(sb.from('tasks').select('*').in('id', cards.slice(0, 1000))) : [];
   await loadSettings();
 }
 
@@ -151,6 +155,7 @@ export async function setCompleted(task, done) {
   const project = task.project_id && byId(db.projects, task.project_id);
   const projectWasOpen = project && ['active', 'on_hold'].includes(project.status);
   const blockedBefore = done ? new Set(waitersOf(task).filter((w) => !isAvailable(w)).map((w) => w.id)) : new Set();
+  const unlocks = done ? unlockedBy(task.id) : []; // on the tech tree: what this card opens
   const [row] = await run(sb.from('tasks').update({ completed_at }).eq('id', task.id).select());
   task = syncRow('tasks', task, row);
   const next = repeating ? (await pullNewSince(since)).tasks.find((t) => t.title === task.title && !t.completed_at) : null;
@@ -166,8 +171,10 @@ export async function setCompleted(task, done) {
   const elephant = finished[finished.length - 1];
   const freed = waitersOf(task).filter((w) => blockedBefore.has(w.id) && isAvailable(w));
   const freedMsg = freed.length ? ` · now available: ${freed.length === 1 ? `“${freed[0].title}”` : `${freed.length} cards`}` : '';
-  const msg = (elephant ? `🎉 Last step done · “${elephant.title}” is complete` : projectDone ? `Completed · “${project.name}” is done too` : next ? `Completed · next one ${nextAt ? fmtNext(nextAt) : 'is ready'}` : 'Completed') + freedMsg;
-  toast(msg, [{ label: task.gain ? 'Did you gain it?' : 'Add note', run: () => openCompletionNote(task) },
+  const treeMsg = unlocks.length ? ` · unlocked: ${unlocks.slice(0, 2).map((x) => `“${x.title}”`).join(', ')}${unlocks.length > 2 ? ` +${unlocks.length - 2}` : ''}` : '';
+  const toStart = unlocks.filter((x) => x.kind === 'project' && x.held).map((x) => x.id);
+  const msg = (elephant ? `🎉 Last step done · “${elephant.title}” is complete` : projectDone ? `Completed · “${project.name}” is done too` : next ? `Completed · next one ${nextAt ? fmtNext(nextAt) : 'is ready'}` : 'Completed') + freedMsg + treeMsg;
+  toast(msg, [...(toStart.length ? [{ label: toStart.length === 1 ? 'Start it' : `Start ${toStart.length}`, run: () => startProjects(toStart) }] : []), { label: task.gain ? 'Did you gain it?' : 'Add note', run: () => openCompletionNote(task) },
     { label: 'Undo', run: () => undoComplete(task, projectDone && project, next, repeating) }]);
 }
 

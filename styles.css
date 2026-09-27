@@ -1635,3 +1635,27 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .hz-across { margin-top: 0; }
 .hz-across .hz-alt { font-size: 20px; line-height: 1; }
 @media (min-width: 900px) { body.wide-view .view { max-width: 1240px; } }
+/* Tech tree: the linker (two browsers side by side) */
+@media (min-width: 900px) { .sheet.wide { max-width: 920px; } }
+.tl-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tl-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.tl-pane { display: grid; gap: 6px; min-width: 0; align-content: start; }
+.tl-label { font-size: 13px; font-weight: 700; color: var(--muted); }
+.tl-q { width: 100%; }
+.tl-list { height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; padding: 4px 0; background: var(--bg, transparent); }
+@media (max-width: 700px) { .tl-list { height: 200px; } }
+.tl-head { padding: 8px 10px 3px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.tl-none { padding: 5px 10px 5px calc(10px + var(--d, 0) * 18px); font-size: 13px; color: var(--muted); }
+.tl-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px 5px calc(4px + var(--d, 0) * 18px); font-size: 14px; line-height: 1.3; cursor: pointer; }
+.tl-row:hover, .tl-row.at { background: var(--surface-2); }
+.tl-row.on { background: var(--accent-soft); color: var(--accent); }
+.tl-row.dim .tl-t { color: var(--muted); }
+.tl-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-t mark { background: color-mix(in srgb, var(--flag) 30%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.tl-ic { flex: none; width: 18px; text-align: center; font-size: 13px; }
+.tl-caret { flex: none; width: 20px; height: 20px; padding: 0; border: none; background: none; color: var(--muted); font-size: 12px; cursor: pointer; }
+.tl-row .chip { flex: none; font-size: 11px; padding: 1px 7px; }
+.tl-out { display: grid; gap: 3px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 14px; min-height: 44px; }
+.tl-bad { color: var(--due); font-size: 13px; }
+.tt-type-card { border-style: dashed; padding-top: 8px; padding-bottom: 8px; }
+.tt-type-card .tt-title { font-size: 13px; font-weight: 600; }

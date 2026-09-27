@@ -116,7 +116,7 @@ export function toggleCollapsed(id) {
 // Every sheet (editors, quick entry, token) shares one <dialog>; each opener starts compact.
 export function openSheet(html) {
   const sheet = $('#sheet');
-  sheet.classList.remove('full');
+  sheet.classList.remove('full', 'wide');
   sheet.innerHTML = html;
   return sheet;
 }
