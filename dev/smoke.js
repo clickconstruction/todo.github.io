@@ -469,7 +469,37 @@ async function horizonChecks(check) {
 
   $('[data-hz="edit-text"]').click(); await until(() => !!ta());
   check('Edit: the same text, brackets and all', ta().value === row().purpose && ta().value.includes('[ ] Am I making kids'));
-  $('[data-hz="done-text"]').click(); await until(() => !!$('.hz-read'));
+  // Headings, bold and italic: buttons that write plain marks; the page as it will read sits beside the text.
+  const pv = () => $('[data-hz-preview="purpose"]');
+  const sel = (needle) => { const i = ta().value.indexOf(needle); ta().focus(); ta().setSelectionRange(i, i + needle.length); };
+  check('editing shows the page as it will read, with its checkboxes (not tickable there)', !!pv() && pv().querySelectorAll('input[type=checkbox]').length === 3 && [...pv().querySelectorAll('input')].every((x) => x.disabled && !x.dataset.hzTick) && ['heading', 'bold', 'italic', 'bullet'].every((k) => !!$(`[data-hz="fmt-${k}"]`)));
+  sel('Survive and replicate'); $('[data-hz="fmt-bold"]').click();
+  check('B makes the selection bold, as plain marks, and the preview follows', ta().value.includes('**Survive and replicate**.') && has('[data-hz-preview="purpose"] strong', 'survive and replicate') && !has('[data-hz-preview="purpose"]', '**') && ta().value.slice(ta().selectionStart, ta().selectionEnd) === 'Survive and replicate', ta().value);
+  $('[data-hz="fmt-bold"]').click();
+  check('B again takes it off', !ta().value.includes('**') && !pv().querySelector('strong'));
+  sel('replicate'); $('[data-hz="fmt-italic"]').click();
+  check('I makes it italic', ta().value.includes('Survive and *replicate*.') && has('[data-hz-preview="purpose"] em', 'replicate'));
+  sel('Survive'); ta().dispatchEvent(new KeyboardEvent('keydown', { key: 'b', metaKey: true, bubbles: true, cancelable: true }));
+  check('⌘B is bold too', ta().value.includes('**Survive** and *replicate*.') && has('[data-hz-preview="purpose"] strong', 'survive'));
+  sel('PURPOSE'); $('[data-hz="fmt-heading"]').click();
+  check('H makes the line a title', ta().value.startsWith('# PURPOSE\n') && has('[data-hz-preview="purpose"] .hz-h1', 'purpose'));
+  $('[data-hz="fmt-heading"]').click();
+  check('H again: a section', ta().value.startsWith('## PURPOSE\n') && !pv().querySelector('.hz-h1') && has('[data-hz-preview="purpose"] .hz-h', 'purpose'));
+  $('[data-hz="fmt-heading"]').click();
+  check('H a third time: plain again', ta().value.startsWith('PURPOSE\n'));
+  $('[data-hz="fmt-heading"]').click();
+  sel('Am I making kids'); $('[data-hz="fmt-bold"]').click();
+  check('a checkbox line can carry bold', ta().value.includes('[ ] **Am I making kids**') && pv().querySelectorAll('input[type=checkbox]').length === 3 && has('[data-hz-preview="purpose"] .hz-check strong', 'am i making kids'));
+  const was = ta().value; ta().value = `${was}\n<img src=x onerror="window.__pwned=1"> <b>not bold</b>`; ta().dispatchEvent(new Event('input', { bubbles: true })); await wait(100);
+  check('anything typed stays text: no markup gets through', !pv().querySelector('img') && !pv().querySelector('b') && !window.__pwned && has('[data-hz-preview="purpose"]', '<b>not bold</b>'));
+  ta().value = was; ta().dispatchEvent(new Event('input', { bubbles: true }));
+  await until(() => (row().purpose || '') === was, 2000);
+  $('[data-hz="done-text"]').click(); await until(() => !!$('.hz-read:not(.hz-preview)') && !ta());
+  check('Done: the page reads formatted, and the text saved is plain marks', has('.hz-read .hz-h1', 'purpose') && has('.hz-read strong', 'survive') && has('.hz-read em', 'replicate') && !has('.hz-read', '**') && !has('.hz-read', '# ') && row().purpose === was && boxes().length === 3, row().purpose);
+  boxes()[0].click(); await until(() => /\[x\] \*\*Am I making kids\*\*/.test(row().purpose || ''));
+  check('ticking a bold checkbox keeps its marks', /\[x\] \*\*Am I making kids\*\*/.test(row().purpose) && has(undefined, '1 of 3 ticked'));
+  app.hzEdit = null; await go('#horizons');
+  check('the ladder shows words, not marks', has(undefined, 'survive and replicate') && !has(undefined, '**survive'));
   await go('#horizons/vision');
   check('vision works the same way (and starts ready to write)', !!$('textarea[data-hz-field="vision"]') && !!$('[data-hz="add-check"][data-kind="vision"]'));
   app.hzEdit = null;

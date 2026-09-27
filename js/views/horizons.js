@@ -7,7 +7,7 @@ import { projectRow } from '../rows.js';
 import { saveSettings } from '../prefs.js';
 import { isAvailable } from '../availability.js';
 import { areaBalance, isDueForReview, bigReviewsDue } from '../whatnow.js';
-import { parseText, counts, setTick, clearTicks, toggleBoxes } from '../horizon-text.js';
+import { parseText, counts, setTick, clearTicks, toggleBoxes, inlineHtml, plain, toggleWrap, cycleHeading, toggleBullets } from '../horizon-text.js';
 
 export const liveAreas = () => (db.areas || []).filter((a) => !a.archived_at).sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
 export const activeGoals = () => (db.goals || []).filter((g) => g.status === 'active').sort((a, b) => String(a.target_date || '9').localeCompare(String(b.target_date || '9')) || a.title.localeCompare(b.title));
@@ -36,7 +36,7 @@ const balanceOf = (a) => areaBalance(a, { projects: db.projects, tasks: db.tasks
 
 const readAgo = (iso) => (iso ? `read ${fmtDate(iso)}` : 'not read yet');
 // The first line that says something: past a heading, and without a checkbox's brackets.
-const firstLine = (s) => { const l = parseText(s).filter((x) => x.text); return ((l.find((x) => x.kind !== 'heading') || l[0] || {}).text) || ''; };
+const firstLine = (s) => { const l = parseText(s).filter((x) => x.text); return plain((l.find((x) => x.kind !== 'heading') || l[0] || {}).text || ''); };
 
 // ---------- the ladder ----------
 export function viewHorizons(sub) {
@@ -71,28 +71,31 @@ export function viewHorizons(sub) {
     <p class="view-sub">Every quarter: <a href="#horizons/quarterly">the quarterly check-in</a>${s.horizons_quarter_at ? ` (last ${esc(fmtDate(s.horizons_quarter_at))})` : ''}. Every year: read your purpose and vision.</p>`;
 }
 
-// Purpose and vision: a page to read and tick, and the same text to edit. A line that starts with [ ] is a
-// checkbox (js/horizon-text.js); ticking saves in the text, and "Mark as read today" clears the ticks.
+// Purpose and vision: a page to read and tick, and the same text to edit, written plainly (js/horizon-text.js):
+// # title, ## section, **bold**, *italic*, - bullet, [ ] checkbox. Ticking saves in the text, and "Mark as read
+// today" clears the ticks. While you edit, the page as it will read sits beside the text (below it on a phone).
 const editing = (kind) => app.hzEdit === kind;
-function readHtml(kind, text) {
+function readHtml(kind, text, { preview = false } = {}) {
+  const words = (t) => inlineHtml(t, esc);
   let open = false;
   const out = [];
   const close = () => { if (open) { out.push('</div>'); open = false; } };
   parseText(text).forEach((l) => {
     if (l.kind === 'check') {
       if (!open) { out.push('<div class="hz-checks">'); open = true; }
-      out.push(`<label class="hz-check ${l.on ? 'on' : ''}"><input type="checkbox" data-hz-tick="${l.i}" data-kind="${kind}" ${l.on ? 'checked' : ''}><span>${esc(l.text) || '&nbsp;'}</span></label>`);
+      out.push(`<label class="hz-check ${l.on ? 'on' : ''}"><input type="checkbox" ${preview ? 'disabled' : `data-hz-tick="${l.i}" data-kind="${kind}"`} ${l.on ? 'checked' : ''}><span>${words(l.text) || '&nbsp;'}</span></label>`);
       return;
     }
     close();
-    if (l.kind === 'heading') out.push(`<h2 class="hz-h">${esc(l.text)}</h2>`);
-    else if (l.kind === 'bullet') out.push(`<p class="hz-li">${esc(l.text)}</p>`);
+    if (l.kind === 'heading') out.push(l.level === 1 ? `<h2 class="hz-h1">${words(l.text)}</h2>` : `<h3 class="hz-h">${words(l.text)}</h3>`);
+    else if (l.kind === 'bullet') out.push(`<p class="hz-li">${words(l.text)}</p>`);
     else if (l.kind === 'blank') out.push('<div class="hz-gap"></div>');
-    else out.push(`<p>${esc(l.text)}</p>`);
+    else out.push(`<p>${words(l.text)}</p>`);
   });
   close();
-  return out.join('');
+  return out.join('') || (preview ? '<p class="hint">The page as it will read shows here.</p>' : '');
 }
+const TOOLS = [['heading', 'H', 'Heading: title, then section, then plain again'], ['bold', 'B', 'Bold (⌘B)'], ['italic', 'I', 'Italic (⌘I)'], ['bullet', '•', 'Bullet'], ['check', '☐', 'Checkbox: tick it when you read']];
 function textPage(kind) {
   const s = app.settings || {};
   const isP = kind === 'purpose';
@@ -105,10 +108,11 @@ function textPage(kind) {
     <div class="view-head"><h1 class="horizons">${isP ? 'Purpose and principles' : 'Vision'}</h1>${edit ? '<button class="btn small primary" data-hz="done-text">Done</button>' : `<button class="btn small" data-hz="edit-text" data-kind="${kind}">Edit</button>`}</div>
     <p class="view-sub">${isP ? 'Why you do what you do, and the standards you hold yourself to. Read it once a year, or whenever a decision is hard.' : 'Where you want to be in 3 to 5 years: your work, family, health, money. Read it once a year.'}</p>
     ${isP ? '' : `<label class="set-row hz-year"><span class="set-text"><b>By</b></span><input type="number" min="2000" max="2200" data-hz-field="vision_year" value="${esc(s.vision_year || new Date().getFullYear() + 3)}" inputmode="numeric"></label>`}
-    ${edit ? `<div class="hz-tools"><button type="button" class="btn small" data-hz="add-check" data-kind="${kind}" title="Make the line you are on a checkbox (or plain again)">☐ Checkbox</button><span class="hint">A line that starts with [ ] is a checkbox you can tick when you read.</span></div>
-    <textarea class="hz-text" data-hz-field="${kind}" rows="16" placeholder="${isP ? 'I build things that last and treat people fairly…' : 'Two crews running without me on the phone at night…'}">${esc(text)}</textarea>
+    ${edit ? `<div class="hz-tools" role="toolbar" aria-label="Formatting">${TOOLS.map(([k, l, tip]) => `<button type="button" class="btn small hz-tool hz-tool-${k}" data-hz="${k === 'check' ? 'add-check' : `fmt-${k}`}" data-kind="${kind}" title="${tip}" aria-label="${tip}">${l}</button>`).join('')}<span class="hint">Select text, then press a button. It stays plain text: # title, **bold**, *italic*, [ ] checkbox.</span></div>
+    <div class="hz-edit"><div class="hz-pane"><span class="hz-pane-h">Write</span><textarea class="hz-text" data-hz-field="${kind}" rows="16" placeholder="${isP ? 'I build things that last and treat people fairly…' : 'Two crews running without me on the phone at night…'}">${esc(text)}</textarea></div>
+      <div class="hz-pane"><span class="hz-pane-h">As it will read</span><div class="hz-page hz-preview" data-hz-preview="${kind}" aria-live="off">${readHtml(kind, text, { preview: true })}</div></div></div>
     <p class="hint">${readAgo(s[`${kind}_read_at`])} · saves as you type</p>`
-    : `<div class="hz-read" data-hz-read="${kind}">${readHtml(kind, text)}</div>
+    : `<div class="hz-page hz-read" data-hz-read="${kind}">${readHtml(kind, text)}</div>
     <p class="hint">${readAgo(s[`${kind}_read_at`])}${ticks}</p>`}
     <p><button class="btn ${!edit && c.total && c.on === c.total ? 'primary' : ''}" data-hz="read" data-kind="${kind}">Mark as read today</button>${c.total ? ' <span class="hint">clears the ticks</span>' : ''}</p>`;
 }
@@ -300,17 +304,28 @@ export async function horizonsAction(el) {
     if (ta) await saveSettings({ [ta.dataset.hzField]: ta.value }, { quiet: true });
     app.hzEdit = null;
   }
-  else if (a === 'add-check') {
-    const ta = $(`textarea[data-hz-field="${el.dataset.kind}"]`);
-    if (!ta) return;
-    const r = toggleBoxes(ta.value, ta.selectionStart, ta.selectionEnd);
-    ta.value = r.text; ta.focus(); ta.setSelectionRange(r.end, r.end);
-    ta.dispatchEvent(new Event('input', { bubbles: true })); // saves as any typing does
-    return;
-  }
+  else if (a === 'add-check' || /^fmt-/.test(a)) { format($(`textarea[data-hz-field="${el.dataset.kind}"]`), a === 'add-check' ? 'check' : a.slice(4)); return; }
   else if (a === 'quarter-done') { await saveSettings({ horizons_quarter_at: now }); toast('Quarterly check-in done · next in three months'); }
   app.render();
 }
+
+// A toolbar button (or ⌘B / ⌘I): change the text the way typing the marks would, keep the words selected.
+function format(ta, what) {
+  if (!ta) return;
+  const args = [ta.value, ta.selectionStart, ta.selectionEnd];
+  const r = what === 'bold' ? toggleWrap(...args, '**') : what === 'italic' ? toggleWrap(...args, '*') : what === 'heading' ? cycleHeading(...args) : what === 'bullet' ? toggleBullets(...args) : toggleBoxes(...args);
+  ta.value = r.text; ta.focus();
+  if (what === 'bold' || what === 'italic') ta.setSelectionRange(r.start, r.end); else ta.setSelectionRange(r.end, r.end);
+  ta.dispatchEvent(new Event('input', { bubbles: true })); // saves, and redraws the preview, as any typing does
+}
+document.addEventListener('keydown', (e) => {
+  const ta = e.target && e.target.classList && e.target.classList.contains('hz-text') ? e.target : null;
+  if (!ta || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+  const what = { b: 'bold', i: 'italic' }[String(e.key).toLowerCase()];
+  if (!what) return;
+  e.preventDefault();
+  format(ta, what);
+});
 
 // Text pages save as you type (debounced); selects link projects.
 let textTimer;
@@ -320,6 +335,8 @@ export function horizonsInput(e) {
   clearTimeout(textTimer);
   const key = el.dataset.hzField;
   const value = key === 'vision_year' ? (Number(el.value) || null) : el.value;
+  const pv = key === 'vision_year' ? null : $(`[data-hz-preview="${key}"]`);
+  if (pv) pv.innerHTML = readHtml(key, el.value, { preview: true });
   textTimer = setTimeout(() => saveSettings({ [key]: value }, { quiet: true }).catch(() => {}), 600);
   return true;
 }

@@ -1547,12 +1547,12 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .fr-back-undo [data-fr="undo"] { max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 520px) { .fr-back-undo [data-fr="undo"] { max-width: 11em; } }
 /* Horizons: purpose and vision as a page to read and tick (js/horizon-text.js) */
-.hz-read { padding: 14px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); margin: 8px 0; overflow-wrap: anywhere; }
-.hz-read p { margin: 4px 0; line-height: 1.5; }
-.hz-read .hz-h { font-size: 12px; font-weight: 700; letter-spacing: .6px; color: var(--muted); margin: 14px 0 4px; }
-.hz-read .hz-h:first-child { margin-top: 0; }
-.hz-read .hz-li { padding-left: 18px; position: relative; }
-.hz-read .hz-li::before { content: "•"; position: absolute; left: 4px; color: var(--muted); }
+.hz-page { padding: 14px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); margin: 8px 0; overflow-wrap: anywhere; }
+.hz-page p { margin: 4px 0; line-height: 1.5; }
+.hz-page .hz-h { font-size: 12px; font-weight: 700; letter-spacing: .6px; color: var(--muted); margin: 14px 0 4px; }
+.hz-page .hz-h:first-child { margin-top: 0; }
+.hz-page .hz-li { padding-left: 18px; position: relative; }
+.hz-page .hz-li::before { content: "•"; position: absolute; left: 4px; color: var(--muted); }
 .hz-gap { height: 8px; }
 .hz-checks { display: grid; gap: 2px; margin: 4px 0; }
 .hz-check { display: flex; align-items: flex-start; gap: 10px; padding: 6px 4px; border-radius: 8px; cursor: pointer; line-height: 1.45; }
@@ -1560,3 +1560,18 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .hz-check input { flex: none; width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--accent); }
 .hz-check.on span { color: var(--muted); text-decoration: line-through; }
 .hz-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 6px; }
+/* Horizons editor: formatting buttons, and the page as it will read beside the text */
+.hz-tool { min-width: 36px; padding-left: 10px; padding-right: 10px; }
+.hz-tool-bold { font-weight: 800; }
+.hz-tool-italic { font-style: italic; font-family: Georgia, 'Times New Roman', serif; }
+.hz-edit { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 900px) { .hz-edit { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+.hz-pane { display: grid; gap: 4px; min-width: 0; }
+.hz-pane-h { font-size: 12px; font-weight: 700; letter-spacing: .4px; color: var(--muted); text-transform: uppercase; }
+.hz-edit .hz-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+.hz-preview { margin: 0; min-height: 280px; border-style: dashed; }
+.hz-preview .hz-check { cursor: default; }
+.hz-page .hz-h1 { font-size: 20px; font-weight: 700; margin: 0 0 8px; }
+.hz-page .hz-h1:not(:first-child) { margin-top: 16px; }
+.hz-page strong { font-weight: 700; }
+.hz-page em { font-style: italic; }

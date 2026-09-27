@@ -1,6 +1,6 @@
 // Horizons of Focus and "What now?" for agents (same rules as the app: js/whatnow.js).
 import { rankNow, areaBalance, isDueForReview, bigReviewsDue } from '../../js/whatnow.js';
-import { parseText, counts, setTick, findTick } from '../../js/horizon-text.js';
+import { parseText, counts, setTick, findTick, plain } from '../../js/horizon-text.js';
 
 export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, calendar }) {
   // Link many projects in two requests (one lookup, one batched update): a per-project loop ran past
@@ -32,7 +32,7 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
         const big = bigReviewsDue({ settings: s, goals, areas, projects });
         const text = (v) => (include_text ? v || '' : String(v || '').split('\n')[0].slice(0, 200));
         // Checkboxes in the text (lines that start with [ ]): how many, and which are still to tick.
-        const boxes = (v) => { const c = counts(v); return c.total ? { ticked: c.on, of: c.total, left: parseText(v).filter((l) => l.kind === 'check' && !l.on).map((l) => l.text).slice(0, 30) } : undefined; };
+        const boxes = (v) => { const c = counts(v); return c.total ? { ticked: c.on, of: c.total, left: parseText(v).filter((l) => l.kind === 'check' && !l.on).map((l) => plain(l.text)).slice(0, 30) } : undefined; };
         return {
           purpose: { text: text(s.purpose) || null, last_read: localDate(s.purpose_read_at, api.tz), checkboxes: boxes(s.purpose) },
           vision: { year: s.vision_year || null, text: text(s.vision) || null, last_read: localDate(s.vision_read_at, api.tz), checkboxes: boxes(s.vision) },
@@ -108,7 +108,7 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
     },
     {
       name: 'save_horizon',
-      description: 'Write the user\'s purpose and principles or their vision (3-5 years), in their words. In the text, a line that starts with [ ] is a checkbox the user ticks as they read ([x] = ticked); put one on the lines they want to check themselves against. tick / untick: the text of one checkbox, to tick it for them. read: true records that they read it today (the yearly read) and clears every tick, so the next read starts fresh. kind quarterly with read: true records the quarterly check-in on goals and areas as done.',
+      description: 'Write the user\'s purpose and principles or their vision (3-5 years), in their words. The text is plain and reads formatted in the app: # Title, ## Section, **bold**, *italic*, - bullet, one item per line. A line that starts with [ ] is a checkbox the user ticks as they read ([x] = ticked); put one on the lines they want to check themselves against. tick / untick: the text of one checkbox, to tick it for them. read: true records that they read it today (the yearly read) and clears every tick, so the next read starts fresh. kind quarterly with read: true records the quarterly check-in on goals and areas as done.',
       inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['purpose', 'vision', 'quarterly'] }, text: { type: 'string' }, year: { type: 'integer', description: 'vision: the year it looks ahead to' }, read: { type: 'boolean' }, tick: { type: 'string', description: 'The text of the checkbox to tick' }, untick: { type: 'string', description: 'The text of the checkbox to un-tick' } }, required: ['kind'] },
       async run(api, a) {
         const body = {};

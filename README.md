@@ -21,7 +21,7 @@ A GTD (Getting Things Done) to-do app at **[todotooling.com](https://todotooling
 - **Places:** actions tied to locations, with Nearby, errand runs and location alerts.
 - **Reminders:** notifications on your devices that follow an item's dates.
 - **Attachments:** files on an action or project.
-- **A purpose you can tick:** in your purpose and vision, a line that starts with `[ ]` is a checkbox. Tick them as you read; "Mark as read today" clears them for next time.
+- **A purpose you can tick:** your purpose and vision are written plainly (`# title`, `## section`, `**bold**`, `*italic*`, `- bullet`) with buttons for each, and read formatted; while you edit, the page as it will read sits beside the text. A line that starts with `[ ]` is a checkbox: tick them as you read, and "Mark as read today" clears them for next time.
 - **Horizons, perspectives, the Eisenhower matrix, checklists, templates, a slipbox and a reading list.**
 - **An OmniFocus import** with a guided sort afterwards.
 - **Nothing is ever deleted.** Actions are completed or dropped, projects are completed or dropped, and folders are archived. The database enforces this.
