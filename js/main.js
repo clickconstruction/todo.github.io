@@ -61,8 +61,10 @@ import { planAction, planSubmit, planInput, planChange } from './views/plan.js';
 const view = $('#view');
 const typing = () => /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
 // Wide screens edit in the inspector; phones (and items not loaded locally) use the sheet.
+// So does Full Review on any screen: it hides the inspector (one card, nothing else).
 const inspectOrEdit = (id) => {
-  if (isWide() && byId(db.tasks, id)) return select('task', id);
+  const inspector = isWide() && !document.body.classList.contains('fr-mode');
+  if (inspector && byId(db.tasks, id)) return select('task', id);
   const t = findTask(id);
   if (t) openEditor(t);
 };

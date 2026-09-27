@@ -369,6 +369,12 @@ async function fullReview(check) {
   await until(() => location.hash.startsWith('#full/') && has(undefined, 'update my will'));
   const sid = location.hash.split('/')[1];
   check('starts: full screen, important first with why, progress', document.body.classList.contains('fr-mode') && has(undefined, 'update my will', 'mentions “my will”', '1 of 4') && t.review_items.filter((x) => x.session_id === sid).length === 4);
+  // Edit details on a wide screen: the inspector is hidden in Full Review, so the sheet opens instead.
+  window.__forceSheet = false; window.__forceWide = true;
+  $('.fr-edit [data-task="fW"]').click(); await wait(200);
+  check('Edit details opens the editor on a wide screen too', $('#sheet').open && $('#sheet input[name=title]').value === 'Update my will' && $('#inspector').hidden !== false);
+  if ($('#sheet').open) $('#sheet').close();
+  window.__forceWide = false; window.__forceSheet = true; await wait(100);
   check('queue: 1 important, 14 movies as one group, 2 singles', t.review_items.filter((x) => x.session_id === sid && x.kind === 'group').length === 1 && t.review_items.find((x) => x.kind === 'group' && x.session_id === sid).grp.task_ids.length === 14);
   // "Which one?" guide under the buttons: seven lines, hide is remembered, "? Which one" brings it back.
   try { localStorage.removeItem('tt.frGuide'); } catch { /* */ } app.frGuideOff = undefined; app.render(); await wait(30);
