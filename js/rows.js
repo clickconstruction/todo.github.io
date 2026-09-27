@@ -10,6 +10,7 @@ import { app } from './state.js';
 import { waitingPerson, agendaPerson, followUpDue, ENERGY_ICON, returnedFromTickler, isTickled } from './gtd.js';
 import { progress, nextStep, ancestors, rootOf, depthOf, heightOf, MAX_DEPTH } from './tree.js';
 import { folderButton } from './folders.js';
+import { isDaily, isTicked, describeDaily, summary } from './dailies.js';
 
 // Meta icons are small and monochrome: the words carry the meaning, the icon only helps scanning.
 const ic = (e, sp = ' ') => `<i class="mi" aria-hidden="true">${e}</i>${sp}`;
@@ -49,6 +50,8 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   if (t.folder_path && isOpen(t)) meta.push(folderButton(t.folder_path, { label: ic('📂', ''), cls: 'meta-folder' }));
   if (clips) meta.push(`<span class="meta-clip" title="${clips} attachment${clips === 1 ? '' : 's'}">${ic('📎', '')}${clips > 1 ? clips : ''}</span>`);
   if (bells) meta.push(`<span class="meta-bell" title="${bells} notification${bells === 1 ? '' : 's'}">${ic('🔔', '')}</span>`);
+  const dly = isDaily(t);
+  if (dly) meta.push(`<span class="meta-daily" title="${esc(describeDaily(t.daily))}">${ic('🔂')}${esc(summary(t) || describeDaily(t.daily))}</span>`);
   if (t.repeat_rule && isOpen(t)) meta.push(`<span class="meta-repeat" title="${esc(describe(t.repeat_rule))}">${ic('🔁', '')}</span>`);
   if (t.scheduled_at && isOpen(t)) { const d = new Date(t.scheduled_at); const today = new Date().toDateString() === d.toDateString(); meta.push(`<span class="meta-sched" title="Scheduled">${ic('⏰')}${esc(today ? '' : `${d.toLocaleDateString(undefined, { weekday: 'short' })} `)}${esc(d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))}</span>`); }
   const ck = t.checklist_id && isOpen(t) && (db.checklists || []).find((c) => c.id === t.checklist_id);
@@ -86,7 +89,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
     : hierarchy && hasGroups ? '<span class="disclosure-spacer"></span>' : '';
   const addSub = kids.length && isOpen(t) ? `<button class="icon-btn add-sub" data-add-sub="${t.id}" aria-label="Add a step to ${esc(t.title)}" title="Add a step">＋</button>` : '';
   return `<li class="row ${cls} ${kids.length ? 'group' : ''}" data-task="${t.id}" style="--depth:${hierarchy ? depth : 0}">
-    ${toggle}<button class="${checkCls}" data-check="${t.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>
+    ${toggle}${dly ? `<button class="dly-box ${isTicked(t) ? 'on' : ''}" data-dly-tick="${t.id}" aria-pressed="${isTicked(t)}" aria-label="${isTicked(t) ? 'Un-tick' : 'Tick'} for today">✓</button>` : `<button class="${checkCls}" data-check="${t.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>`}
     <div class="row-main"><div class="row-title">${esc(t.title)}</div>${t.gain && !done ? `<div class="row-gain">→ ${esc(t.gain)}${t.gain_by === 'agent' ? ' <span class="chip sug">Claude suggested</span>' : ''}</div>` : ''}${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}${prog}</div>
     <span class="row-signals">${t.notes ? '<span class="sig-note" title="Has notes" aria-label="Has notes">📝</span>' : ''}
       ${isOpen(t) ? `<button class="flag-btn ${t.flagged ? 'on' : ''}" data-flag="${t.id}" aria-pressed="${!!t.flagged}" aria-label="${t.flagged ? 'Unflag' : 'Flag'}" title="${t.flagged ? 'Unflag' : 'Flag'}">⚑</button>` : ''}</span>

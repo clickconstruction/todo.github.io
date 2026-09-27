@@ -13,7 +13,7 @@
   function seed() {
     const T = (o) => ({ user_id: uid, parent_id: null, project_id: null, in_inbox: false, notes: '', completion_note: '', flagged: false,
       defer_at: null, planned_at: null, due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app',
-      energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, sort: 0, created_at: at(-20), updated_at: at(-1), ...o });
+      energy: null, daily: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, sort: 0, created_at: at(-20), updated_at: at(-1), ...o });
     const P = (o) => ({ user_id: uid, folder_id: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false,
       review_every_days: 7, review_every: 1, review_unit: 'week', last_reviewed_at: null, next_review_at: null, completed_at: null, sort: 0,
       defer_at: null, planned_at: null, due_at: null, estimate_minutes: null, place_id: null, location_trigger: null, location_radius_m: null,
@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      task_waits: [], events: [], perspectives: [], imports: [], settle_ops: [], review_sessions: [], review_items: [], slipbox_notes: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      daily_ticks: [], task_waits: [], events: [], perspectives: [], imports: [], settle_ops: [], review_sessions: [], review_items: [], slipbox_notes: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -179,7 +179,25 @@
     });
   }
 
+  // Mirrors tasks_daily_guard / daily_ticks_guard (migration 20261101000001).
+  const dayStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  function tickGuard(r, before) {
+    const t = tables.tasks.find((x) => x.id === r.task_id && x.user_id === r.user_id);
+    if (!t) return 'That action isn’t yours.';
+    if (before && (before.task_id !== r.task_id || before.day !== r.day)) return 'A tick stays on its action and day.';
+    if (r.state === 'done' && (!before || before.state !== 'done')) {
+      if (!t.daily) return 'That action isn’t a daily one.';
+      if (!isOpen(t)) return 'That action is closed.';
+      if (r.day > dayStr(new Date(Date.now() + 86400000))) return 'That day hasn’t come yet.';
+      if (!before && tables.daily_ticks.some((x) => x.task_id === r.task_id && x.day === r.day)) return 'duplicate key value violates unique constraint "daily_ticks_task_id_day_key"';
+    }
+    return null;
+  }
   function taskRules(t, before) {
+    if (t.daily) {
+      if (!['must', 'should'].includes(t.daily.tier)) { t.daily = before ? before.daily || null : null; }
+      else { t.repeat_rule = null; t.due_at = null; t.planned_at = null; t.defer_at = null; if (!t.daily.since) t.daily = { ...t.daily, since: (before && before.daily && before.daily.since) || dayStr(new Date()) }; }
+    }
     // tasks_people_guard: delegated_at when waiting_on changes; no follow-up without a person.
     if (t.waiting_on && (!before || before.waiting_on !== t.waiting_on) && !t.delegated_at) t.delegated_at = now();
     if (!t.waiting_on) t.follow_up_at = null;
@@ -247,7 +265,7 @@
   const DEFAULTS = {
     tasks: () => ({ project_id: null, parent_id: null, in_inbox: true, notes: '', completion_note: '', flagged: false, defer_at: null, planned_at: null,
       due_at: null, estimate_minutes: null, completed_at: null, dropped_at: null, source: 'app', place_id: null, location_trigger: null, location_radius_m: null, repeat_rule: null, steps_in_order: false, steps_single: false, complete_with_last: true, on_unblock: 'forecast', scheduled_at: null, scheduled_minutes: null, checklist_id: null,
-      energy: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, gain: '', gain_cost: '', gain_by: null, gain_met: null, clarify_skips: 0, reading_type: null, reading_state: null, reading_url: null, reading_notes_done: false, important: null, folder_path: null }),
+      energy: null, daily: null, waiting_on: null, delegated_at: null, follow_up_at: null, agenda_for: null, tickler: false, reference_id: null, gain: '', gain_cost: '', gain_by: null, gain_met: null, clarify_skips: 0, reading_type: null, reading_state: null, reading_url: null, reading_notes_done: false, important: null, folder_path: null }),
     projects: () => ({ folder_id: null, folder_path: null, notes: '', status: 'active', kind: 'parallel', complete_with_last: false, flagged: false, review_every_days: 7,
       review_every: 1, review_unit: 'week', last_reviewed_at: null, completed_at: null, defer_at: null, planned_at: null, due_at: null, estimate_minutes: null,
       place_id: null, location_trigger: null, location_radius_m: null, next_review_at: null, repeat_rule: null, outcome: '', area_id: null, goal_id: null, purpose: '', purpose_by: null, principles: '', plan: null }),
@@ -262,6 +280,7 @@
     review_sessions: () => ({ title: 'Full Review', scope: {}, current_item: null, status: 'active', agent_seen_at: null, agent_status: '', finished_at: null }),
     review_items: () => ({ task_id: null, grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: null }),
     checklists: () => ({ items: [], complete_action: true, reflect: false, sort: 0, archived_at: null }),
+    daily_ticks: () => ({ state: 'done' }),
     checklist_runs: () => ({ started_at: new Date().toISOString(), finished_at: null, ticked: [], total: 0, notes: {} }),
     areas: () => ({ standards: '', review_every_days: 30, last_reviewed_at: null, sort: 0, archived_at: null }),
     goals: () => ({ why: '', area_id: null, target_date: null, status: 'active', achieved_at: null, review_every_days: 30, last_reviewed_at: null, sort: 0 }),
@@ -273,7 +292,7 @@
     reference_items: () => ({ body: '', topic: '', secret_value: null, project_id: null, archived_at: null }),
     attachments: () => ({ task_id: null, project_id: null, reference_id: null, size: 0, mime: 'application/octet-stream', archived_at: null }),
   };
-  const NO_DELETE = { daily_reviews: 'daily reviews are kept.', checklists: 'checklists are archived, not deleted.', checklist_runs: 'runs are kept.', areas: 'areas are archived, not deleted.', goals: 'goals are achieved or dropped, not deleted.', weekly_reviews: 'reviews are kept.', people: 'people are archived, not deleted.', reference_items: 'reference items are archived, not deleted.', calendars: 'calendars are archived, not deleted.', events: 'events are archived, not deleted.', project_templates: 'templates are archived, not deleted.', imports: 'imports are kept.', perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
+  const NO_DELETE = { daily_ticks: 'ticks are kept.', daily_reviews: 'daily reviews are kept.', checklists: 'checklists are archived, not deleted.', checklist_runs: 'runs are kept.', areas: 'areas are archived, not deleted.', goals: 'goals are achieved or dropped, not deleted.', weekly_reviews: 'reviews are kept.', people: 'people are archived, not deleted.', reference_items: 'reference items are archived, not deleted.', calendars: 'calendars are archived, not deleted.', events: 'events are archived, not deleted.', project_templates: 'templates are archived, not deleted.', imports: 'imports are kept.', perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
 
   // ----- PostgREST-ish filter parsing for .or() strings -----
   function splitTop(s) {
@@ -316,6 +335,7 @@
         const add = [].concat(st.payload).map((p) => ({ id: id(), user_id: uid, created_at: now(), updated_at: now(), sort: 0, ...(DEFAULTS[table] ? DEFAULTS[table]() : {}), ...p }));
         if (table === 'tasks') { for (const r of add) { const err = treeGuard(r); if (err) return { data: null, error: { message: err } }; } }
         if (table === 'task_waits') { for (const r of add) { const err = waitsGuard(r); if (err) return { data: null, error: { message: err } }; } }
+        if (table === 'daily_ticks') { for (const r of add) { const err = tickGuard(r, null); if (err) return { data: null, error: { message: err } }; } }
         rows.push(...add);
         add.forEach((r) => { if (table === 'projects') { reviewSchedule(r); projectStatusChange(r, null); } if (table === 'tasks') taskRules(r, null); if (table === 'notifications') { fireAt(r); history(r, 'notification', null, { kind: r.kind, offset_minutes: r.offset_minutes, at: r.at }); } });
         return { data: add.map(copy), error: null };
@@ -325,6 +345,7 @@
         if (table === 'tasks' && ('parent_id' in st.payload || 'project_id' in st.payload)) {
           for (const r of hit) { const trial = { ...r, ...st.payload }; const err = treeGuard(trial); if (err) return { data: null, error: { message: err } }; st.payload = { ...st.payload, project_id: trial.project_id, in_inbox: trial.in_inbox }; }
         }
+        if (table === 'daily_ticks') { for (const r of hit) { const err = tickGuard({ ...r, ...st.payload }, r); if (err) return { data: null, error: { message: err } }; } }
         hit.forEach((r) => {
           const before = { ...r };
           Object.assign(r, st.payload, { updated_at: now() });
@@ -570,7 +591,7 @@
           if (it.status !== 'pending') return { data: null, error: { message: 'That card was already decided (undo it first).' } };
           const s = it.suggestion;
           if (!s || !s.decision) return { data: null, error: { message: 'No suggestion to submit on this card.' } };
-          let snap = null; let stepsSnap = null; let ckSnap = null;
+          let snap = null; let stepsSnap = null; let ckSnap = null; let dySnap = null;
           if (it.kind === 'group') { if (s.proposal) it.grp = { ...it.grp, proposal: s.proposal }; }
           else {
             const t = tables.tasks.find((x) => x.id === it.task_id);
@@ -584,6 +605,10 @@
             (s.add_tag_names || []).forEach((nm) => { let g = tables.tags.find((x) => x.name.toLowerCase() === nm.toLowerCase()); if (!g) { g = { ...DEFAULTS.tags(), id: id(), user_id: uid, name: nm, sort: 0, created_at: now() }; tables.tags.push(g); } if (!tables.task_tags.some((l) => l.task_id === t.id && l.tag_id === g.id)) tables.task_tags.push({ task_id: t.id, tag_id: g.id, user_id: uid }); });
             tables.task_tags = tables.task_tags.filter((l) => !(l.task_id === t.id && (s.remove_tag_ids || []).includes(l.tag_id)));
             t.updated_at = now();
+            if (s.daily && typeof s.daily === 'object' && s.decision === 'keep') { // mirrors 20261101000001
+              dySnap = { t: 'daily', id: t.id, daily: t.daily || null, repeat_rule: t.repeat_rule || null };
+              const b = { ...t }; t.daily = { tier: s.daily.tier, ...(s.daily.weekdays ? { weekdays: s.daily.weekdays } : {}) }; taskRules(t, b);
+            }
             if (Array.isArray(s.steps) && s.steps.length && ['keep', 'someday'].includes(s.decision)) { // mirrors migration 20261020000001
               const addSteps = (parent, list) => { const base = Math.max(-1, ...tables.tasks.filter((c) => c.parent_id === parent.id).map((c) => c.sort || 0)) + 1; let i = 0; return list.flatMap((x) => { const o = x && typeof x === 'object' ? x : { title: x }; const title = String(o.title || '').trim(); if (!title) return []; const row = { ...DEFAULTS.tasks(), id: id(), user_id: uid, title, parent_id: parent.id, project_id: parent.project_id, in_inbox: false, sort: base + i++, steps_in_order: !!o.in_order, created_at: now(), updated_at: now() }; tables.tasks.push(row); return [row.id, ...(Array.isArray(o.steps) ? addSteps(row, o.steps) : [])]; }); }; // mirrors 20261028000001 (nested)
               const ids = addSteps(t, s.steps);
@@ -599,7 +624,7 @@
           }
           const res = await this.rpc('review_decide', { item: it.id, decision: s.decision, by: 'user', note: s.note });
           if (res.error) return res;
-          if (snap) it.before = [...(it.before || []), snap, ...(stepsSnap ? [stepsSnap] : []), ...(ckSnap ? [ckSnap] : [])];
+          if (snap) it.before = [...(it.before || []), ...(dySnap ? [dySnap] : []), snap, ...(stepsSnap ? [stepsSnap] : []), ...(ckSnap ? [ckSnap] : [])];
           it.suggestion = { ...s, applied_at: now() };
           return res;
         }
@@ -621,6 +646,7 @@
               if (e.t === 'slipbox') { const n = tables.slipbox_notes.find((x) => x.id === e.note); if (n) n.archived_at = now(); tables.tasks.find((t) => t.id === e.id).dropped_at = e.dropped_at; }
               if (e.t === 'checklist') { const tk = tables.tasks.find((x) => x.id === e.id); if (tk) tk.checklist_id = e.prev || null; const mc = e.made && tables.checklists.find((c) => c.id === e.made); if (mc) mc.archived_at = now(); }
               if (e.t === 'steps') { tables.tasks.forEach((c) => { if (e.ids.includes(c.id) && !c.completed_at && !c.dropped_at) c.dropped_at = now(); }); const p0 = tables.tasks.find((t) => t.id === e.id); if (p0) p0.steps_in_order = !!e.steps_in_order; }
+              if (e.t === 'daily') Object.assign(tables.tasks.find((t) => t.id === e.id), { daily: e.daily || null, repeat_rule: e.repeat_rule || null });
               if (e.t === 'fields') { Object.assign(tables.tasks.find((t) => t.id === e.id), { folder_path: e.folder_path ?? null, title: e.title, ...('notes' in e ? { notes: e.notes ?? '' } : {}), gain: e.gain, gain_by: e.gain_by, project_id: e.project_id, in_inbox: e.in_inbox, planned_at: e.planned_at, due_at: e.due_at, defer_at: e.defer_at, flagged: e.flagged });
                 tables.task_tags = tables.task_tags.filter((l) => l.task_id !== e.id).concat(e.tags.map((g) => ({ task_id: e.id, tag_id: g, user_id: uid }))); }
               if (e.t === 'expanded') tables.review_items.filter((x) => x.session_id === it.session_id && x.sort > it.sort && x.sort < it.sort + 1 && x.kind === 'task' && x.status === 'pending').forEach((x) => { x.status = 'void'; });

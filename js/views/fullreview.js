@@ -2,6 +2,8 @@
 // Claude in another window; it reads the same current card over the MCP (full_review), annotates it and
 // decides it with you, and the card here updates live (Realtime, with a polling fallback). Keys 1–4
 // decide, s skips, u undoes. Every decision can be undone; nothing is deleted.
+import { describeDaily, isDaily, summary as dailySummary } from '../dailies.js';
+import { describe } from '../repeat.js';
 import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen, openSheet } from '../state.js';
 import { loadAll, refreshTasks } from '../data.js';
 import { fmtDate } from '../dates.js';
@@ -213,6 +215,7 @@ function suggestionBar(it, t) {
       const n = countSteps(s.steps);
       row('🪜', `Break it down: ${n} step${n === 1 ? '' : 's'}${s.steps_in_order ? ', in order' : ''}${n > s.steps.length ? ' <span class="hint">(nested)</span>' : ''}${stepsOf(t).length ? ` <span class="hint">(after the ${stepsOf(t).length} it has)</span>` : ''}${stepsHtml(s.steps)}`);
     }
+    if (s.daily && s.decision === 'keep') row('🔂', `Make it daily: <b>${esc(describeDaily(s.daily))}</b> <span class="hint">a checkbox that starts fresh each day</span>${t.repeat_rule || t.due_at || t.planned_at ? ` <span class="sg-old">${esc([t.repeat_rule && describe(t.repeat_rule), t.due_at && `due ${when(t.due_at)}`, t.planned_at && `planned ${when(t.planned_at)}`].filter(Boolean).join(' · '))}</span>` : ''}`);
     if (s.checklist && ['keep', 'someday'].includes(s.decision)) {
       const ck = s.checklist;
       const list = Array.isArray(ck.items) ? ck.items : [];
@@ -272,6 +275,7 @@ function taskCard(it) {
     ${row('Project', 'project', p ? esc(p.name) : '<span class="hint">none</span>')}
     ${row('When', 'dates', [t.planned_at && `planned ${esc(fmtDate(t.planned_at))}`, t.due_at && `due ${esc(fmtDate(t.due_at))}`, t.defer_at && `from ${esc(fmtDate(t.defer_at))}`].filter(Boolean).join(' · ') || '<span class="hint">no dates</span>')}
     ${row('Tags', 'tags', tags.length ? tags.map((g) => `<span class="chip">${esc(tagLabel(g))}</span>`).join(' ') : '<span class="hint">none</span>')}
+    ${isDaily(t) ? row('Every day', 'daily', `${esc(describeDaily(t.daily))}${dailySummary(t) ? ` <span class="hint">${esc(dailySummary(t))}</span>` : ''}`) : t.repeat_rule ? row('Repeats', 'repeat', esc(describe(t.repeat_rule))) : ''}
     ${t.flagged ? row('Flag', 'flagged', '<span class="chip flagged-chip">⚑ Flagged</span>') : ''}
     ${t.folder_path ? row('Folder', 'folder', `<span class="fr-folder">${esc(shortPath(t.folder_path))}</span>${folderButton(t.folder_path)}`) : ''}
     ${stepsRow(t, row)}
@@ -422,7 +426,7 @@ export async function fullReviewAction(el) {
       const { openEditor } = await import('../editors/task.js');
       openEditor({ ...t, ...(sug.title ? { title: sug.title } : {}), ...(sug.task_notes ? { notes: sug.task_notes } : {}), ...('gain' in sug ? { gain: sug.gain, gain_by: sug.gain_suggested ? 'agent' : null } : {}),
         ...('project_id' in sug ? { project_id: sug.project_id } : {}), ...('planned' in sug ? { planned_at: sug.planned } : {}), ...('due' in sug ? { due_at: sug.due } : {}),
-        ...('defer' in sug ? { defer_at: sug.defer } : {}), ...('flagged' in sug ? { flagged: sug.flagged } : {}) });
+        ...('defer' in sug ? { defer_at: sug.defer } : {}), ...('flagged' in sug ? { flagged: sug.flagged } : {}), ...(sug.daily ? { daily: sug.daily } : {}) });
     }
     app.render();
   }

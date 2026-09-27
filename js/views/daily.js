@@ -1,6 +1,7 @@
 // Daily review. Morning, "Start your day": the calendar first (hard landscape), then must-dos, then up
 // to 3 things for today (planned today; "Fit in" makes a time block). Evening, "Shut down": capture,
 // carry over what didn't happen, a glance at tomorrow. One row per day (daily_reviews).
+import { mustLeft, summary } from '../dailies.js';
 import { db, app, sb, run, syncRow, esc, byId, isOpen, toast } from '../state.js';
 import { startOfToday, addDays, atDefaultTime, endOfToday, fmtDate } from '../dates.js';
 import { isAvailable } from '../availability.js';
@@ -62,7 +63,7 @@ function mustDos() {
   const due = db.tasks.filter((t) => isOpen(t) && t.due_at && new Date(t.due_at) <= end && !isWaiting(t)).sort((a, b) => a.due_at.localeCompare(b.due_at));
   const follow = db.tasks.filter((t) => followUpDue(t) && isWaiting(t));
   const tickled = db.tasks.filter((t) => returnedFromTickler(t) && !t.parent_id);
-  return { due, follow, tickled, inbox: db.tasks.filter((t) => t.in_inbox && !t.parent_id && isOpen(t) && !isTickled(t)).length };
+  return { due, follow, tickled, daily: mustLeft(), inbox: db.tasks.filter((t) => t.in_inbox && !t.parent_id && isOpen(t) && !isTickled(t)).length };
 }
 
 // Suggestions: the What now? ranking over what you could do today (not already in focus).
@@ -82,7 +83,7 @@ export function viewDaily(mode) {
   const focus = (r ? r.focus : []).filter((id) => byId(db.tasks, id));
   const day = dayHtml(todayKey());
   const m = mustDos();
-  const mustN = m.due.length + m.follow.length + m.tickled.length;
+  const mustN = m.due.length + m.follow.length + m.tickled.length + m.daily.length;
   const streak = dailyStreak();
   const focusRow = (t) => `<div class="dv-pick on" data-task="${t.id}"><button class="dv-box on ${t.completed_at ? 'done' : ''}" data-daily="unfocus" data-id="${t.id}" aria-label="Remove from today">✓</button>
     <span class="dv-x ${t.completed_at ? 'done' : ''}">${esc(t.title)}${t.estimate_minutes ? ` <span class="hint">${t.estimate_minutes} min</span>` : ''}</span>
@@ -93,6 +94,7 @@ export function viewDaily(mode) {
       <span><a class="btn primary" href="#now">What now? →</a> ${hour >= 15 ? '<a class="btn" href="#daily/shutdown">Shut down</a>' : ''}</span></div>` : ''}
     <h2 class="section-title dv-sec">Your day <span class="hint">${esc(day.line)}</span></h2><div class="dv-day">${day.html}</div>
     <h2 class="section-title dv-sec">Must-dos <span class="hint">${mustN || 'none'}</span></h2>
+    ${m.daily.map((t) => `<div class="dv-row" data-task="${t.id}"><button class="dly-box" data-dly-tick="${t.id}" aria-pressed="false" aria-label="Tick for today">✓</button><span class="dv-x">${esc(t.title)}</span><span class="chip">${/^missed/.test(summary(t)) ? esc(summary(t)) : 'every day'}</span></div>`).join('')}
     ${m.due.map((t) => `<div class="dv-row" data-task="${t.id}"><span class="dv-x">${esc(t.title)}</span><span class="chip red">${new Date(t.due_at) < startOfToday() ? 'overdue' : 'due today'}</span>${!t.planned_at || new Date(t.planned_at) > endOfToday() ? `<button class="btn small" data-daily="focus" data-id="${t.id}" ${focus.length >= MAX_FOCUS ? 'disabled' : ''}>Today</button>` : ''}</div>`).join('')}
     ${m.follow.map((t) => { const p = waitingPerson(t); return `<div class="dv-row" data-task="${t.id}"><span class="dv-x">${esc(t.title)}${p ? ` · ${esc(p.name)}` : ''}</span><span class="chip">follow up</span>${p && (p.email || p.phone) ? `<button class="btn small" data-daily="nudge" data-id="${t.id}">Nudge</button>` : ''}</div>`; }).join('')}
     ${m.tickled.map((t) => `<div class="dv-row" data-task="${t.id}"><span class="dv-x">📆 ${esc(t.title)}</span><span class="chip">from the tickler</span></div>`).join('')}

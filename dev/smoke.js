@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, dailies, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -348,6 +348,86 @@ async function slipboxReading(check) {
 }
 
 // Full Review: one card at a time, Claude alongside (simulated here by writing what the MCP writes).
+// Dailies: a checkbox that starts fresh each day, in two tiers (js/dailies.js, migration 20261101000001).
+async function dailies(check) {
+  const { app } = await import('/js/state.js');
+  const av = await import('/js/availability.js');
+  const D = await import('/js/dailies.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const day = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - n); return D.dayKey(d); };
+  const iso = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  const t = T();
+  const base = { ...t.tasks[0], notes: '', project_id: null, parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, completed_at: null, dropped_at: null, gain: '', waiting_on: null, agenda_for: null, scheduled_at: null, checklist_id: null, created_at: iso(30), updated_at: iso(30) };
+  const notToday = [0, 1, 2, 3, 4, 5, 6].filter((d) => d !== new Date().getDay());
+  t.tasks.push({ ...base, id: 'dM', title: 'Take medication', daily: { tier: 'must', since: day(4) } });
+  t.tasks.push({ ...base, id: 'dS', title: 'Stretch for ten minutes', daily: { tier: 'should', since: day(20) } });
+  t.tasks.push({ ...base, id: 'dW', title: 'Water the orchard', daily: { tier: 'should', weekdays: notToday, since: day(20) } });
+  t.tasks.push({ ...base, id: 'dR', title: 'Walk for 30min to relax my mind', project_id: 'p1', due_at: iso(3), repeat_rule: { every: 1, unit: 'day', from: 'assigned', n: 1 } });
+  [2, 3, 4].forEach((n) => t.daily_ticks.push({ id: `tk${n}`, user_id: 'u1', task_id: 'dM', day: day(n), state: 'done', created_at: iso(n), updated_at: iso(n) }));
+  [1, 3].forEach((n) => t.daily_ticks.push({ id: `ts${n}`, user_id: 'u1', task_id: 'dS', day: day(n), state: 'done', created_at: iso(n), updated_at: iso(n) }));
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const task = (id) => app && (window.__mock.tables.tasks.find((x) => x.id === id));
+  const { db } = await import('/js/state.js');
+  const local = (id) => db.tasks.find((x) => x.id === id);
+
+  await go('#forecast');
+  const titles = $$('#view .section-title').map((h) => h.innerText.toLowerCase());
+  const at = (needle) => titles.findIndex((x) => x.includes(needle));
+  check('Today: Have to and Should, each with its count, above Due', at('have to, every day') >= 0 && at('should, most days') > at('have to, every day') && at('due') > at('should, most days') && has('[data-dly-tier="must"]', '0 of 1') && has('[data-dly-tier="should"]', '0 of 1'), titles.join(' | '));
+  check('a have-to names its missed day; a should counts its week', has('.dly-row[data-task="dM"]', 'missed yesterday') && has('.dly-row[data-task="dS"]', '2 of 7 this week') && !!$('.dly-row[data-task="dM"] .dly-dot.red') && !$('.dly-row[data-task="dS"] .dly-dot.red'));
+  check('a daily for other weekdays isn’t asked for today', !$('.dly-row[data-task="dW"]'));
+  check('the repeating walk is overdue, a deadline it never was (before)', (await import('/js/views/forecast.js')).forecastData().overdue.some((x) => x.id === 'dR') && !$('.dly-row[data-task="dR"]'));
+  check('a daily checkbox is not an available action', !av.isAvailable(local('dM')) && !av.isAvailable(local('dS')));
+
+  $('.dly-row[data-task="dM"] [data-dly-tick]').click();
+  await until(() => t.daily_ticks.some((x) => x.task_id === 'dM' && x.day === day(0)));
+  await wait(100);
+  check('tick: recorded for today, the action stays open, the count moves', t.daily_ticks.some((x) => x.task_id === 'dM' && x.day === day(0) && x.state === 'done') && !task('dM').completed_at && has('[data-dly-tier="must"]', '1 of 1') && $('.dly-row[data-task="dM"] [data-dly-tick]').getAttribute('aria-pressed') === 'true');
+  $('.dly-row[data-task="dM"] [data-dly-tick]').click();
+  await until(() => t.daily_ticks.some((x) => x.task_id === 'dM' && x.day === day(0) && x.state === 'cleared'));
+  await wait(100);
+  check('un-tick: the tick is cleared, not deleted', t.daily_ticks.filter((x) => x.task_id === 'dM' && x.day === day(0)).length === 1 && has('[data-dly-tier="must"]', '0 of 1'));
+
+  await go('#daily');
+  const must = $$('#view .dv-row').map((r) => r.innerText.toLowerCase());
+  check('Daily review: an unticked have-to is a must-do, a should is not', must.some((x) => x.includes('take medication')) && !must.some((x) => x.includes('stretch for ten')) && !!$('.dv-row[data-task="dM"] [data-dly-tick]'), must.join(' | '));
+  $('.dv-row[data-task="dM"] [data-dly-tick]').click();
+  await until(() => !$('.dv-row[data-task="dM"]'));
+  check('ticked in the Daily review, it leaves the must-dos', !$('.dv-row[data-task="dM"]') && t.daily_ticks.some((x) => x.task_id === 'dM' && x.day === day(0) && x.state === 'done'));
+
+  // Make the repeating walk a daily one in the editor.
+  await go('#project/p1');
+  $('.row[data-task="dR"] .row-title').click(); await wait(200);
+  const form = $('#sheet form');
+  check('editor: Every day sits with Repeat', !!form && !!form.elements.daily_tier && form.elements.daily_tier.value === '');
+  form.elements.daily_tier.value = 'should'; form.elements.daily_tier.dispatchEvent(new Event('change', { bubbles: true }));
+  check('editor: choosing a tier shows the days and says what it does', !$('.dly-days', form).hidden && /empty dot/i.test($('[data-dly-hint]', form).textContent));
+  form.requestSubmit();
+  await until(() => task('dR').daily);
+  await wait(150);
+  check('saved: daily, and its repeat and due date are cleared', task('dR').daily.tier === 'should' && !!task('dR').daily.since && task('dR').repeat_rule === null && task('dR').due_at === null, JSON.stringify(task('dR').daily));
+  check('in its project the row has today’s checkbox, not Complete', !!$('.row[data-task="dR"] [data-dly-tick]') && !$('.row[data-task="dR"] [data-check]') && has('.row[data-task="dR"]', 'this week'));
+  await go('#forecast');
+  check('Today: the walk is under Should, and no longer overdue (after)', !(await import('/js/views/forecast.js')).forecastData().overdue.some((x) => x.id === 'dR') && !!$('.dly-row[data-task="dR"]') && has('[data-dly-tier="should"]', '0 of 2') && !$$('#view .row:not(.dly-row)').some((r) => r.dataset.task === 'dR'));
+
+  // Full Review: a suggestion makes it daily on Submit; Undo puts the repeat and due date back.
+  t.tasks.push({ ...base, id: 'dF', title: 'Read twenty pages', due_at: iso(2), repeat_rule: { every: 1, unit: 'day', from: 'assigned', n: 1 }, import_id: 'imD' });
+  t.review_sessions.push({ id: 'sD', user_id: 'u1', title: 'Full Review', scope: {}, current_item: 'iD', status: 'active', agent_seen_at: null, agent_status: '', finished_at: null, created_at: iso(0), updated_at: iso(0) });
+  t.review_items.push({ id: 'iD', session_id: 'sD', user_id: 'u1', sort: 1, kind: 'task', task_id: 'dF', grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: { decision: 'keep', daily: { tier: 'must' }, at: iso(0) }, created_at: iso(0), updated_at: iso(0) });
+  await loadAll(); app.fr = null;
+  await go('#full/sD');
+  await until(() => has(undefined, 'read twenty pages') && !!$('.sg-bar'));
+  check('Full Review: the suggestion says it becomes daily, and what goes', has('.sg-bar', 'make it daily', 'have to, every day', 'every day') && has('.fr-card', 'repeats'), text('.sg-bar'));
+  $('[data-fr="submit"]').click();
+  await until(() => task('dF').daily);
+  check('Submit: the action is daily, its repeat and due date gone', task('dF').daily && task('dF').daily.tier === 'must' && task('dF').repeat_rule === null && task('dF').due_at === null);
+  await wait(300);
+  const undo = $('[data-fr="undo"]');
+  if (undo) { undo.click(); await until(() => !task('dF').daily); }
+  check('Undo: an ordinary repeating action again, due date back', !!undo && !task('dF').daily && task('dF').repeat_rule && task('dF').repeat_rule.unit === 'day' && !!task('dF').due_at);
+  app.fr = null;
+}
+
 async function fullReview(check) {
   const { app } = await import('/js/state.js');
   app.fr = null; window.__frPollMs = 150;

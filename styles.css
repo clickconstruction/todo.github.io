@@ -1518,3 +1518,19 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 /* Search everything */
 .sr-snip { margin-top: 2px; overflow-wrap: anywhere; }
 #search-results mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+
+/* Dailies (js/dailies.js): a checkbox that starts fresh each day; have-to and should */
+.dly-box { flex: none; width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--muted); background: transparent; color: transparent; font-size: 14px; line-height: 1; cursor: pointer; padding: 0; }
+.dly-box.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.dly-row.dly-on .row-title { color: var(--muted); }
+.dly-title .hint { font-weight: 500; margin-left: 6px; }
+.dly-meta { align-items: center; }
+.dly-dots { display: inline-flex; gap: 3px; margin-right: 6px; vertical-align: middle; }
+.dly-dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); box-sizing: border-box; opacity: .55; }
+.dly-dot.done { background: var(--accent); border-color: var(--accent); opacity: 1; }
+.dly-dot.red { background: var(--due, #d33); border-color: var(--due, #d33); opacity: 1; }
+.dly-dot.off { border-style: dotted; opacity: .3; }
+.dly-dot.open { opacity: 1; }
+.dly-missed { color: var(--due, #d33); }
+.dly-field select { width: 100%; }
+.dv-row .dly-box { margin-right: 8px; }

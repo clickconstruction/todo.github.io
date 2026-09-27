@@ -1,4 +1,5 @@
 // Todo Tooling entry point: event wiring, auth, service worker.
+import { tickDaily } from './dailies.js';
 import { sb, db, app, $, byId, isOpen, toggleCollapsed, toast } from './state.js';
 import { render } from './router.js';
 import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, bulkUpdate, markReviewed, indentTask, outdentTask } from './data.js';
@@ -126,6 +127,7 @@ const CLICKS = [
     if (!t.completed_at && openKids && !confirm(`Complete “${t.title}” and its ${openKids} open step${openKids === 1 ? '' : 's'}?`)) return;
     setCompleted(t, !t.completed_at);
   }],
+  ['[data-dly-tick]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.dlyTick); if (t) tickDaily(t); }],
   ['[data-flag]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.flag); if (t) updateTask(t, { flagged: !t.flagged }); }],
   ['[data-flag-project]', (el, e) => { e.stopPropagation(); const p = byId(db.projects, el.dataset.flagProject); if (p) updateProject(p, { flagged: !p.flagged }); }],
   ['[data-triage]', (el) => {

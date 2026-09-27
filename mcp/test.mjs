@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [], slipbox_notes: [], task_waits: [], events: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [], slipbox_notes: [], task_waits: [], events: [], daily_ticks: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -152,11 +152,25 @@ globalThis.fetch = async (url, init = {}) => {
     return null;
   };
   const follow = (r) => db.tasks.filter((x) => x.parent_id === r.id && x.project_id !== r.project_id).forEach((x) => { x.project_id = r.project_id; follow(x); });
+  // Mirror of tasks_daily_guard / daily_ticks_guard (migration 20261101000001).
+  const dayStr = (d) => d.toISOString().slice(0, 10);
+  const dailyGuard = (r, was) => { if (r.daily) { r.repeat_rule = null; r.due_at = null; r.planned_at = null; r.defer_at = null; if (!r.daily.since) r.daily = { ...r.daily, since: (was && was.since) || dayStr(new Date()) }; } };
+  if (table === 'daily_ticks' && (m === 'POST' || m === 'PATCH')) for (const b of (m === 'POST' ? [].concat(body) : rows.filter(match).map((r) => ({ ...r, ...body, was: r.state })))) {
+    const t = db.tasks.find((x) => x.id === b.task_id && x.user_id === b.user_id);
+    if (!t) return res({ message: 'That action isn’t yours.' }, 409);
+    if ((b.state || 'done') === 'done' && b.was !== 'done') {
+      if (!t.daily) return res({ message: 'That action isn’t a daily one.' }, 400);
+      if (t.completed_at || t.dropped_at) return res({ message: 'That action is closed.' }, 400);
+      if (b.day > dayStr(new Date(Date.now() + 86400000))) return res({ message: 'That day hasn’t come yet.' }, 400);
+      if (m === 'POST' && rows.some((x) => x.task_id === b.task_id && x.day === b.day)) return res({ message: 'duplicate key value violates unique constraint' }, 409);
+    }
+  }
+  if (m === 'PATCH' && table === 'tasks' && body && 'daily' in body) rows.filter(match).forEach((r) => { r.__was = r.daily; });
   if (m === 'POST' && table === 'tasks') for (const b of (Array.isArray(body) ? body : [body])) { const e = guard({}, b); if (e) return res({ message: e }, 400); }
   if (m === 'PATCH' && table === 'tasks') for (const r of rows.filter(match)) { const b = { ...body }; const e = guard(r, b); if (e) return res({ message: e }, 400); Object.assign(r, b); follow(r); }
   if (m === 'POST' && Array.isArray(body) && body.some((b) => Object.keys(b).sort().join() !== Object.keys(body[0]).sort().join())) return res({ code: 'PGRST102', message: 'All object keys must match' }, 400); // as PostgREST does
-  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...(table === 'checklists' ? { complete_action: true, archived_at: null } : {}), ...(table === 'review_items' ? { status: 'pending', note: '', changed: {}, priority: false } : {}), ...(table === 'checklist_runs' ? { started_at: new Date().toISOString(), finished_at: null } : {}), ...b })); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
-  if (m === 'PATCH') { const hit = rows.filter((r) => match(r) && orMatch(r)); hit.forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); if (table === 'tasks') hit.forEach((r) => { if (!r.waiting_on) r.follow_up_at = null; }); return init.headers.Prefer ? res(hit) : res(null, 204); }
+  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...(table === 'checklists' ? { complete_action: true, archived_at: null } : {}), ...(table === 'review_items' ? { status: 'pending', note: '', changed: {}, priority: false } : {}), ...(table === 'checklist_runs' ? { started_at: new Date().toISOString(), finished_at: null } : {}), ...(table === 'daily_ticks' ? { state: 'done' } : {}), ...b })); if (table === 'tasks') add.forEach((r) => dailyGuard(r)); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
+  if (m === 'PATCH') { const hit = rows.filter((r) => match(r) && orMatch(r)); hit.forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); if (table === 'tasks') hit.forEach((r) => { if (!r.waiting_on) r.follow_up_at = null; dailyGuard(r, r.__was); delete r.__was; }); return init.headers.Prefer ? res(hit) : res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
 };
 const env = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SECRET_KEY: 'sb_secret_test', TIMEZONE: 'America/Chicago' };
@@ -175,7 +189,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 77 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 77 tools, no internals leaked');
+assert(list.body.result.tools.length === 78 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 78 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -1237,6 +1251,10 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   // Suggestions: nothing changes until the user Submits in the app.
   const s1 = db.review_items.find((x) => x.task_id === S1);
   await tool('full_review', { action: 'goto', item_id: s1.id });
+  await tool('full_review', { action: 'suggest', decision: 'keep', daily: { tier: 'should', weekdays: [1, 3, 5] } });
+  const sgDaily = db.review_items.find((x) => x.suggestion && x.suggestion.daily);
+  let badDaily = ''; try { await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'sometimes' }); } catch (e) { badDaily = e.message; }
+  assert(sgDaily && sgDaily.suggestion.daily.tier === 'should' && sgDaily.suggestion.daily.weekdays.join() === '1,3,5' && /"must".*"should"/.test(badDaily), 'full_review suggest: a suggestion can make the action daily (tier and days checked)');
   const sg = await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Fix the gate latch before winter', gain: 'Goats stay in', project: 'Estate and legacy', planned: '2026-10-05', flagged: false, add_tags: ['Brand new tag'], note: 'You said before the cold snap' });
   assert(sg.suggested === 1 && s1.suggestion.decision === 'keep' && s1.suggestion.project_id === 'pRE' && s1.suggestion.project_name === 'Estate and legacy' && /^2026-10-05T/.test(s1.suggestion.planned) && s1.suggestion.add_tag_names.includes('Brand new tag') && !s1.suggestion.ahead, 'suggest: resolved and stored on the card');
   assert(db.tasks.find((t) => t.id === S1).title === 'Fix the gate latch' && !db.tasks.find((t) => t.id === S1).gain, 'suggest changes nothing until the user Submits');
@@ -1512,6 +1530,55 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(ics2.includes('GEO:29.7351;-95.471') && /X-APPLE-STRUCTURED-LOCATION;VALUE=URI;X-APPLE-RADIUS=200;X-TITLE="Ellington Airport, Houston":geo:29\.7351,-95\.471/.test(ics2.replace(/\r\n /g, '')), 'feed: coordinates as GEO and Apple\'s structured location (map, Directions, time to leave)');
   assert(!/SUMMARY:Somewhere vague[\s\S]*?GEO:/.test(ics2.split('SUMMARY:Somewhere vague')[1].split('END:VEVENT')[0]), 'feed: no GEO for an event without coordinates');
   db.events.length = 0;
+}
+
+// ---------- dailies: a checkbox that starts fresh each day, have to and should ----------
+{
+  db.daily_ticks.length = 0;
+  const refuse = async (name, args, re) => { try { await tool(name, args); return false; } catch (e) { return re.test(e.message); } };
+  const dstr = (n) => { const d = new Date(`${localToday()}T12:00`); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const walk = await tool('capture', { title: 'Walk for 30min to relax my mind', due: dstr(3), repeat: { every: 1, unit: 'day' } });
+  const meds = await tool('capture', { title: 'Take medication' });
+  const plain = await tool('capture', { title: 'An ordinary dailies-test action', project: null });
+  const set = await tool('dailies', { action: 'set', id: walk.id, tier: 'should' });
+  const wrow = db.tasks.find((t) => t.id === walk.id);
+  assert(set.daily === 'Should, most days' && wrow.daily.tier === 'should' && wrow.daily.since && wrow.repeat_rule === null && wrow.due_at === null && /repeat and dates were cleared/.test(set.next), 'dailies set: the action becomes a daily checkbox; its repeat and due date are cleared');
+  const viaUpdate = await tool('update_task', { id: meds.id, daily: { tier: 'must', weekdays: [1, 2, 3, 4, 5, 6, 0] } });
+  const mrow = db.tasks.find((t) => t.id === meds.id);
+  assert(viaUpdate.daily.tier === 'must' && viaUpdate.daily.summary === 'Have to, every day' && !mrow.daily.weekdays, 'update_task daily: must; all seven days is every day');
+  assert(await refuse('dailies', { action: 'set', id: plain.id, tier: 'sometimes' }, /"must".*"should"/) && await refuse('update_task', { id: plain.id, daily: { tier: 'must', weekdays: [9] } }, /0 \(Sunday\) to 6/) && !db.tasks.find((t) => t.id === plain.id).daily, 'a tier that isn’t must or should, or a weekday that isn’t 0 to 6, is refused');
+  // it became daily four days ago: three days ticked, yesterday missed
+  mrow.daily = { ...mrow.daily, since: dstr(4) }; wrow.daily = { ...wrow.daily, since: dstr(10) };
+  [2, 3, 4].forEach((n) => db.daily_ticks.push({ id: `tk${n}`, user_id: UID, task_id: meds.id, day: dstr(n), state: 'done' }));
+  db.daily_ticks.push({ id: 'tkx', user_id: 'someone-else', task_id: meds.id, day: dstr(5), state: 'done' });
+  const list = await tool('dailies', {});
+  assert(list.have_to.length === 1 && list.have_to[0].id === meds.id && list.have_to[0].summary === 'missed yesterday' && !list.have_to[0].ticked && list.should[0].id === walk.id && list.should[0].summary === '0 of 7 this week' && list.left.have_to === 1, 'dailies list: by tier; a have-to names its missed day, a should counts the week; another user’s tick doesn’t count');
+  const ticked = await tool('dailies', { action: 'tick', title: 'take medication' });
+  assert(ticked.ticked && db.daily_ticks.some((x) => x.task_id === meds.id && x.day === localToday() && x.state === 'done' && x.user_id === UID) && !mrow.completed_at, 'dailies tick: by title, for today; the action stays open');
+  await tool('dailies', { action: 'tick', id: meds.id });
+  assert(db.daily_ticks.filter((x) => x.task_id === meds.id && x.day === localToday()).length === 1, 'ticking twice keeps one tick');
+  const back1 = await tool('dailies', { action: 'tick', id: meds.id, day: dstr(1) });
+  assert(back1.summary === '5 days running' && back1.day === dstr(1), `a missed day can be ticked afterwards (${back1.summary})`);
+  const un = await tool('dailies', { action: 'untick', id: meds.id });
+  const kept = db.daily_ticks.find((x) => x.task_id === meds.id && x.day === localToday());
+  assert(!un.ticked && kept && kept.state === 'cleared', 'dailies untick: the tick is cleared, not deleted');
+  assert(await refuse('dailies', { action: 'tick', id: meds.id, day: '2099-01-01' }, /hasn’t come/) && await refuse('dailies', { action: 'tick', id: plain.id }, /No daily action/) && await refuse('dailies', { action: 'tick', title: 'An ordinary dailies-test action' }, /No daily action/), 'a day that hasn’t come, or an action that isn’t daily, can’t be ticked');
+  const avail = await tool('list_tasks', { available_only: true, limit: 500 });
+  assert(avail.count > 0 && !avail.items.some((t) => [walk.id, meds.id].includes(t.id)) && (await tool('get_task', { id: meds.id })).daily.tier === 'must', 'a daily checkbox is never an available action; get_task says it is daily');
+  const td = await tool('today', {});
+  assert(td.daily.have_to[0].id === meds.id && td.daily.have_to[0].ticked === false && td.daily.should[0].id === walk.id && !JSON.stringify(td.overdue).includes(walk.id), 'today: the dailies asked for today, and the walk is no longer overdue');
+  const br = await tool('daily_review', {});
+  assert(br.must_dos.daily.length === 1 && br.must_dos.daily[0].id === meds.id && !JSON.stringify(br.must_dos).includes(walk.id), 'daily_review: an unticked have-to is a must-do; a should never is');
+  await tool('dailies', { action: 'tick', id: meds.id });
+  assert(!(await tool('daily_review', {})).must_dos.daily, 'daily_review: ticked, it leaves the must-dos');
+  const cleared = await tool('dailies', { action: 'clear', id: walk.id });
+  assert(cleared.daily === null && wrow.daily === null && (await tool('dailies', {})).should.length === 0, 'dailies clear: an ordinary action again');
+  const real = globalThis.fetch; let calls = 0; globalThis.fetch = (u, ...x) => { calls += 1; return real(u, ...x); };
+  const counted = {}; for (const [k, args] of [['list', {}], ['tick', { action: 'tick', id: meds.id }], ['set', { action: 'set', id: walk.id, tier: 'should' }]]) { calls = 0; await tool('dailies', args); counted[k] = calls; }
+  globalThis.fetch = real;
+  assert(Object.values(counted).every((v) => v <= 10), `dailies: a handful of requests a call (${Object.entries(counted).map(([k, v]) => `${k} ${v}`).join(', ')})`);
+  [walk.id, meds.id, plain.id].forEach((x) => { const t = db.tasks.find((y) => y.id === x); t.dropped_at = new Date().toISOString(); });
+  db.daily_ticks.length = 0;
 }
 
 // ---------- settings: what the Settings page holds ----------

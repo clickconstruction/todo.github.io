@@ -1,6 +1,7 @@
 // Daily review for agents: a morning briefing (calendar, must-dos, today's focus with suggestions) and
 // an evening wrap-up (focus done or not, carry the rest over, tomorrow at a glance). Same rows the app
 // uses (daily_reviews); up to 3 focus items, each planned for today.
+import { mustLeft } from './dailies.js';
 import { rankNow } from '../../js/whatnow.js';
 
 export function dailyTools({ OPEN, localDate, zonedToIso, availableTasks, calendar }) {
@@ -49,6 +50,7 @@ export function dailyTools({ OPEN, localDate, zonedToIso, availableTasks, calend
       const due = open.filter((t) => t.due_at && t.due_at < endToday && !isWaiting(t));
       const follow = open.filter((t) => t.waiting_on && t.follow_up_at && t.follow_up_at < endToday);
       const tickler = open.filter((t) => t.tickler && t.in_inbox && (!t.defer_at || t.defer_at <= nowIso));
+      const dailyLeft = open.filter((t) => t.daily && t.daily.tier === 'must').length ? await mustLeft(api, today) : [];
       const inbox = open.filter((t) => t.in_inbox && !t.parent_id && !(t.tickler && t.defer_at && t.defer_at > nowIso)).length;
       const sugg = rankNow(avail.filter((t) => !focusIds.includes(t.id)), { tz: api.tz, endOfToday: new Date(endToday), projects, goals, limit: 5 }).items;
       const shapedS = new Map((await api.shape(sugg.map((x) => x.t))).map((x) => [x.id, x]));
@@ -56,7 +58,7 @@ export function dailyTools({ OPEN, localDate, zonedToIso, availableTasks, calend
         day: today, started: !!(r && r.started_at),
         calendar: await events(today),
         scheduled: (await api.shape(open.filter((t) => t.scheduled_at && localDate(t.scheduled_at, api.tz) === today))).map((t) => ({ id: t.id, title: t.title, at: t.scheduled.at, minutes: t.scheduled.minutes })),
-        must_dos: { due: await api.shape(due), follow_ups: await api.shape(follow), from_tickler: await api.shape(tickler), inbox_count: inbox },
+        must_dos: { daily: dailyLeft.length ? dailyLeft.map((t) => ({ id: t.id, title: t.title, every_day: true })) : undefined, due: await api.shape(due), follow_ups: await api.shape(follow), from_tickler: await api.shape(tickler), inbox_count: inbox },
         focus: focus.map((t) => ({ id: t.id, title: t.title, status: t.status })),
         suggestions: sugg.map(({ t, reasons, gain }) => ({ ...shapedS.get(t.id), why: reasons.map((x) => x.text), ...(gain ? { gain } : {}) })),
         note: 'Up to 3 focus items (action focus with ids).',

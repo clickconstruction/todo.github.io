@@ -23,6 +23,7 @@ import { openSchedule, addToGoogle, addToApple, scheduledLabel } from './schedul
 import { openDelegate, openTickle } from './gtd.js';
 import { gainFieldHtml, wireGainField, offerPlacement } from './gainField.js';
 import { splitGain } from '../gain.js';
+import { dailyFieldHtml, wireDailyField } from '../dailies.js';
 
 // Waiting on someone (with a follow-up day), or something to discuss with them (Agenda).
 function waitingFieldHtml(t, task) {
@@ -74,6 +75,7 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
       ${task && isOpen(task) ? `<div class="sched-row"><span class="prop-label">Scheduled</span><span class="sched-val">${task.scheduled_at ? `⏰ ${esc(scheduledLabel(task))} · ${task.scheduled_minutes || 30} min` : '<span class="hint">Not on your calendar</span>'}</span>
         <span class="sched-btns"><button type="button" class="btn small" data-sched-open>${task.scheduled_at ? 'Change' : 'Schedule it'}</button>${task.scheduled_at ? '<button type="button" class="btn small" data-sched-google>Add to Google</button><button type="button" class="btn small" data-sched-apple>Apple</button>' : ''}</span></div>` : ''}`)}
     ${section('alerts', 'Repeat and alerts', `
+      ${prop('daily', 'Every day', dailyFieldHtml(t))}
       ${prop('repeat', 'Repeat', repeatFieldHtml(t, { skippable: !!task && isOpen(task) }))}
       ${prop('notify', 'Notifications', notifyFieldHtml())}
       ${prop('location', 'Location', locationFieldHtml(t, { inherited: task ? placeFor({ ...task, place_id: null }) : null }))}`)}
@@ -106,6 +108,7 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
   const collectWaits = wireWaitsField(form, task, onTagsChange);
   const collectLocation = wireLocationField(form, onTagsChange);
   const collectRepeat = wireRepeatField(form, t, onTagsChange);
+  const collectDaily = wireDailyField(form, t);
   const collectReminders = wireNotifyField(form, remindersFor('task_id', task && task.id), onTagsChange);
   const collectGain = wireGainField(form, t, 'task', onTagsChange);
   const collectFiles = wireAttachField(form, 'task_id', task && task.id);
@@ -158,6 +161,7 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
       agenda_for: f.get('agenda_for') || null,
       ...collectLocation(),
       repeat_rule: collectRepeat(),
+      ...(form.elements.daily_tier ? { daily: collectDaily() } : {}),
       notifications: collectReminders(),
       attachments_pending: collectFiles(),
     };

@@ -40,7 +40,7 @@ function ix() {
     if (t.parent_id) anyKids.add(t.parent_id);
     if (!isOpen(t)) return;
     if (t.parent_id) { if (!kids.has(t.parent_id)) kids.set(t.parent_id, []); kids.get(t.parent_id).push(t); }
-    else if (t.project_id) { if (!projTop.has(t.project_id)) projTop.set(t.project_id, []); projTop.get(t.project_id).push(t); }
+    else if (t.project_id && !t.daily) { if (!projTop.has(t.project_id)) projTop.set(t.project_id, []); projTop.get(t.project_id).push(t); } // a daily one never holds the turn
   });
   kids.forEach((l) => l.sort(taskSort)); projTop.forEach((l) => l.sort(taskSort));
   const held = new Map(db.tags.filter((g) => tagStatus(g) === 'on_hold').map((g) => [g.id, g]));
@@ -80,7 +80,7 @@ export function isSequenceBlocked(t) {
     const parent = taskById(node.parent_id);
     if (parent) {
       if (parent.steps_in_order) {
-        const first = openSteps(parent)[0];
+        const first = openSteps(parent).filter((c) => !c.daily)[0];
         if (first && first.id !== node.id) return true;
       }
       node = parent;
@@ -111,6 +111,7 @@ export const unblocksOf = (t) => (db.taskWaits || []).filter((w) => w.waits_for 
 
 export function isBlocked(t) {
   if (t.steps_single) return true; // a bucket of actions, not an action
+  if (t.daily) return true; // a daily checkbox (js/dailies.js), not an action to pick
   if (openSteps(t).length) return true; // has steps: do the steps
   return isSequenceBlocked(t);
 }

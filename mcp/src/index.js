@@ -22,6 +22,8 @@ import { planTools } from './plan.js';
 import { handleCapture, followTag, nameFor } from './capture.js';
 import { checklistTools } from './checklists.js';
 import { dailyTools } from './daily.js';
+import { dailiesTools, dailiesFor, dailyOut } from './dailies.js';
+import { describeDaily, readDaily, onDay } from '../../js/daily-rules.js';
 import { settleTools } from './settle.js';
 import { gainsTools } from './gains.js';
 import { fullReviewTools } from './fullreview.js';
@@ -56,6 +58,7 @@ Search: search finds words across actions (open and done), projects, the Slipbox
 Events: the user's own calendar entries (an airshow, a trip, an appointment) go in with the events tool (add; several at once with items; pass task to link them to the card they come from); they show in Forecast (by day) and the Events list, and reach their phone through the calendar feed. Not actions: a time block on an action is update_task schedule.
 Calendars: the other calendars they follow (Google, iCloud, Outlook) are private iCal links kept with the calendars tool (list, add, update, remove); their events show in Forecast. You can save a link the user gives you; links are never returned.
 Settings: the settings tool reads and changes what the app's Settings page holds (default times, the Today tag, review and morning reminders, the sidebar, their own mind sweep prompts); change one only when they ask. API tokens and approved email senders are managed in the app only.
+Dailies: something done every day is a daily checkbox, not a repeating action with a due date (which piles up as overdue). The dailies tool lists today's, ticks them and sets the tier: must = have to, every day (a missed day shows; one of the Daily review's must-dos), should = should, most days (a missed day is an empty dot; never nag). Each day starts fresh and the action stays open. When the user describes a habit or a daily obligation, offer dailies set (or full_review suggest daily) and ask which tier if it isn't plain.
 Matrix (Eisenhower): the matrix tool sorts available actions into do / schedule / delegate / park from due dates, flags and goals; the user can override with ★/☆ (mark). Use it when they ask what matters, or to park the neither-urgent-nor-important box in Someday (only what they agree to; unpark undoes).
 Full Review (full_review): when the user wants to go through things together, start or resume a session, give them the app link, and work card by card while they watch it in the app. Turn what they tell you into a suggestion (full_review suggest) that they Submit in the app (or, when they say "submit", call full_review submit to press it for them); draft suggestions ahead for the next cards (upcoming + suggest items) so they can approve quickly. Apply directly (annotate/decide) only when they say to just do it. Important items come first; group cards need their agreement on the proposal.
 Perspectives are the user's saved views (e.g. Calls, Today): list_perspectives, then run_perspective to see what's in one; to answer "what should I do now" questions, prefer the user's own perspectives. create_perspective/update_perspective build them (preview rules with run_perspective first).
@@ -631,6 +634,7 @@ class Api {
       checklist_id: t.checklist_id || undefined,
       place: placeSummary(placeOf(t)),
       repeat: t.repeat_rule ? { ...t.repeat_rule, summary: describeRepeat(t.repeat_rule) } : undefined,
+      daily: t.daily ? { ...t.daily, summary: describeDaily(t.daily) } : undefined, // a daily checkbox (dailies tool), not an action to pick
       notifications: reminders[t.id],
       attachments: files.some((f) => f.task_id === t.id) ? files.filter((f) => f.task_id === t.id).map(({ task_id, ...f }) => f) : undefined,
       in_inbox: t.in_inbox,
@@ -805,7 +809,7 @@ export function availabilityOf(tasks, projects, nowIso = new Date().toISOString(
   const projectById = new Map(projects.map((p) => [p.id, p]));
   const sortT = (a, b) => ((a.sort || 0) - (b.sort || 0)) || (a.created_at < b.created_at ? -1 : 1);
   const kidsOf = new Map();
-  tasks.filter(isOpenT).forEach((t) => { const k = t.parent_id || `p:${t.project_id}`; if (!kidsOf.has(k)) kidsOf.set(k, []); kidsOf.get(k).push(t); });
+  tasks.filter((t) => isOpenT(t) && !t.daily).forEach((t) => { const k = t.parent_id || `p:${t.project_id}`; if (!kidsOf.has(k)) kidsOf.set(k, []); kidsOf.get(k).push(t); });
   kidsOf.forEach((list) => list.sort(sortT));
   const firstOpen = (key) => (kidsOf.get(key) || []).filter((t) => key.startsWith('p:') ? !t.parent_id : true)[0];
   const deferred = (t) => t.defer_at && t.defer_at > nowIso;
@@ -826,7 +830,7 @@ export function availabilityOf(tasks, projects, nowIso = new Date().toISOString(
     return false;
   };
   const available = known ? (t) => known.has(t.id) : (t) => {
-    if (!isOpenT(t) || deferred(t)) return false;
+    if (!isOpenT(t) || deferred(t) || t.daily) return false; // a daily checkbox is never an action to pick
     const p = t.project_id && projectById.get(t.project_id);
     if (p && (p.status !== 'active' || (p.defer_at && p.defer_at > nowIso))) return false; // deferred project hides its actions
     if ((kidsOf.get(t.id) || []).length) return false; // has open steps: do the steps
@@ -860,7 +864,7 @@ const cardWaitsOf = (data) => {
 };
 export const parkedOf = (data) => {
   const hold = P.makeOnHold(data); const wait = P.makeWaiting(data); const cards = cardWaitsOf(data);
-  return (t) => hold(t) || wait(t) || cards(t) || (data.buckets ? data.buckets.has(t.id) : !!t.steps_single);
+  return (t) => hold(t) || wait(t) || cards(t) || !!t.daily || (data.buckets ? data.buckets.has(t.id) : !!t.steps_single);
 };
 async function holdFor(api, tasks) {
   const [tags, taskTags, projectTags, people, taskWaits] = await Promise.all([
@@ -1052,7 +1056,7 @@ const TOOLS = [
   },
   {
     name: 'today',
-    description: 'What needs attention today: overdue items, items due today, items planned for today or earlier, and flagged items. Deferred items are hidden.',
+    description: 'What needs attention today: overdue items, items due today, items planned for today or earlier, flagged items, and the daily checkboxes asked for today (daily: have_to and should, each with ticked; tick with the dailies tool). Deferred items are hidden.',
     inputSchema: { type: 'object', properties: {} },
     async run(api) {
       const today = localDate(new Date().toISOString(), api.tz);
@@ -1065,10 +1069,13 @@ const TOOLS = [
         api.q(`tasks?${api.u}&${OPEN}&${notDeferred}&planned_at=lt.${endOfToday}&order=planned_at.asc&select=*`),
       ]);
       const startOfToday = zonedToIso(today, 0, api.tz);
+      const dl = await dailiesFor(api, today);
+      const dailyToday = (tier) => dl.tasks.filter((t) => onDay(t.daily, today) && (t.daily.tier === 'must') === (tier === 'must')).map((t) => { const o = dailyOut(t, dl.ticked(t), today); return { id: o.id, title: o.title, ticked: o.ticked, summary: o.summary }; });
       const shapedDue = await api.shape(due);
       const dueIds = new Set(due.map((t) => t.id));
       return {
         date: today,
+        daily: dl.tasks.length ? { have_to: dailyToday('must'), should: dailyToday('should') } : undefined,
         overdue: shapedDue.filter((_, i) => due[i].due_at < startOfToday),
         due_today: shapedDue.filter((_, i) => due[i].due_at >= startOfToday),
         planned: await api.shape(planned.filter((t) => !dueIds.has(t.id))),
@@ -1341,6 +1348,7 @@ const TOOLS = [
           items: { type: 'object', properties: { kind: { type: 'string', enum: ['before_due', 'before_planned', 'at_defer', 'at'] }, minutes: { type: 'integer' }, at: { type: 'string' } }, required: ['kind'] },
         },
         skip_occurrence: { type: 'boolean', description: 'Move a repeating action to its next occurrence without completing it' },
+        daily: { type: ['object', 'string', 'null'], description: 'Make it a daily checkbox: "must" (have to, every day) or "should" (should, most days), or {tier, weekdays: [0-6]}; null makes it an ordinary action again. Clears its repeat and dates. Tick it with the dailies tool.' },
         move: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'Reorder among its siblings (same project and parent). Order decides the next action in sequential projects.' },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
@@ -1377,6 +1385,7 @@ const TOOLS = [
       if (a.estimate_minutes !== undefined) patch.estimate_minutes = a.estimate_minutes === null ? null : Math.max(0, Math.round(Number(a.estimate_minutes)));
       Object.assign(patch, await api.locationPatch(a));
       if (a.repeat !== undefined) patch.repeat_rule = repeatRule(a.repeat, api.tz, task.repeat_rule);
+      if (a.daily !== undefined) patch.daily = a.daily === null || a.daily === '' ? null : { ...readDaily(a.daily), ...(task.daily && task.daily.since ? { since: task.daily.since } : {}) };
       if (a.schedule !== undefined) {
         if (a.schedule === null || a.schedule === '') Object.assign(patch, { scheduled_at: null, scheduled_minutes: null });
         else {
@@ -2307,6 +2316,7 @@ TOOLS.push(...eventsTools({ localDate, zonedToIso, OPEN, geocode }));
 TOOLS.push(...searchTools());
 TOOLS.push(...calendarsTools({ sha256Hex }));
 TOOLS.push(...settingsTools());
+TOOLS.push(...dailiesTools({ localDate }));
 TOOLS.push(...dailyTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));

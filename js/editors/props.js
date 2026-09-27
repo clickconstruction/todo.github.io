@@ -44,6 +44,7 @@ const VALUES = {
     return [own, unblocks ? unblocks.textContent.replace(/:.*$/, '') : ''].filter(Boolean).join(' · ');
   },
   estimate: (f) => { const m = Number(f.elements.estimate_minutes && f.elements.estimate_minutes.value); return m ? fmtMinutes(m) : ''; },
+  daily: (f) => { const s = f.elements.daily_tier; return s && s.value ? optText(s) : ''; },
   repeat: (f) => { const s = f.elements.repeat_preset; return s && s.value && s.value !== 'none' ? optText(s) : ''; },
   notify: (f) => { const n = f.querySelectorAll('[data-notify-list] li').length; return n ? `${n} reminder${n === 1 ? '' : 's'}` : ''; },
   location: (f) => { const s = f.elements.place_id; if (!s) return ''; if (s.value && s.value !== '__new') return `📍 ${optText(s)}`; return /^Inherit/.test(optText(s)) ? optText(s).replace(/^Inherit \((.*)\)$/, '📍 $1 (inherited)') : ''; },
@@ -62,7 +63,7 @@ const SUMMARIES = {
   },
   dates: (f) => [['due_at', 'Due'], ['planned_at', 'Planned'], ['defer_at', 'Defer']]
     .map(([k, l]) => (VALUES[k](f) ? `${l} ${VALUES[k](f).replace(/,.*$/, '')}` : '')).filter(Boolean).slice(0, 2).join(' · '),
-  alerts: (f) => [VALUES.repeat(f) && '🔁', VALUES.notify(f) && '🔔', VALUES.location(f) && '📍'].filter(Boolean).join(' ') || 'Off',
+  alerts: (f) => [VALUES.daily(f) && '🔂', VALUES.repeat(f) && '🔁', VALUES.notify(f) && '🔔', VALUES.location(f) && '📍'].filter(Boolean).join(' ') || 'Off',
   more: (f) => { const s = f.elements.status; const files = f.querySelectorAll('[data-attach-list] li, .attach-list li').length; return [s ? optText(s) : '', files ? `${files} file${files === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '); },
   review: (f) => { const n = f.elements.review_every && f.elements.review_every.value; const u = f.elements.review_unit ? optText(f.elements.review_unit).toLowerCase() : ''; const next = VALUES.next_review_at(f); return [n ? `Every ${n === '1' ? u.replace(/s$/, '') : `${n} ${u}`}` : '', next ? `next ${next.replace(/,.*$/, '')}` : ''].filter(Boolean).join(' · '); },
   files: (f) => { const files = f.querySelectorAll('[data-attach-list] li, .attach-list li').length; return files ? `${files} file${files === 1 ? '' : 's'}` : ''; },

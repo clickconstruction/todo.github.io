@@ -12,6 +12,7 @@ import { followUpDue, isWaiting, livePeople, agendaFor, mentions } from '../gtd.
 import { calendarEvents, calendarErrors, liveCalendars, fmtEventTime } from '../calendars.js';
 import { ownEvents, fromHtml, distanceText, leaveByText } from '../events.js';
 import { upcomingEvents, eventRow as ownEventRow } from './events.js';
+import { dailyBlock, mustLeft } from '../dailies.js';
 
 const DAYS_AHEAD = 6;
 const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -58,7 +59,8 @@ const projectSection = (title, list) => (list.length ? `<h2 class="section-title
 export const forecastBadgeCount = () => {
   const end = addDays(startOfToday(), 1);
   return db.tasks.filter((t) => isOpen(t) && t.due_at && new Date(t.due_at) < end && !onHoldTagFor(t)).length // parked items don't nag
-    + db.projects.filter((p) => ['active', 'on_hold'].includes(p.status) && p.due_at && new Date(p.due_at) < end).length;
+    + db.projects.filter((p) => ['active', 'on_hold'].includes(p.status) && p.due_at && new Date(p.due_at) < end).length
+    + mustLeft().length; // have-to dailies not ticked yet today
 };
 
 const fmtHM = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(/\s/g, '').toLowerCase();
@@ -150,6 +152,7 @@ export function viewForecast(selected = 'today') {
     if (isToday) notes += '<a class="fc-banner fc-now" href="#now">▶ What now?</a>';
     const follow = isToday ? db.tasks.filter((t) => followUpDue(t) && isWaiting(t)) : []; // not your actions, so the view filter doesn't apply
     if (follow.length) body += `<h2 class="section-title">Follow up · ${follow.length} <a class="btn small" href="#waiting">Waiting For</a></h2>${taskList(follow)}`;
+    if (isToday) body += dailyBlock(); // each day starts fresh: have-to and should, above the deadlines
     body += section('Due', it.due);
     body += section('Planned', it.planned.filter((t) => !(t.scheduled_at && key(new Date(t.scheduled_at)) === dayKey)));
     body += projectSection('Projects', projectsOn(day, liveProjects));

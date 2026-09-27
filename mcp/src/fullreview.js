@@ -1,6 +1,7 @@
 // Full Review for agents: the same session and current card the user sees in the app (#full/<id>).
 // Read the card, talk it through with the user, annotate it (gain, project, dates, tags, a one-line
 // note) and decide it; the app updates live. Every decision can be undone; nothing is deleted.
+import { readDaily } from '../../js/daily-rules.js';
 import { buildQueue, priorityReason, proposalText } from '../../js/review.js';
 import { parseItemLines } from './checklists.js';
 
@@ -47,6 +48,7 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
     const hours = { planned: api.hours.planned, due: api.hours.due, defer: api.hours.defer };
     ['planned', 'due', 'defer'].forEach((k) => { if (a[k] !== undefined) s[k] = a[k] === null || a[k] === '' ? null : zonedToIso(a[k], hours[k], api.tz); });
     if (a.flagged !== undefined) s.flagged = !!a.flagged;
+    if (a.daily !== undefined && a.daily !== null) s.daily = readDaily(a.daily); // a daily checkbox on Submit (keep only); its repeat and dates go
     if (a.steps !== undefined) { // break it down: added under the action on Submit (keep / someday only); a step can carry its own steps
       let count = 0;
       const norm = (list, depth) => (Array.isArray(list) ? list : []).map((x) => {
@@ -159,7 +161,7 @@ Draft ahead: call "upcoming" and "suggest" with items [...] for the next few car
 actions:
   start {import_id | project | all:true, min_age_days?, title?} → a new session (give the user app_link)
   status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
-  suggest {decision, title?, task_notes? (the action's new notes, replacing the old; ≤6000 characters; omitted or null = unchanged), gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down; a step can be {title, steps: [...], in_order?} to nest), steps_in_order?, checklist? ({name, items: [lines; "# Section" starts a section], reflect?, complete_action?} to make one, or an existing checklist's name: attached on Submit; use it for routines the card repeats), mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
+  suggest {decision, title?, daily? ("must" = have to, every day | "should" = should, most days, or {tier, weekdays: [0-6]}: with keep, the action becomes a daily checkbox that starts fresh each day and its repeat and dates are cleared; for habits and daily obligations that came in as repeating actions), task_notes? (the action's new notes, replacing the old; ≤6000 characters; omitted or null = unchanged), gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down; a step can be {title, steps: [...], in_order?} to nest), steps_in_order?, checklist? ({name, items: [lines; "# Section" starts a section], reflect?, complete_action?} to make one, or an existing checklist's name: attached on Submit; use it for routines the card repeats), mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
   submit {item_id? (default current)} → apply the pending suggestion as the app's Submit does (only when the user says "submit"), then the next card
   upcoming {count? ≤10} → the next cards in full, for drafting ahead
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
@@ -180,6 +182,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
         task_notes: { type: ['string', 'null'], maxLength: MAX_NOTES, description: 'suggest / annotate: new notes for the card\'s action, replacing its current notes (on Submit for suggest). Plain text, line breaks kept, at most 6000 characters; omitted, null or blank leaves the notes unchanged. Not the one-line reason (note), and not add\'s notes.' },
         gain: { type: 'string' }, gain_suggested: { type: 'boolean' },
         tags: { type: 'array', items: { type: 'string' } }, add_tags: { type: 'array', items: { type: 'string' } }, remove_tags: { type: 'array', items: { type: 'string' } },
+        daily: { type: ['string', 'object', 'null'], description: 'suggest: make the action a daily checkbox on Submit (keep): "must" or "should", or {tier, weekdays: [0-6]}' },
         steps: { type: 'array', items: { type: ['string', 'object'], properties: { title: { type: 'string' }, steps: { type: 'array' }, in_order: { type: 'boolean' } } }, description: 'suggest: break the action down: step titles, first to last (added on Submit). A step can be {title, steps: [...], in_order?} to carry its own steps, three levels under the card.' },
         checklist: { type: ['object', 'string', 'null'], description: 'suggest: a checklist for the action, attached on Submit (keep / someday). {name, items: [lines, "# Section" starts a section], reflect?: a line per item each run, complete_action?: last tick completes the action (default true)} makes a new one; a string is an existing checklist’s name or id.', properties: { name: { type: 'string' }, items: { type: 'array', items: { type: 'string' } }, reflect: { type: 'boolean' }, complete_action: { type: 'boolean' } } },
         mac_folder: { type: ['string', 'null'], description: 'suggest: a folder on the user\'s Mac for the action\'s files (e.g. ~/_SYNC/MAGA/_Todo/<action>); null to clear' }, steps_in_order: { type: 'boolean', description: 'suggest: only the first open step is available' },

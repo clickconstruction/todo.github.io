@@ -15,6 +15,7 @@ A GTD (Getting Things Done) to-do app at **[todotooling.com](https://todotooling
 - **What now?** Tell it where you are, how long you have and how much energy, and it picks from what's available and says why.
 - **Search everything:** actions (open and done), projects, the Slipbox, reference, events, people, places, checklists, areas and goals.
 - **Dates that mean something:** *Planned* is when you intend to do it and *Due* is a hard deadline. Forecast shows both day by day.
+- **Every day, without the pile-up:** a daily action is a checkbox that starts fresh each morning, not a repeating action that goes overdue. *Have to, every day* (medication, logging hours) shows a missed day and counts as a must-do; *Should, most days* (a walk, reading) just shows how the week is going. Both sit at the top of Forecast → Today.
 - **Your own events:** an airshow, a trip, an appointment. Forecast shows them on every day they cover, next to the calendars you subscribe to (private iCal links from Google, iCloud or Outlook), the Events list shows what's coming by month, and they reach your phone through the calendar feed. Add them with + Event or ask Claude.
 - **Reviews:** Daily, Weekly (the full GTD checklist), per-project Review, and Full Review, which walks you through a whole library card by card with Claude suggesting and you approving.
 - **Places:** actions tied to locations, with Nearby, errand runs and location alerts.
