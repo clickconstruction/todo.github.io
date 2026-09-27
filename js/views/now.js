@@ -69,7 +69,7 @@ export function viewNow() {
     <div class="now-q"><b>Energy</b>${a.energyWhy ? ` <span class="hint">· ${a.energyWhy}</span>` : ''}<div class="now-opts">${[['low', `${ENERGY_ICON.low} Low`], ['medium', `${ENERGY_ICON.medium} Medium`], ['high', `${ENERGY_ICON.high} High`], ['', 'Any']].map(([v, l]) => chip('energy', v, l, a.energy === v)).join('')}</div></div>
     <p class="view-sub">${res.total ? `${res.total} action${res.total === 1 ? '' : 's'} fit${res.total === 1 ? 's' : ''}${res.total > res.items.length ? ` · the best ${res.items.length}` : ''}` : 'Nothing fits.'}</p>
     ${res.items.map(({ t, reasons, gain }) => { const p = t.project_id && byId(db.projects, t.project_id); return `<div class="now-item" data-task="${t.id}"><b>${esc(t.title)}</b>${gain ? `<div class="row-gain">→ ${esc(gain)}</div>` : ''}
-      ${p ? `<span class="hint">${esc(p.name)}</span>` : ''}<div class="now-why">${reasons.map(reason).join('')}</div>
+      <div class="now-meta"><span class="hint">${p ? esc(p.name) : ''}</span><div class="now-why">${reasons.map(reason).join('')}</div></div>
       <div class="row-actions now-acts"><button class="btn small primary" data-now="done" data-id="${t.id}">Done</button><button class="btn small" data-now="later" data-id="${t.id}">Not now</button><button class="btn small" data-now="open" data-id="${t.id}">Open</button></div></div>`; }).join('')}
     ${a.where !== 'anywhere' && res.total < 5 ? `<p class="view-sub">${res.total ? 'Nothing else fits here.' : ''} <button class="link-btn" data-now-set="where" data-v="anywhere">Try Anywhere</button></p>` : ''}
     ${a.minutes && res.total < 3 ? `<p class="view-sub"><button class="link-btn" data-now-set="minutes" data-v="0">Any length</button></p>` : ''}`;

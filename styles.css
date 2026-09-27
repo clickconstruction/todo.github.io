@@ -1032,7 +1032,9 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .now-opt.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .now-item { display: grid; gap: 4px; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); margin-bottom: 8px; cursor: pointer; }
 .now-item b { font-size: 16px; overflow-wrap: anywhere; }
-.now-why { display: flex; flex-wrap: wrap; gap: 4px; }
+.now-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; } /* project on the left, why it fits on the right, one line when it fits */
+.now-meta > .hint { min-width: 0; overflow-wrap: anywhere; }
+.now-why { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; justify-content: flex-end; }
 .now-why .chip { font-size: 12px; }
 .chip.now-due { background: color-mix(in srgb, var(--due) 16%, transparent); color: var(--due); }
 .chip.now-flag { background: color-mix(in srgb, var(--flag) 18%, transparent); color: var(--flag); }
