@@ -10,10 +10,16 @@ A GTD (Getting Things Done) to-do app at **[todotooling.com](https://todotooling
 
 - **Capture anywhere:** the Inbox, email (send or BCC `inbox@todotooling.com`), an iPhone Shortcut, or Claude.
 - **Clarify and organize:** projects (parallel, sequential or single actions), steps up to four levels deep, tags, people, "waiting on", "waits for" links between cards, the tickler, reference and someday.
+- **Delegate and follow up:** hand an action to a person with a drafted message you send yourself, see which follow-ups are due, and keep an agenda of what to raise with each person.
+- **What do I gain?** Every action can say why it's worth doing, so priorities explain themselves and ideas with no payoff are easy to drop.
+- **What now?** Tell it where you are, how long you have and how much energy, and it picks from what's available and says why.
+- **Search everything:** actions (open and done), projects, the Slipbox, reference, events, people, places, checklists, areas and goals.
 - **Dates that mean something:** *Planned* is when you intend to do it and *Due* is a hard deadline. Forecast shows both day by day.
-- **Your own events:** an airshow, a trip, an appointment. Forecast shows them on every day they cover, next to your subscribed calendars, the Events list shows what's coming by month, and they reach your phone through the calendar feed. Add them with + Event or ask Claude.
+- **Your own events:** an airshow, a trip, an appointment. Forecast shows them on every day they cover, next to the calendars you subscribe to (private iCal links from Google, iCloud or Outlook), the Events list shows what's coming by month, and they reach your phone through the calendar feed. Add them with + Event or ask Claude.
 - **Reviews:** Daily, Weekly (the full GTD checklist), per-project Review, and Full Review, which walks you through a whole library card by card with Claude suggesting and you approving.
 - **Places:** actions tied to locations, with Nearby, errand runs and location alerts.
+- **Reminders:** notifications on your devices that follow an item's dates.
+- **Attachments:** files on an action or project.
 - **Horizons, perspectives, the Eisenhower matrix, checklists, templates, a slipbox and a reading list.**
 - **An OmniFocus import** with a guided sort afterwards.
 - **Nothing is ever deleted.** Actions are completed or dropped, projects are completed or dropped, and folders are archived. The database enforces this.
@@ -40,7 +46,9 @@ To pick up a Full Review on another computer, open the review in the app, copy t
 |---|---|
 | `index.html`, `styles.css`, `sw.js`, `manifest.webmanifest` | The app shell and service worker |
 | `js/` | App modules (plain ES modules, no build step). `main.js` starts it; `views/` are screens; `editors/` are the inspector and sheets |
-| `config.js` | Supabase URL and publishable key (public, protected by RLS) |
+| `config.js` | Supabase URL and publishable key (public, protected by RLS). `config.example.js` is the template for a local `config.local.js` |
+| `supabase-client.js`, `vendor/` | The Supabase client and the bundled `supabase-js` library it loads |
+| `icons/`, `favicon.png` | App icons |
 | `supabase/migrations/` | The database schema, rules and functions |
 | `supabase/tests/` | SQL rule tests; each runs in a transaction and rolls back |
 | `mcp/` | The MCP server, a Cloudflare Worker (also email capture, reminders, calendar feed, push) |

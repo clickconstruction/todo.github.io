@@ -4,8 +4,8 @@ Guidance for Claude working in this repo. See README.md for what the app is and 
 
 ## Product rules (don't break these)
 
-- **Nothing is deleted.** Actions are completed or dropped, projects are completed or dropped, folders and places are archived. Database triggers and RLS enforce this; never add a delete path.
-- **The MCP can do everything a user can,** except manage API tokens and approved email senders, which stay app-only for security.
+- **Nothing the user made is deleted.** Actions are completed or dropped, projects are completed or dropped, and everything else they keep (folders, places, events, calendars, attachments, perspectives) is archived. Database triggers and RLS enforce this; never add a delete path for any of it. Only links and device settings are removed outright: tag links, "waits for" links, reminders on an item, push subscriptions, API tokens and approved senders.
+- **The MCP can do everything a user can,** except manage API tokens and approved email senders, which stay app-only for security. What belongs to one device rather than the account (its push subscription, Focus, which sidebar groups are collapsed) is set in the app on that device. Subscribed calendars are the `calendars` tool and the Settings page is the `settings` tool; a calendar's private link can be saved through the MCP but is never returned.
 - **Planned vs Due:** Planned is an intention; Due is only for hard deadlines. Flagged means "important now".
 - **The database is the source of truth for rules.** Put a rule in a trigger or SQL function when it must hold for both the app and the MCP, and test it in `supabase/tests/`.
 
@@ -32,7 +32,7 @@ Guidance for Claude working in this repo. See README.md for what the app is and 
 Each call gets **50 outgoing requests** and **about 10 ms of CPU**, and the library is large (8,000+ open tasks).
 
 - Never make one request per item. Batch with `id=in.(…)`.
-- Whole-library reads come from one snapshot, `rpc/mcp_snapshot`. If you add a column to `tasks`, add it to `mcp_snapshot` and to the mirror in `mcp/test.mjs`.
+- Whole-library reads come from one snapshot, `rpc/mcp_snapshot`. If you add a column to `tasks`, add it to `mcp_snapshot`. The mirror in `mcp/test.mjs` takes its columns from the test rows, so give a test task the new column or the tests won't see it.
 - "What's available" comes from `rpc/available_task_ids`. Keep the SQL, `js/availability.js` and the MCP's `availabilityOf` / `parkedOf` in sync.
 - Reads are cached per call (`api.q`); writes clear the cache.
 - REST paging adds `order=id.asc`; tables without an `id` column need an entry in `TIE` in `mcp/src/index.js`.

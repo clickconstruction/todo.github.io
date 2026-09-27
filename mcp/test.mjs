@@ -175,7 +175,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 75 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 75 tools, no internals leaked');
+assert(list.body.result.tools.length === 77 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 77 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -709,6 +709,27 @@ assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'r
   const fc = await tool('forecast', { days: 2 });
   const todayEvents = Object.values(fc.days)[0].events || [];
   assert(todayEvents.some((e) => e.title === 'Site walk' && e.calendar === 'Work' && e.location === '1000 Main St') && !JSON.stringify(fc).includes('cal.example'), 'forecast includes calendar events, never the links');
+  db.calendars.length = 0;
+  // the calendars tool: what Settings → Calendars does, without ever giving a link back
+  const added = await tool('calendars', { action: 'add', url: 'webcal://cal.example/team.ics' });
+  const crow = db.calendars.find((c) => c.id === added.id);
+  assert(added.name === 'Work' && added.events === 1 && added.shown_in_forecast && crow.url === 'https://cal.example/team.ics' && crow.user_id === UID, 'calendars add: the link is checked, named after the calendar and saved as https');
+  assert(!JSON.stringify(added).includes('cal.example'), 'calendars add: the link is not returned');
+  const refuse = async (args, re) => { try { await tool('calendars', args); return false; } catch (e) { return re.test(e.message) && !e.message.includes('cal.example'); } };
+  assert(await refuse({ action: 'add', url: 'https://cal.example/missing.ics' }, /doesn’t exist any more/) && await refuse({ action: 'add', url: 'http://cal.example/a.ics' }, /https:\/\/ or webcal/) && db.calendars.length === 1, 'calendars add: a dead or plain-http link is refused and nothing is saved');
+  db.calendars.push({ id: '00000000-0000-0000-0000-00000000ca12', user_id: 'someone-else', name: 'Theirs', url: 'https://cal.example/theirs.ics', color: '#1D9E75', enabled: true, sort: 0, archived_at: null });
+  const listed = await tool('calendars', {});
+  assert(listed.calendars.length === 1 && listed.calendars[0].id === added.id && !JSON.stringify(listed).includes('cal.example'), 'calendars list: the owner\'s calendars only, never the links');
+  assert(await refuse({ action: 'update', id: '00000000-0000-0000-0000-00000000ca12', enabled: false }, /not found/i) && db.calendars[1].enabled === true, 'calendars update: can’t touch someone else’s calendar');
+  const changed = await tool('calendars', { action: 'update', name: 'work', new_name: 'Team', color: '#378ADD', enabled: false });
+  assert(changed.name === 'Team' && changed.color === '#378ADD' && changed.shown_in_forecast === false && crow.url === 'https://cal.example/team.ics', 'calendars update: by name; rename, colour and hide, the link untouched');
+  assert(await refuse({ action: 'update', id: added.id, color: 'blue' }, /hex colour/) && await refuse({ action: 'update', id: added.id, url: 'https://cal.example/html' }, /isn’t a calendar feed/) && crow.url === 'https://cal.example/team.ics', 'calendars update: a bad colour or a link that isn’t a calendar changes nothing');
+  await tool('calendars', { action: 'update', id: added.id, url: 'https://cal.example/new.ics' });
+  assert(crow.url === 'https://cal.example/new.ics', 'calendars update: a replacement link is checked and saved');
+  const gone = await tool('calendars', { action: 'remove', id: added.id });
+  assert(gone.archived && crow.archived_at && db.calendars.length === 2 && (await tool('calendars', {})).calendars.length === 0, 'calendars remove: archived, never deleted');
+  const back = await tool('calendars', { action: 'restore', id: added.id });
+  assert(!back.archived && crow.archived_at === null, 'calendars restore brings it back');
   db.calendars.length = 0;
 }
 
@@ -1481,6 +1502,38 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(ics2.includes('GEO:29.7351;-95.471') && /X-APPLE-STRUCTURED-LOCATION;VALUE=URI;X-APPLE-RADIUS=200;X-TITLE="Ellington Airport, Houston":geo:29\.7351,-95\.471/.test(ics2.replace(/\r\n /g, '')), 'feed: coordinates as GEO and Apple\'s structured location (map, Directions, time to leave)');
   assert(!/SUMMARY:Somewhere vague[\s\S]*?GEO:/.test(ics2.split('SUMMARY:Somewhere vague')[1].split('END:VEVENT')[0]), 'feed: no GEO for an event without coordinates');
   db.events.length = 0;
+}
+
+// ---------- settings: what the Settings page holds ----------
+{
+  db.user_settings.length = 0;
+  const refuse = async (args, re) => { try { await tool('settings', args); return false; } catch (e) { return re.test(e.message); } };
+  const fresh = await tool('settings', {});
+  assert(fresh.due_time === '17:00' && fresh.planned_time === '09:00' && fresh.review_day === 'Friday' && fresh.today_tag === null && db.user_settings.length === 0, 'settings get: the defaults when nothing is saved, and nothing is written');
+  const first = await tool('settings', { action: 'set', due_time: '16:30', review_day: 'thursday', daily_notify: true, waiting_followup_days: 10 });
+  const srow = db.user_settings.find((x) => x.user_id === UID);
+  assert(db.user_settings.length === 1 && srow.due_minutes === 990 && srow.review_day === 4 && srow.daily_notify === true && srow.waiting_followup_days === 10 && first.due_time === '16:30' && first.review_day === 'Thursday', 'settings set: the first save makes the row, in the database\'s units');
+  db.user_settings.push({ user_id: 'someone-else', due_minutes: 60 });
+  await tool('settings', { action: 'set', planned_time: '08:15' });
+  assert(db.user_settings.length === 2 && srow.planned_minutes === 495 && srow.due_minutes === 990 && db.user_settings[1].planned_minutes === undefined, 'settings set: a later save changes only the owner\'s row');
+  assert(await refuse({ action: 'set', due_time: '25:00' }, /time like/) && await refuse({ action: 'set', matrix_urgent_days: 90 }, /1 to 60/) && await refuse({ action: 'set', review_day: 'Someday' }, /day of the week/) && await refuse({ action: 'set' }, /Nothing to change/) && srow.due_minutes === 990, 'settings set: a bad time, number or day changes nothing');
+  const stag = await tool('create_tag', { label: 'Settings today tag' });
+  assert((await tool('settings', { action: 'set', today_tag: 'settings today tag' })).today_tag === 'Settings today tag' && srow.forecast_tag_id === stag.id && await refuse({ action: 'set', today_tag: 'No such tag' }, /No tag called/), 'settings set: the Today tag by name');
+  assert((await tool('settings', { action: 'set', today_tag: null })).today_tag === null && srow.forecast_tag_id === null, 'settings set: null clears the Today tag');
+  const side = await tool('settings', { action: 'sidebar', hide: ['matrix', 'slipbox'], order: { do: ['now', 'forecast'] } });
+  assert(side.sidebar.hidden.join() === 'matrix,slipbox' && side.sidebar.order.do.join() === 'now,forecast' && srow.sidebar.hidden.length === 2, 'settings sidebar: hide views and order a group');
+  assert((await tool('settings', { action: 'sidebar', show: ['matrix'] })).sidebar.hidden.join() === 'slipbox' && srow.sidebar.order.do.length === 2, 'settings sidebar: show one again, the order kept');
+  assert(await refuse({ action: 'sidebar', hide: ['forecast'] }, /can’t be hidden/) && await refuse({ action: 'sidebar', hide: ['nope'] }, /no sidebar view/) && await refuse({ action: 'sidebar', order: { do: ['projects'] } }, /not in do/) && srow.sidebar.hidden.join() === 'slipbox', 'settings sidebar: Forecast can\'t be hidden, unknown or misplaced views are refused');
+  assert((await tool('settings', { action: 'sidebar', reset: true })).sidebar.hidden.length === 0 && Object.keys(srow.sidebar).length === 0, 'settings sidebar: reset');
+  const mine = await tool('settings', { action: 'sweep_prompt', add: { group: 'Work', prompt: 'Trucks due for service' } });
+  await tool('settings', { action: 'sweep_prompt', hide: 'calls to make or return' });
+  const sweep = await tool('mind_sweep_prompts', {});
+  assert(mine.mind_sweep.yours[0].prompt === 'Trucks due for service' && sweep.prompts.some((p) => p.prompt === 'Trucks due for service' && p.yours) && !sweep.prompts.some((p) => p.prompt === 'Calls to make or return'), 'settings sweep_prompt: their own prompt added and a built-in hidden, as the mind sweep then shows');
+  await tool('settings', { action: 'sweep_prompt', remove: mine.mind_sweep.yours[0].id });
+  const restored = await tool('settings', { action: 'sweep_prompt', restore_hidden: true });
+  assert(restored.mind_sweep.yours.length === 0 && restored.mind_sweep.hidden_prompts === 0 && await refuse({ action: 'sweep_prompt', hide: 'Not a prompt' }, /No built-in prompt/), 'settings sweep_prompt: remove theirs, restore the hidden');
+  assert(!/token|sender/i.test(JSON.stringify(restored)) && !TOOL_NAMES.some((n) => /token|sender/.test(n)), 'API tokens and approved senders stay out of the MCP');
+  db.user_settings.length = 0; db.tags = db.tags.filter((t) => t.id !== stag.id);
 }
 
 // ---------- search everything ----------

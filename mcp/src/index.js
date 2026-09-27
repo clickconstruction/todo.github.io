@@ -10,7 +10,7 @@ import PostalMime from 'postal-mime';
 import { handleGeo, makePlaceResolver, loadPlaceData, decodeSnapshot } from './geo.js';
 import { sendDueReminders, sendReviewReminders, sendDailyReminders } from './reminders.js';
 import { deliver, sendQueuedTests } from './deliver.js';
-import { handleCalendarFetch, calendarEvents } from './calendar.js';
+import { handleCalendarFetch, calendarEvents, calendarsTools } from './calendar.js';
 import * as P from '../../js/perspective-engine.js';
 import * as OF from '../../js/omnifocus-import.js';
 import * as TPL from '../../js/templates.js';
@@ -29,6 +29,7 @@ import { eventsTools, nextDay } from './events.js';
 import { searchTools } from './search.js';
 import { slipboxTools } from './slipbox.js';
 import { matrixTools } from './matrix.js';
+import { settingsTools } from './settings.js';
 import { eventOf, ownEventOf, icsCalendar } from '../../js/schedule.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
@@ -53,6 +54,8 @@ Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); 
 Slipbox and reading: ideas to think with (not actions) go to the slipbox tool as fleeting notes (one idea, the user's words, [[links]]); things to read/watch/listen to go on the reading list (reading tool; clarify_item/full_review decisions slipbox and reading). When they finish something, offer to take notes. The Weekly Review step "notes" turns fleeting notes into permanent ones.
 Search: search finds words across actions (open and done), projects, the Slipbox, reference (never secret values), events and people; use it before asking the user where something is.
 Events: the user's own calendar entries (an airshow, a trip, an appointment) go in with the events tool (add; several at once with items; pass task to link them to the card they come from); they show in Forecast (by day) and the Events list, and reach their phone through the calendar feed. Not actions: a time block on an action is update_task schedule.
+Calendars: the other calendars they follow (Google, iCloud, Outlook) are private iCal links kept with the calendars tool (list, add, update, remove); their events show in Forecast. You can save a link the user gives you; links are never returned.
+Settings: the settings tool reads and changes what the app's Settings page holds (default times, the Today tag, review and morning reminders, the sidebar, their own mind sweep prompts); change one only when they ask. API tokens and approved email senders are managed in the app only.
 Matrix (Eisenhower): the matrix tool sorts available actions into do / schedule / delegate / park from due dates, flags and goals; the user can override with ★/☆ (mark). Use it when they ask what matters, or to park the neither-urgent-nor-important box in Someday (only what they agree to; unpark undoes).
 Full Review (full_review): when the user wants to go through things together, start or resume a session, give them the app link, and work card by card while they watch it in the app. Turn what they tell you into a suggestion (full_review suggest) that they Submit in the app (or, when they say "submit", call full_review submit to press it for them); draft suggestions ahead for the next cards (upcoming + suggest items) so they can approve quickly. Apply directly (annotate/decide) only when they say to just do it. Important items come first; group cards need their agreement on the proposal.
 Perspectives are the user's saved views (e.g. Calls, Today): list_perspectives, then run_perspective to see what's in one; to answer "what should I do now" questions, prefer the user's own perspectives. create_perspective/update_perspective build them (preview rules with run_perspective first).
@@ -2302,6 +2305,8 @@ TOOLS.push(...slipboxTools({ tool: (name) => TOOLS.find((t) => t.name === name) 
 TOOLS.push(...matrixTools({ OPEN, availableTasks }));
 TOOLS.push(...eventsTools({ localDate, zonedToIso, OPEN, geocode }));
 TOOLS.push(...searchTools());
+TOOLS.push(...calendarsTools({ sha256Hex }));
+TOOLS.push(...settingsTools());
 TOOLS.push(...dailyTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
