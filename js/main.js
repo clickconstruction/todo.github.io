@@ -56,6 +56,7 @@ import { weeklyAction, staleAction, weeklySubmit } from './views/weekly.js';
 import { sweepAction, sweepSubmit, sweepKey } from './views/sweep.js';
 import { somedayAction, somedaySubmit, somedayCount } from './views/someday.js';
 import { horizonsAction, horizonsInput, horizonsChange } from './views/horizons.js';
+import { treeAction } from './views/tree.js';
 import { nowAction } from './views/now.js';
 import { planAction, planSubmit, planInput, planChange } from './views/plan.js';
 
@@ -184,6 +185,7 @@ const CLICKS = [
   ['[data-stale]', (el, e) => { e.stopPropagation(); staleAction(el); }],
   ['[data-sweep]', (el, e) => { e.stopPropagation(); sweepAction(el); }],
   ['[data-someday]', (el, e) => { e.stopPropagation(); somedayAction(el); }],
+  ['[data-tt]', (el, e) => { e.stopPropagation(); treeAction(el); }],
   ['[data-hz]', (el, e) => { e.stopPropagation(); horizonsAction(el); }],
   ['[data-plan]', (el, e) => { e.stopPropagation(); planAction(el); }],
   ['[data-ck]', (el, e) => { e.stopPropagation(); checklistAction(el); }],

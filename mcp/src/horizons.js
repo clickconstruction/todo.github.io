@@ -80,14 +80,15 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
     },
     {
       name: 'save_goal',
-      description: 'Add or edit a goal (1-2 years). target: YYYY-MM-DD. status: active, achieved or dropped (never deleted). projects: names or ids of projects that serve it (their actions rank higher in what_now). reviewed: true marks it reviewed now.',
-      inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Goal id or title, to edit' }, title: { type: 'string' }, why: { type: 'string' }, target: { type: ['string', 'null'] }, area: { type: ['string', 'null'] }, status: { type: 'string', enum: ['active', 'achieved', 'dropped'] }, reviewed: { type: 'boolean' }, projects: { type: 'array', items: { type: 'string' } } } },
+      description: 'Add or edit a goal (1-2 years). target: YYYY-MM-DD. kind: goal, milestone (a condition the user ticks on the tech tree) or destination (where a branch of the tree leads). status: active, achieved or dropped (never deleted). projects: names or ids of projects that serve it (their actions rank higher in what_now). reviewed: true marks it reviewed now.',
+      inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Goal id or title, to edit' }, title: { type: 'string' }, kind: { type: 'string', enum: ['goal', 'milestone', 'destination'] }, why: { type: 'string' }, target: { type: ['string', 'null'] }, area: { type: ['string', 'null'] }, status: { type: 'string', enum: ['active', 'achieved', 'dropped'] }, reviewed: { type: 'boolean' }, projects: { type: 'array', items: { type: 'string' } } } },
       async run(api, a) {
         const body = {};
         if (a.title !== undefined) body.title = String(a.title).trim();
         if (a.why !== undefined) body.why = String(a.why);
         if (a.target !== undefined) { if (a.target !== null && !/^\d{4}-\d{2}-\d{2}$/.test(a.target)) throw new Error('target must be YYYY-MM-DD'); body.target_date = a.target; }
         if (a.status !== undefined) body.status = a.status;
+        if (a.kind !== undefined) { if (!['goal', 'milestone', 'destination'].includes(a.kind)) throw new Error('kind is goal, milestone or destination'); body.kind = a.kind; }
         if (a.reviewed) body.last_reviewed_at = new Date().toISOString();
         if (a.area !== undefined) {
           if (a.area === null) body.area_id = null;
@@ -103,7 +104,7 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
           [row] = await api.q('goals', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, ...body } });
         }
         await linkProjects(api, a.projects, 'goal_id', row.id);
-        return { id: row.id, title: row.title, status: row.status, target: row.target_date, why: row.why || undefined, projects_linked: (a.projects || []).length || undefined };
+        return { id: row.id, title: row.title, kind: row.kind && row.kind !== 'goal' ? row.kind : undefined, status: row.status, target: row.target_date, why: row.why || undefined, projects_linked: (a.projects || []).length || undefined };
       },
     },
     {

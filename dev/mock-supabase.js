@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      daily_ticks: [], task_waits: [], events: [], perspectives: [], imports: [], settle_ops: [], review_sessions: [], review_items: [], slipbox_notes: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      daily_ticks: [], tree_links: [], task_waits: [], events: [], perspectives: [], imports: [], settle_ops: [], review_sessions: [], review_items: [], slipbox_notes: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -179,6 +179,20 @@
     });
   }
 
+  // Mirrors tree_links_guard and tree_accept (migration 20261103000001).
+  function linkGuard(r, id0) {
+    if (r.archived_at) return null;
+    const owned = (kind, id) => (kind === 'goal' ? tables.goals : kind === 'project' ? tables.projects : []).some((x) => x.id === id && x.user_id === r.user_id);
+    if (!owned(r.node_kind, r.node_id)) return 'That goal or project isn’t yours.';
+    if (!r.requires_id) return r.state === 'proposed' && String(r.requires_title || '').trim() ? null : 'new row for relation "tree_links" violates check constraint';
+    if (!owned(r.requires_kind, r.requires_id)) return 'That goal or project isn’t yours.';
+    if (r.node_kind === r.requires_kind && r.node_id === r.requires_id) return 'A goal or project can’t require itself.';
+    const livel = tables.tree_links.filter((l) => !l.archived_at && l.requires_id && l.id !== id0);
+    if (livel.some((l) => l.node_kind === r.node_kind && l.node_id === r.node_id && l.requires_kind === r.requires_kind && l.requires_id === r.requires_id)) return 'duplicate key value violates unique constraint "tree_links_once"';
+    const seen = new Set(); const stack = [`${r.requires_kind}:${r.requires_id}`];
+    while (stack.length) { const k = stack.pop(); if (k === `${r.node_kind}:${r.node_id}`) return 'That would make a loop: it already rests on this one.'; if (seen.has(k)) continue; seen.add(k); livel.filter((l) => `${l.node_kind}:${l.node_id}` === k).forEach((l) => stack.push(`${l.requires_kind}:${l.requires_id}`)); }
+    return null;
+  }
   // Mirrors tasks_daily_guard / daily_ticks_guard (migration 20261101000001).
   const dayStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   function tickGuard(r, before) {
@@ -283,7 +297,8 @@
     daily_ticks: () => ({ state: 'done' }),
     checklist_runs: () => ({ started_at: new Date().toISOString(), finished_at: null, ticked: [], total: 0, notes: {} }),
     areas: () => ({ standards: '', review_every_days: 30, last_reviewed_at: null, sort: 0, archived_at: null }),
-    goals: () => ({ why: '', area_id: null, target_date: null, status: 'active', achieved_at: null, review_every_days: 30, last_reviewed_at: null, sort: 0 }),
+    tree_links: () => ({ requires_kind: null, requires_id: null, requires_title: null, state: 'accepted', proposed_by: 'user', why: '', archived_at: null }),
+    goals: () => ({ kind: 'goal', why: '', area_id: null, target_date: null, status: 'active', achieved_at: null, review_every_days: 30, last_reviewed_at: null, sort: 0 }),
     weekly_reviews: () => ({ started_at: new Date().toISOString(), completed_at: null, abandoned_at: null, steps: {}, stats: {} }),
     project_templates: () => ({ icon: '📋', folder_id: null, schedule: null, next_run_at: null, last_run_at: null, sort: 0, archived_at: null }),
     perspectives: () => ({ icon: '🔭', rules: { v: 1, match: 'all', rules: [] }, options: { show: 'available', group_by: 'project', sort_by: 'project', layout: 'tree' }, badge: false, pinned: true, sort: 0, archived_at: null }),
@@ -292,7 +307,7 @@
     reference_items: () => ({ body: '', topic: '', secret_value: null, project_id: null, archived_at: null }),
     attachments: () => ({ task_id: null, project_id: null, reference_id: null, size: 0, mime: 'application/octet-stream', archived_at: null }),
   };
-  const NO_DELETE = { daily_ticks: 'ticks are kept.', daily_reviews: 'daily reviews are kept.', checklists: 'checklists are archived, not deleted.', checklist_runs: 'runs are kept.', areas: 'areas are archived, not deleted.', goals: 'goals are achieved or dropped, not deleted.', weekly_reviews: 'reviews are kept.', people: 'people are archived, not deleted.', reference_items: 'reference items are archived, not deleted.', calendars: 'calendars are archived, not deleted.', events: 'events are archived, not deleted.', project_templates: 'templates are archived, not deleted.', imports: 'imports are kept.', perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
+  const NO_DELETE = { tree_links: 'links are archived, not deleted.', daily_ticks: 'ticks are kept.', daily_reviews: 'daily reviews are kept.', checklists: 'checklists are archived, not deleted.', checklist_runs: 'runs are kept.', areas: 'areas are archived, not deleted.', goals: 'goals are achieved or dropped, not deleted.', weekly_reviews: 'reviews are kept.', people: 'people are archived, not deleted.', reference_items: 'reference items are archived, not deleted.', calendars: 'calendars are archived, not deleted.', events: 'events are archived, not deleted.', project_templates: 'templates are archived, not deleted.', imports: 'imports are kept.', perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
 
   // ----- PostgREST-ish filter parsing for .or() strings -----
   function splitTop(s) {
@@ -336,6 +351,8 @@
         if (table === 'tasks') { for (const r of add) { const err = treeGuard(r); if (err) return { data: null, error: { message: err } }; } }
         if (table === 'task_waits') { for (const r of add) { const err = waitsGuard(r); if (err) return { data: null, error: { message: err } }; } }
         if (table === 'daily_ticks') { for (const r of add) { const err = tickGuard(r, null); if (err) return { data: null, error: { message: err } }; } }
+        if (table === 'tree_links') { for (const r of add) { const err = linkGuard(r, null); if (err) return { data: null, error: { message: err } }; } }
+        if (table === 'goals') { for (const r of add) { if (!['goal', 'milestone', 'destination'].includes(r.kind)) return { data: null, error: { message: 'new row for relation "goals" violates check constraint' } }; } }
         rows.push(...add);
         add.forEach((r) => { if (table === 'projects') { reviewSchedule(r); projectStatusChange(r, null); } if (table === 'tasks') taskRules(r, null); if (table === 'notifications') { fireAt(r); history(r, 'notification', null, { kind: r.kind, offset_minutes: r.offset_minutes, at: r.at }); } });
         return { data: add.map(copy), error: null };
@@ -346,6 +363,7 @@
           for (const r of hit) { const trial = { ...r, ...st.payload }; const err = treeGuard(trial); if (err) return { data: null, error: { message: err } }; st.payload = { ...st.payload, project_id: trial.project_id, in_inbox: trial.in_inbox }; }
         }
         if (table === 'daily_ticks') { for (const r of hit) { const err = tickGuard({ ...r, ...st.payload }, r); if (err) return { data: null, error: { message: err } }; } }
+        if (table === 'tree_links') { for (const r of hit) { const err = linkGuard({ ...r, ...st.payload }, r.id); if (err) return { data: null, error: { message: err } }; } }
         hit.forEach((r) => {
           const before = { ...r };
           Object.assign(r, st.payload, { updated_at: now() });
@@ -551,6 +569,20 @@
         // Mirrors reading_set() / slipbox_from_task() (migration 20261017000001).
         const guessType = (s) => (/\b(watch|video|youtube|film|movie|documentary)\b/i.test(s) ? 'video' : /\b(listen|podcast|episode|audiobook)\b/i.test(s) ? 'podcast' : /\b(book|novel)\b|archive\.org/i.test(s) ? 'book' : /https?:\/\//i.test(s) ? 'article' : /^\s*read\b/i.test(s) ? 'book' : 'other');
         const somedayOf = (create) => { let g = tables.tags.find((x) => !x.parent_id && /^someday/i.test(x.name)); if (!g && create) { g = { ...DEFAULTS.tags(), id: id(), user_id: uid, name: 'Someday', status: 'on_hold', sort: 0, created_at: now() }; tables.tags.push(g); } return g; };
+        if (name === 'tree_accept') {
+          const l = tables.tree_links.find((x) => x.id === args.link && x.user_id === uid && !x.archived_at);
+          if (!l) return { data: null, error: { message: 'Link not found.' } };
+          let made = false;
+          if (!l.requires_id) {
+            const want = String(l.requires_title).trim().toLowerCase();
+            let g = tables.goals.find((x) => x.user_id === uid && x.title.trim().toLowerCase() === want && x.status !== 'dropped');
+            if (!g) { g = { ...DEFAULTS.goals(), id: id(), user_id: uid, title: String(l.requires_title).trim(), kind: 'milestone', created_at: now(), updated_at: now() }; tables.goals.push(g); made = true; }
+            if (tables.tree_links.some((x) => !x.archived_at && x.id !== l.id && x.node_kind === l.node_kind && x.node_id === l.node_id && x.requires_id === g.id)) { l.archived_at = now(); return { data: { id: l.id, already: true, requires_id: g.id }, error: null }; }
+            Object.assign(l, { requires_kind: 'goal', requires_id: g.id });
+          }
+          l.state = 'accepted'; l.updated_at = now();
+          return { data: { id: l.id, requires_kind: l.requires_kind, requires_id: l.requires_id, milestone_made: made }, error: null };
+        }
         // Mirrors matrix_park() / matrix_unpark() (migration 20261018000001).
         if (name === 'matrix_park') {
           const g = somedayOf(true); g.status = 'on_hold';

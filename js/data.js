@@ -37,7 +37,7 @@ async function every(query, ...keys) {
 
 export async function loadAll() {
   const since = new Date(Date.now() - 86400000).toISOString();
-  const [tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions, taskWaits, events, dailyTicks] = await Promise.all([
+  const [tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions, taskWaits, events, dailyTicks, treeLinks] = await Promise.all([
     every((c) => sb.from('tasks').select('*', c).or(`and(completed_at.is.null,dropped_at.is.null),completed_at.gte.${since}`), 'id'),
     every((c) => sb.from('projects').select('*', c), 'id'),
     every((c) => sb.from('folders').select('*', c), 'id'),
@@ -64,8 +64,9 @@ export async function loadAll() {
     every((c) => sb.from('task_waits').select('*', c), 'task_id', 'waits_for'),
     every((c) => sb.from('events').select('*', c).is('archived_at', null), 'id'),
     run(sb.from('daily_ticks').select('*').gte('day', new Date(Date.now() - 62 * 86400000).toISOString().slice(0, 10))),
+    run(sb.from('tree_links').select('*').is('archived_at', null)),
   ]);
-  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions, taskWaits, events, dailyTicks });
+  Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions, taskWaits, events, dailyTicks, treeLinks });
   // Cards that events point at but that aren't loaded any more (completed a while ago): fetched so the link still reads.
   const linked = [...new Set(events.map((e) => e.task_id).filter((id) => id && !byId(tasks, id)))];
   db.eventTasks = linked.length ? await run(sb.from('tasks').select('*').in('id', linked.slice(0, 1000))) : [];

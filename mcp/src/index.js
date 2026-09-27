@@ -32,6 +32,7 @@ import { searchTools } from './search.js';
 import { slipboxTools } from './slipbox.js';
 import { matrixTools } from './matrix.js';
 import { settingsTools } from './settings.js';
+import { treeTools } from './tree.js';
 import { eventOf, ownEventOf, icsCalendar } from '../../js/schedule.js';
 
 const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
@@ -59,6 +60,7 @@ Events: the user's own calendar entries (an airshow, a trip, an appointment) go 
 Calendars: the other calendars they follow (Google, iCloud, Outlook) are private iCal links kept with the calendars tool (list, add, update, remove); their events show in Forecast. You can save a link the user gives you; links are never returned.
 Settings: the settings tool reads and changes what the app's Settings page holds (default times, the Today tag, review and morning reminders, the sidebar, their own mind sweep prompts); change one only when they ask. API tokens and approved email senders are managed in the app only.
 Dailies: something done every day is a daily checkbox, not a repeating action with a due date (which piles up as overdue). The dailies tool lists today's, ticks them and sets the tier: must = have to, every day (a missed day shows; one of the Daily review's must-dos), should = should, most days (a missed day is an empty dot; never nag). Each day starts fresh and the action stays open. When the user describes a habit or a daily obligation, offer dailies set (or full_review suggest daily) and ask which tier if it isn't plain.
+Tech tree (tech_tree): goals and projects linked by what they require, so doing certain things unlocks future things; milestones are conditions the user ticks, destinations are where a branch leads. A locked project belongs on hold and an unlocked one can be started, but only on the user's word: propose links (shown dashed until they accept), say what holding or starting would change, and never do either yourself. Use get with a destination to answer what to work towards next.
 Matrix (Eisenhower): the matrix tool sorts available actions into do / schedule / delegate / park from due dates, flags and goals; the user can override with ★/☆ (mark). Use it when they ask what matters, or to park the neither-urgent-nor-important box in Someday (only what they agree to; unpark undoes).
 Full Review (full_review): when the user wants to go through things together, start or resume a session, give them the app link, and work card by card while they watch it in the app. Turn what they tell you into a suggestion (full_review suggest) that they Submit in the app (or, when they say "submit", call full_review submit to press it for them); draft suggestions ahead for the next cards (upcoming + suggest items) so they can approve quickly. Apply directly (annotate/decide) only when they say to just do it. Important items come first; group cards need their agreement on the proposal.
 Perspectives are the user's saved views (e.g. Calls, Today): list_perspectives, then run_perspective to see what's in one; to answer "what should I do now" questions, prefer the user's own perspectives. create_perspective/update_perspective build them (preview rules with run_perspective first).
@@ -2317,6 +2319,7 @@ TOOLS.push(...searchTools());
 TOOLS.push(...calendarsTools({ sha256Hex }));
 TOOLS.push(...settingsTools());
 TOOLS.push(...dailiesTools({ localDate }));
+TOOLS.push(...treeTools());
 TOOLS.push(...dailyTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));

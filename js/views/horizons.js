@@ -7,6 +7,7 @@ import { projectRow } from '../rows.js';
 import { saveSettings } from '../prefs.js';
 import { isAvailable } from '../availability.js';
 import { areaBalance, isDueForReview, bigReviewsDue } from '../whatnow.js';
+import { viewTree, treeSummary } from './tree.js';
 import { parseText, counts, setTick, clearTicks, toggleBoxes, inlineHtml, plain, toggleWrap, cycleHeading, toggleBullets } from '../horizon-text.js';
 
 export const liveAreas = () => (db.areas || []).filter((a) => !a.archived_at).sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
@@ -39,12 +40,13 @@ const readAgo = (iso) => (iso ? `read ${fmtDate(iso)}` : 'not read yet');
 const firstLine = (s) => { const l = parseText(s).filter((x) => x.text); return plain((l.find((x) => x.kind !== 'heading') || l[0] || {}).text || ''); };
 
 // ---------- the ladder ----------
-export function viewHorizons(sub) {
+export function viewHorizons(sub, id) {
   if (sub !== app.hzEdit) app.hzEdit = null; // editing is for the page you are on
   if (sub === 'purpose' || sub === 'vision') return textPage(sub);
   if (sub === 'areas') return areasList();
   if (sub === 'goals') return goalsList();
   if (sub === 'quarterly') return quarterlyHtml();
+  if (sub === 'tree') return viewTree(id);
   const s = app.settings || {};
   const areas = liveAreas();
   const goals = activeGoals();
@@ -58,7 +60,7 @@ export function viewHorizons(sub) {
   const g0 = goals[0];
   // A level: its name with what needs you beside it (chips never break across lines), then one line under it:
   // the words, cut with … when long, and what stays readable at any width (when it was read).
-  const row = (href, alt, title, sub2, { chips = '', meta = '' } = {}) => `<a class="hz-level" href="${href}"><span class="hz-alt">${alt}</span><span class="hz-main"><span class="hz-title"><b>${title}</b>${chips}</span>${sub2 ? `<span class="hint hz-sub"><span class="hz-clip">${sub2}</span>${meta ? `<span class="hz-meta">${meta}</span>` : ''}</span>` : ''}</span><span class="hz-go">›</span></a>`;
+  const row = (href, alt, title, sub2, { chips = '', meta = '', cls = 'hz-level' } = {}) => `<a class="${cls}" href="${href}"><span class="hz-alt">${alt}</span><span class="hz-main"><span class="hz-title"><b>${title}</b>${chips}</span>${sub2 ? `<span class="hint hz-sub"><span class="hz-clip">${sub2}</span>${meta ? `<span class="hz-meta">${meta}</span>` : ''}</span>` : ''}</span><span class="hz-go">›</span></a>`;
   const yearly = (k) => (big.yearly.includes(k) ? '<span class="chip warn">yearly read due</span>' : '');
   return `<div class="view-head"><h1 class="horizons">Horizons</h1></div>
     <p class="view-sub">From why you do it down to what’s next. The higher levels change slowly; look at them monthly and yearly.</p>
@@ -71,6 +73,7 @@ export function viewHorizons(sub) {
       ${row('#projects', '10k', `Projects · ${live.length} active`, noOutcome ? `${noOutcome} without a “done looks like”` : 'Every project says what done looks like.')}
       ${row('#now', 'Runway', `Actions · ${open}`, `${available} available now · What now? →`)}
     </div>
+    <div class="hz-ladder hz-across">${(() => { const t = treeSummary(); return row('#horizons/tree', '🌳', t.title, t.sub, { chips: t.chips, cls: 'hz-level-like hz-link' }); })()}</div>
     ${due ? `<p class="view-sub">${due} area${due === 1 ? '' : 's'} or goal${due === 1 ? '' : 's'} due for review. They’re a step in the <a href="#weekly/horizons">Weekly Review</a>.</p>` : ''}
     <p class="view-sub">Every quarter: <a href="#horizons/quarterly">the quarterly check-in</a>${s.horizons_quarter_at ? ` (last ${esc(fmtDate(s.horizons_quarter_at))})` : ''}. Every year: read your purpose and vision.</p>`;
 }
@@ -260,13 +263,14 @@ function openGoalEditor(g, defaults = {}) {
     <div class="grid2"><label>By<input type="date" name="target_date" value="${esc(v.target_date || '')}"></label>
       <label>Area<select name="area_id"><option value="">No area</option>${liveAreas().map((a) => `<option value="${a.id}" ${a.id === v.area_id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label></div>
     <label>Why it matters<textarea name="why" rows="3">${esc(v.why)}</textarea></label>
+    <label>On the tech tree<select name="kind">${[['goal', 'Goal'], ['milestone', 'Milestone: a condition to tick'], ['destination', 'Destination: where a branch leads']].map(([k, l]) => `<option value="${k}" ${(v.kind || 'goal') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <div class="actions"><div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div></div></form>`);
   const form = $('form', sheet);
   $('[data-cancel]', form).onclick = () => sheet.close();
   form.onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(form);
-    const fields = { title: f.get('title').trim(), target_date: f.get('target_date') || null, area_id: f.get('area_id') || null, why: f.get('why') };
+    const fields = { title: f.get('title').trim(), target_date: f.get('target_date') || null, area_id: f.get('area_id') || null, why: f.get('why'), kind: f.get('kind') || 'goal' };
     if (!fields.title) return;
     sheet.close();
     const row = await saveGoal(g, fields);

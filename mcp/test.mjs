@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [], slipbox_notes: [], task_waits: [], events: [], daily_ticks: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [], slipbox_notes: [], task_waits: [], events: [], daily_ticks: [], tree_links: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -87,6 +87,19 @@ globalThis.fetch = async (url, init = {}) => {
     const { applied, ...rest } = p.plan; p.plan = rest;
     return new Response(JSON.stringify({ tasks_dropped: a.task_ids.length, references_archived: 0 }), { status: 200 });
   }
+  if (String(url).includes('/rest/v1/rpc/tree_accept')) { // mirror of tree_accept (migration 20261103000001)
+    const b = JSON.parse(init.body); const l = db.tree_links.find((x) => x.id === b.link && x.user_id === b.owner && !x.archived_at);
+    if (!l) return new Response(JSON.stringify({ message: 'Link not found.' }), { status: 400 });
+    let made = false;
+    if (!l.requires_id) {
+      const want = l.requires_title.trim().toLowerCase();
+      let g = db.goals.find((x) => x.user_id === b.owner && x.title.trim().toLowerCase() === want && x.status !== 'dropped');
+      if (!g) { g = { id: id(), user_id: b.owner, title: l.requires_title.trim(), kind: 'milestone', status: 'active', why: '', created_at: new Date().toISOString() }; db.goals.push(g); made = true; }
+      Object.assign(l, { requires_kind: 'goal', requires_id: g.id });
+    }
+    l.state = 'accepted';
+    return new Response(JSON.stringify({ id: l.id, requires_id: l.requires_id, milestone_made: made }), { status: 200 });
+  }
   if (String(url).includes('/rest/v1/rpc/available_task_ids')) { // mirror: the JS rules (matched the SQL on the real library)
     const b = JSON.parse(init.body);
     const open = db.tasks.filter((t) => t.user_id === UID && !t.completed_at && !t.dropped_at);
@@ -169,7 +182,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (m === 'POST' && table === 'tasks') for (const b of (Array.isArray(body) ? body : [body])) { const e = guard({}, b); if (e) return res({ message: e }, 400); }
   if (m === 'PATCH' && table === 'tasks') for (const r of rows.filter(match)) { const b = { ...body }; const e = guard(r, b); if (e) return res({ message: e }, 400); Object.assign(r, b); follow(r); }
   if (m === 'POST' && Array.isArray(body) && body.some((b) => Object.keys(b).sort().join() !== Object.keys(body[0]).sort().join())) return res({ code: 'PGRST102', message: 'All object keys must match' }, 400); // as PostgREST does
-  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...(table === 'checklists' ? { complete_action: true, archived_at: null } : {}), ...(table === 'review_items' ? { status: 'pending', note: '', changed: {}, priority: false } : {}), ...(table === 'checklist_runs' ? { started_at: new Date().toISOString(), finished_at: null } : {}), ...(table === 'daily_ticks' ? { state: 'done' } : {}), ...b })); if (table === 'tasks') add.forEach((r) => dailyGuard(r)); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
+  if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...(table === 'checklists' ? { complete_action: true, archived_at: null } : {}), ...(table === 'review_items' ? { status: 'pending', note: '', changed: {}, priority: false } : {}), ...(table === 'checklist_runs' ? { started_at: new Date().toISOString(), finished_at: null } : {}), ...(table === 'daily_ticks' ? { state: 'done' } : {}), ...(table === 'tree_links' ? { state: 'accepted', proposed_by: 'user', archived_at: null } : {}), ...(table === 'goals' ? { kind: 'goal', status: 'active' } : {}), ...b })); if (table === 'tasks') add.forEach((r) => dailyGuard(r)); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
   if (m === 'PATCH') { const hit = rows.filter((r) => match(r) && orMatch(r)); hit.forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); if (table === 'user_settings') hit.forEach((r) => ['purpose', 'vision'].forEach((k) => { if (body[`${k}_read_at`]) r[k] = String(r[k] || '').replace(/^([ \t]*(?:[-*][ \t]+)?)\[[xX]\]/gm, '$1[ ]'); })); // mirror of user_settings_read_clears
   if (table === 'tasks') hit.forEach((r) => { if (!r.waiting_on) r.follow_up_at = null; dailyGuard(r, r.__was); delete r.__was; }); return init.headers.Prefer ? res(hit) : res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
@@ -190,7 +203,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 78 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 78 tools, no internals leaked');
+assert(list.body.result.tools.length === 79 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 79 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -1531,6 +1544,69 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(ics2.includes('GEO:29.7351;-95.471') && /X-APPLE-STRUCTURED-LOCATION;VALUE=URI;X-APPLE-RADIUS=200;X-TITLE="Ellington Airport, Houston":geo:29\.7351,-95\.471/.test(ics2.replace(/\r\n /g, '')), 'feed: coordinates as GEO and Apple\'s structured location (map, Directions, time to leave)');
   assert(!/SUMMARY:Somewhere vague[\s\S]*?GEO:/.test(ics2.split('SUMMARY:Somewhere vague')[1].split('END:VEVENT')[0]), 'feed: no GEO for an event without coordinates');
   db.events.length = 0;
+}
+
+// ---------- tech tree: what unlocks what ----------
+{
+  const refuse = async (args, re) => { try { await tool('tech_tree', args); return false; } catch (e) { return re.test(e.message); } };
+  db.tree_links.length = 0;
+  const mk = async (name, status) => { const p = await tool('create_project', { name }); if (status) db.projects.find((x) => x.id === p.id).status = status; return p; };
+  const p1 = await mk('Tree Estate Feeder (phase 1)'); const p2 = await mk('Tree Title Feeder (phase 2)'); const p3 = await mk('Tree Mortgage (phase 3)');
+  const pa = await mk('Tree Animal Feeder'); const pb = await mk('Tree ButterFly Group');
+  await tool('capture', { title: 'Start this when I can afford to pay somone full time: Animal Feeder', project: pa.id });
+  await tool('capture', { title: 'Start this when I can afford to pay someone full time: ButterFly', project: pb.id });
+  await tool('capture', { title: 'Draft the title chain', project: p2.id }); await tool('capture', { title: 'Find a title attorney', project: p2.id });
+  const dest = await tool('save_goal', { title: 'Tree significant assets', kind: 'destination' });
+  assert(dest.kind === 'destination' && db.goals.find((g) => g.id === dest.id).kind === 'destination', 'save_goal kind: a destination');
+  const empty = await tool('tech_tree', {});
+  assert(empty.destinations.length === 1 && empty.destinations[0].note && empty.nodes.length === 1, 'tech_tree get: a destination with no path yet');
+
+  const found = await tool('tech_tree', { action: 'find' });
+  assert(found.saved === false && db.tree_links.length === 0 && found.found.filter((f) => /phase/.test(f.node)).length === 2 && found.found.filter((f) => f.requires === 'Can afford to pay someone full time' && f.new_milestone).length === 2, `tech_tree find: reads phases and “Start when…” from the library, and writes nothing (${found.found.length})`);
+  const saved = await tool('tech_tree', { action: 'find', save: true });
+  assert(saved.saved === 4 && db.tree_links.every((l) => l.state === 'proposed' && l.proposed_by === 'agent' && l.user_id === UID), 'find save: stored as proposals from Claude');
+  assert((await tool('tech_tree', { action: 'find' })).found.length === 0, 'find again: nothing new');
+  const g1 = await tool('tech_tree', {});
+  assert(g1.proposals.length === 4 && g1.counts.locked === 0 && g1.nodes.every((x) => x.state !== 'locked'), 'proposed links lock nothing');
+
+  const phase2 = g1.proposals.find((x) => /phase 2/.test(x.node));
+  const acc = await tool('tech_tree', { action: 'accept', id: phase2.id });
+  assert(acc.accepted === 1 && acc.now_locked_but_active[0].project === 'Tree Title Feeder (phase 2)' && acc.now_locked_but_active[0].open_actions === 2 && db.projects.find((x) => x.id === p2.id).status === 'active', 'accept: the project is locked, and is NOT put on hold by itself');
+  const held = await tool('tech_tree', { action: 'hold', project: 'Tree Title Feeder (phase 2)' });
+  assert(held.status === 'on_hold' && held.open_actions === 2 && db.projects.find((x) => x.id === p2.id).status === 'on_hold', 'hold: on the user’s word, the lock is real');
+  assert(await refuse({ action: 'start', project: p2.id }, /still locked.*Tree Estate Feeder/), 'start: a locked project says what it still needs');
+
+  const all = await tool('tech_tree', { action: 'accept', all: true });
+  const ms = db.goals.filter((g) => g.kind === 'milestone' && g.title === 'Can afford to pay someone full time');
+  assert(all.accepted === 3 && all.milestones_made === 1 && ms.length === 1 && db.tree_links.filter((l) => l.requires_id === ms[0].id).length === 2, 'accept all: the shared milestone is made once');
+  const g2 = await tool('tech_tree', {});
+  assert(g2.milestones_to_tick[0].milestone === ms[0].title && g2.milestones_to_tick[0].would_unlock.length === 2 && g2.nodes.find((x) => x.title === 'Tree Animal Feeder').needs[0] === ms[0].title, 'get: a milestone to tick, and what it would unlock');
+
+  const linked = await tool('tech_tree', { action: 'link', node: 'Tree significant assets', requires: 'Tree Mortgage (phase 3)' });
+  assert(linked.linked[0].state === 'accepted' && !linked.now_locked_but_active, 'link: a stated link is accepted at once');
+  assert(await refuse({ action: 'link', node: p1.id, requires: 'Tree significant assets' }, /loop/) && await refuse({ action: 'link', node: p1.id, requires: p1.id }, /itself/) && await refuse({ action: 'link', node: 'No such thing', requires: p1.id }, /No goal or project/), 'link: loops, itself and unknown names are refused in words');
+  const branch = await tool('tech_tree', { destination: 'Tree significant assets' });
+  assert(branch.nodes.length === 4 && branch.destinations[0].of === 4 && branch.destinations[0].next.join() === 'Tree Estate Feeder (phase 1)' && !branch.nodes.some((x) => /Animal/.test(x.title)), 'get destination: its branch, and what is next');
+
+  db.projects.find((x) => x.id === p1.id).status = 'completed';
+  const g3 = await tool('tech_tree', {});
+  assert(g3.nodes.find((x) => x.id === p2.id).state === 'ready' && g3.counts.ready === 1, 'phase 1 done: phase 2 is unlocked and waiting to be started');
+  const started = await tool('tech_tree', { action: 'start', project: p2.id });
+  assert(started.status === 'active' && db.projects.find((x) => x.id === p2.id).status === 'active', 'start: active again');
+
+  const prop = await tool('tech_tree', { action: 'propose', links: [{ node: pa.id, milestone: 'Farm 1 paid for', why: 'Every Feeder runs off Farm 1.' }] });
+  assert(prop.proposed[0].state === 'proposed' && !db.goals.some((g) => g.title === 'Farm 1 paid for'), 'propose: dashed until accepted; the milestone isn’t made yet');
+  await tool('tech_tree', { action: 'dismiss', id: prop.proposed[0].id });
+  await tool('tech_tree', { action: 'unlink', node: 'Tree significant assets', requires: p3.id });
+  assert(db.tree_links.filter((l) => l.archived_at).length === 2 && db.tree_links.length === 6, 'dismiss and unlink archive; nothing is deleted');
+  db.tree_links.push({ id: 'theirs', user_id: 'someone-else', node_kind: 'project', node_id: p1.id, requires_kind: 'project', requires_id: p3.id, state: 'accepted', archived_at: null });
+  assert(!(await tool('tech_tree', {})).nodes.find((x) => x.id === p1.id).needs, 'another user’s links are not read');
+  const real = globalThis.fetch; let calls = 0; globalThis.fetch = (u, ...x) => { calls += 1; return real(u, ...x); };
+  const counted = {}; for (const [k, args] of [['get', {}], ['find', { action: 'find' }], ['hold', { action: 'hold', project: p3.id }]]) { calls = 0; await tool('tech_tree', args); counted[k] = calls; }
+  globalThis.fetch = real;
+  assert(Object.values(counted).every((v) => v <= 10), `tech_tree: a handful of requests a call (${Object.entries(counted).map(([k, v]) => `${k} ${v}`).join(', ')})`);
+  [p1, p2, p3, pa, pb].forEach((p) => { db.projects.find((x) => x.id === p.id).status = 'dropped'; });
+  db.goals = db.goals.filter((g) => g.id !== dest.id && g.kind !== 'milestone'); db.tree_links.length = 0;
 }
 
 // ---------- horizons: checkboxes in the purpose text ----------

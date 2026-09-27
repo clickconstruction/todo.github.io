@@ -21,6 +21,7 @@ import { viewWeekly, isWeeklyDue, openReview } from './views/weekly.js';
 import { viewSweep, mountSweep } from './views/sweep.js';
 import { viewSomeday } from './views/someday.js';
 import { viewHorizons, viewArea, viewGoal } from './views/horizons.js';
+import { drawTree } from './views/tree.js';
 import { viewNow } from './views/now.js';
 import { viewPlan, mountPlan } from './views/plan.js';
 import { viewShare, mountShare } from './views/capture.js';
@@ -48,7 +49,7 @@ const VIEWS = {
   horizons: viewHorizons, area: viewArea, goal: viewGoal, now: viewNow, plan: viewPlan, share: viewShare, checklists: viewChecklists, checklist: viewChecklist, daily: viewDaily, settle: viewSettle, full: viewFullReview, slipbox: viewSlipbox, reading: viewReading, matrix: viewMatrix, events: viewEvents,
 };
 // Work that needs the rendered DOM (the Nearby map is mounted into its slot).
-const AFTER = { events: refreshEventDrives, forecast: refreshEventDrives, share: mountShare, plan: mountPlan, nearby: mountNearbyMap, clarify: mountClarify, sweep: mountSweep, weekly: (step) => step === 'sweep' && mountSweep(), reference: (id) => id && mountReferenceFiles(id) };
+const AFTER = { horizons: (sub) => sub === 'tree' && drawTree(), events: refreshEventDrives, forecast: refreshEventDrives, share: mountShare, plan: mountPlan, nearby: mountNearbyMap, clarify: mountClarify, sweep: mountSweep, weekly: (step) => step === 'sweep' && mountSweep(), reference: (id) => id && mountReferenceFiles(id) };
 // Detail views highlight their parent tab.
 const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting', review: 'weekly', sweep: 'inbox', area: 'horizons', goal: 'horizons', plan: 'projects', checklist: 'checklists', settle: 'settings' };
 
@@ -71,6 +72,7 @@ export function render() {
     <span><button class="link-btn" data-act="focus">Change</button><button class="link-btn" data-act="unfocus">Unfocus</button></span></div>` : '';
   $('#view').innerHTML = banner + html;
   document.body.classList.toggle('fr-mode', view === 'full'); // Full Review: one card, nothing else
+  document.body.classList.toggle('wide-view', view === 'horizons' && args[0] === 'tree'); // the tech tree runs wide
   if (view !== 'full') stopListening();
   document.body.classList.toggle('is-focused', !!getFocus());
   if (AFTER[view]) AFTER[view](...args);

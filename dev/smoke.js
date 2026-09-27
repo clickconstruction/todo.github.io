@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, dailies, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, dailies, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -556,6 +556,110 @@ async function quickStart(check) {
   key('1'); await until(() => has('.fr-card', 'renew the passport'));
   check('and deciding works as ever', t.review_items.find((x) => x.id === 'iQ1').status === 'reviewed' && has('.fr-card', 'renew the passport'));
   app.fr = null;
+}
+
+// Tech tree: goals and projects linked by what they require; real locks; links found in the library.
+async function techTree(check) {
+  const { app, db } = await import('/js/state.js');
+  const av = await import('/js/availability.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const iso = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  const t = T();
+  const P = (id, name, extra = {}) => t.projects.push({ ...t.projects[0], id, name, status: 'active', kind: 'parallel', folder_id: null, notes: '', goal_id: null, area_id: null, completed_at: null, created_at: iso(50), updated_at: iso(50), ...extra });
+  P('tp1', 'Real Estate Feeder (phase 1)'); P('tp2', 'RE Title Feeder (phase 2)'); P('tp3', 'RE Mortgage (phase 3)');
+  P('tpA', 'Animal Feeder'); P('tpB', 'ButterFly Group'); P('tpC', 'Clothing Feeder', { status: 'on_hold', notes: 'Start when: I can afford to pay a show runner full time.' });
+  const base = { ...t.tasks[0], notes: '', parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, daily: null, completed_at: null, dropped_at: null, gain: '', waiting_on: null, agenda_for: null, created_at: iso(40), updated_at: iso(40) };
+  t.tasks.push({ ...base, id: 'tt1', project_id: 'tpA', title: 'Start this when I can afford to pay somone full time: Animal Feeder' });
+  t.tasks.push({ ...base, id: 'tt2', project_id: 'tpB', title: 'Start this when I can afford to pay someone full time: ButterFly Group' });
+  t.tasks.push({ ...base, id: 'tt3', project_id: 'tp2', title: 'Draft the title chain format' }, { ...base, id: 'tt4', project_id: 'tp2', title: 'Find a title attorney' });
+  t.goals.push({ id: 'tgD', user_id: 'u1', title: 'Significant physical assets', kind: 'destination', why: '', area_id: null, target_date: null, status: 'active', achieved_at: null, review_every_days: 30, last_reviewed_at: null, sort: 9, created_at: iso(5), updated_at: iso(5) });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const links = () => t.tree_links.filter((l) => !l.archived_at);
+  const proj = (id) => t.projects.find((x) => x.id === id);
+  const node = (key) => $(`[data-tt-node="${key}"]`);
+  const toastBtn = (re) => $$('#toast button').find((b) => re.test(b.textContent));
+
+  await go('#horizons');
+  check('Horizons has a Tech tree level', !!$('.hz-link[href="#horizons/tree"]') && has('.hz-link[href="#horizons/tree"]', 'tech tree'));
+  await go('#horizons/tree');
+  check('a destination shows before anything is linked, with no path yet', has('.tt-dest', 'significant physical assets', 'no path yet') && !!$('.tt-loose [data-tt-node="goal:tgD"]') && has(undefined, 'not linked yet') && links().length === 0);
+  proj('tpC').status = 'on_hold';
+
+  $('[data-tt="find"]').click();
+  await until(() => links().length >= 4);
+  await wait(150);
+  const props = () => $$('.tt-prop').map((x) => x.innerText.toLowerCase().replace(/\s+/g, ' '));
+  check('Find links reads the library: phases chain, and “Start when…” becomes a shared milestone', links().length === 5 && links().every((l) => l.state === 'proposed' && l.proposed_by === 'app')
+    && props().some((x) => x.includes('re title feeder (phase 2) requires real estate feeder (phase 1)')) && props().some((x) => x.includes('re mortgage (phase 3) requires re title feeder (phase 2)'))
+    && props().filter((x) => x.includes('requires can afford to pay someone full time') && x.includes('new milestone')).length === 2 && props().some((x) => x.includes('clothing feeder requires can afford to pay a show runner full time')), props().join(' | '));
+  check('a project that is on hold for its own reasons is not offered as unlocked', !$('.tt-ready') && !$('[data-tt="start"]'));
+  check('proposed links change nothing: nothing is locked, nothing on hold', proj('tp2').status === 'active' && !$('.tt-node.tt-locked') && $$('.tt-lines > path.dash').length === 2 && has('.tt-props', 'nothing changes until you accept'));
+  $('[data-tt="find"]').click(); await wait(300);
+  check('asking again finds nothing new', links().length === 5 && has('#toast', 'no new links'));
+
+  // Accept one: the project is locked, and the app offers to put it on hold (it doesn't do it by itself).
+  const phase2 = links().find((l) => l.node_id === 'tp2');
+  $(`[data-tt="accept"][data-id="${phase2.id}"]`).click();
+  await until(() => phase2.state === 'accepted' && !!$('.tt-node.tt-locked'));
+  check('accepted: phase 2 is locked and says what it needs, still active until you say', node('project:tp2').classList.contains('tt-locked') && has('[data-tt-node="project:tp2"]', 'needs real estate feeder', 'still active') && proj('tp2').status === 'active' && has('#toast', 'locked now', 'put on hold', '2 actions step back'), text('#toast'));
+  check('the line is solid once accepted', $$('.tt-lines > path:not(.dash)').length === 1 && $$('.tt-lines > path.dash').length === 1);
+  check('its actions are available while it is active', av.isAvailable(db.tasks.find((x) => x.id === 'tt3')));
+  toastBtn(/put on hold/i).click();
+  await until(() => proj('tp2').status === 'on_hold');
+  await wait(100);
+  check('Put on hold: the lock is real, its actions step back', proj('tp2').status === 'on_hold' && !av.isAvailable(db.tasks.find((x) => x.id === 'tt3')) && !has('[data-tt-node="project:tp2"]', 'still active'));
+
+  // A titled proposal makes the milestone once; the second that says the same shares it.
+  const mA = links().find((l) => l.node_id === 'tpA'); const mB = links().find((l) => l.node_id === 'tpB');
+  $(`[data-tt="accept"][data-id="${mA.id}"]`).click(); await until(() => mA.state === 'accepted');
+  await until(() => !!toastBtn(/put on hold/i)); await wait(50);
+  $(`[data-tt="accept"][data-id="${mB.id}"]`).click(); await until(() => mB.state === 'accepted');
+  await wait(200);
+  const ms = t.goals.filter((g) => g.kind === 'milestone');
+  check('a titled proposal makes the milestone once, shared by both projects', ms.length === 1 && ms[0].title === 'Can afford to pay someone full time' && mA.requires_id === ms[0].id && mB.requires_id === ms[0].id && !!node(`goal:${ms[0].id}`) && node(`goal:${ms[0].id}`).classList.contains('tt-type-milestone'));
+  await t.projects.filter((x) => ['tpA', 'tpB'].includes(x.id)).forEach((x) => { x.status = 'on_hold'; }); await loadAll(); (await import('/js/router.js')).render(); await wait(150);
+  $(`[data-tt-node="goal:${ms[0].id}"] [data-tt="achieve"]`).click();
+  await until(() => ms[0].status === 'achieved');
+  await wait(150);
+  check('ticking the milestone says what it unlocked, and offers to start them', has('#toast', 'unlocked', 'animal feeder', 'butterfly group') && !!toastBtn(/start 2/i) && node('project:tpA').classList.contains('tt-ready') && has('.tt-ready', 'unlocked', 'animal feeder') && proj('tpA').status === 'on_hold', text('#toast'));
+  toastBtn(/start 2/i).click();
+  await until(() => proj('tpA').status === 'active' && proj('tpB').status === 'active');
+  await wait(100);
+  check('Start: the projects are active and open on the tree', node('project:tpA').classList.contains('tt-open') && !$('[data-tt-node="project:tpA"] [data-tt="start"]'));
+
+  // Link by hand; loops are refused in words.
+  const { addLink } = await import('/js/views/tree.js');
+  await addLink('goal:tgD', 'project:tp3', { quiet: true });
+  $(`[data-tt="accept"][data-id="${links().find((l) => l.node_id === 'tp3' && l.state === 'proposed').id}"]`).click();
+  await until(() => links().filter((l) => l.state === 'accepted').length === 5);
+  await wait(200);
+  const before = links().length;
+  await addLink('project:tp1', 'goal:tgD', { quiet: true }); await wait(100);
+  check('a loop is refused, in words', links().length === before && has('#toast', 'loop'));
+  await go('#horizons/tree'); await wait(150);
+  check('the destination shows its path and what is next', has('.tt-dest', 'significant physical assets', '0 of 4', 'next: real estate feeder') && node('goal:tgD').classList.contains('tt-locked'), text('.tt-dest'));
+  check('columns run from what comes first to the destination', node('project:tp1').style.gridColumnStart === '1' && node('goal:tgD').style.gridColumnStart === '4' && new Set(['project:tp1', 'project:tp2', 'project:tp3', 'goal:tgD'].map((k) => node(k).style.gridRowStart)).size === 1 && $$('.tt-lines > path').length === links().filter((l) => l.requires_id).length);
+  $('.tt-dest').click(); await until(() => location.hash === '#horizons/tree/tgD'); await wait(150);
+  check('a destination opens its own branch', has('#view h1', 'significant physical assets') && !!node('project:tp1') && !node('project:tpA') && $$('.tt-node').length === 4);
+  await go('#horizons/tree'); await wait(100);
+
+  // Completing phase 1 unlocks phase 2, which is on hold: ready to start.
+  proj('tp1').status = 'completed'; proj('tp1').completed_at = iso(0); await loadAll(); (await import('/js/router.js')).render(); await wait(150);
+  check('when what it needs is done, a project on hold shows as unlocked with Start it', node('project:tp1').classList.contains('tt-achieved') && node('project:tp2').classList.contains('tt-ready') && !!$('[data-tt-node="project:tp2"] [data-tt="start"]') && has('.tt-counts', '2 achieved'));
+  $('[data-tt-node="project:tp2"] [data-tt="start"]').click();
+  await until(() => proj('tp2').status === 'active');
+  check('Start it: active again, its actions available, with Undo', av.isAvailable(db.tasks.find((x) => x.id === 'tt3')) && has('#toast', 'started', '2 actions available again', 'undo'));
+
+  // Dismiss and remove archive; nothing is deleted.
+  const left = links().find((l) => l.state === 'proposed');
+  $(`[data-tt="dismiss"][data-id="${left.id}"]`).click(); await until(() => !!left.archived_at);
+  node('project:tp3').click(); await until(() => $('#sheet').open);
+  check('a node opens what it requires and what it unlocks', has('#sheet', 'requires', 're title feeder', 'unlocks', 'significant physical assets', 'open the project'));
+  $('#sheet [data-unlink]').click(); await until(() => t.tree_links.filter((l) => l.archived_at).length === 2);
+  await wait(100);
+  check('dismissed and removed links are archived, never deleted', t.tree_links.length === 6 && t.tree_links.filter((l) => l.archived_at).length === 2 && node('project:tp3').classList.contains('tt-open') && has('#toast', 'link removed', 'undo'));
+  await go('#horizons');
+  check('the ladder sums the tree up', has('.hz-link[href="#horizons/tree"]', 'tech tree', 'open', 'achieved', 'locked'), text('.hz-link[href="#horizons/tree"]'));
 }
 
 // Dailies: a checkbox that starts fresh each day, in two tiers (js/dailies.js, migration 20261101000001).
