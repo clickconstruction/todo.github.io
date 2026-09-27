@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, dailies, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, dailies, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -510,6 +510,52 @@ async function horizonChecks(check) {
   await go('#horizons/vision');
   check('vision works the same way (and starts ready to write)', !!$('textarea[data-hz-field="vision"]') && !!$('[data-hz="add-check"][data-kind="vision"]'));
   app.hzEdit = null;
+}
+
+// Reload: big tables load their pages together, and a Full Review shows its card before the library is in.
+async function quickStart(check) {
+  const { app, db, sb } = await import('/js/state.js');
+  const { loadAll } = await import('/js/data.js');
+  const until = async (fn, ms = 4000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const iso = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  const t = T();
+  const base = { ...t.tasks[0], notes: '', project_id: 'p1', parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, daily: null, completed_at: null, dropped_at: null, gain: '', created_at: iso(900), updated_at: iso(900) };
+  const pad = (i) => String(i).padStart(5, '0');
+  for (let i = 0; i < 3400; i++) t.tasks.push({ ...base, id: `bulk${pad(i)}`, title: `Bulk action ${i}`, sort: i });
+  for (let i = 0; i < 2300; i++) t.task_tags.push({ task_id: `bulk${pad(i)}`, tag_id: 'g1', user_id: 'u1' });
+  // Count the reads, and when each started, as the real client would send them.
+  const from = sb.from.bind(sb); const log = [];
+  sb.from = (table) => { const b = from(table); const range = b.range.bind(b); b.range = (a, z) => { log.push({ table, from: a, at: performance.now() }); return range(a, z); }; return b; };
+  const n0 = t.tasks.length;
+  await loadAll();
+  sb.from = from;
+  const pages = (table) => log.filter((x) => x.table === table);
+  check('a big library loads whole: every page, nothing twice', db.tasks.length === t.tasks.filter((x) => !x.completed_at && !x.dropped_at || Date.parse(x.completed_at) > Date.now() - 86400000).length && new Set(db.tasks.map((x) => x.id)).size === db.tasks.length && db.taskTags.length === t.task_tags.length && n0 > 3400, `${db.tasks.length} actions, ${db.taskTags.length} tag links`);
+  const tp = pages('tasks'); const rest = tp.slice(1);
+  check('the pages after the first are asked for together, not one after another', tp.length === 4 && tp.map((x) => x.from).join() === '0,1000,2000,3000' && rest.every((x) => Math.abs(x.at - rest[0].at) < 5) && pages('task_tags').length === 3, tp.map((x) => `${x.from}@${Math.round(x.at - tp[0].at)}`).join(' '));
+
+  // A reload on a Full Review: the card first, from a few small reads, while the library is still loading.
+  t.review_sessions.push({ id: '00000000-0000-0000-0000-0000000000f1', user_id: 'u1', title: 'Full Review', scope: {}, current_item: 'iQ1', status: 'active', agent_seen_at: null, agent_status: '', finished_at: null, created_at: iso(0), updated_at: iso(0) });
+  ['Sort the photo folders', 'Renew the passport'].forEach((title, i) => {
+    t.tasks.push({ ...base, id: `q${i}`, title, notes: i ? '' : 'Every quarter.' });
+    t.review_items.push({ id: `iQ${i + 1}`, session_id: '00000000-0000-0000-0000-0000000000f1', user_id: 'u1', sort: i + 1, kind: 'task', task_id: `q${i}`, grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: null, created_at: iso(0), updated_at: iso(0) });
+  });
+  t.task_tags.push({ task_id: 'q0', tag_id: 'g1', user_id: 'u1' });
+  Object.keys(db).forEach((k) => { if (Array.isArray(db[k])) db[k] = []; }); // as a fresh page has it: nothing loaded
+  app.fr = null; $('#view').innerHTML = '';
+  window.history.replaceState(null, '', '#full/00000000-0000-0000-0000-0000000000f1');
+  const { quickReview } = await import('/js/views/fullreview.js');
+  app.libraryLoading = true;
+  const q = quickReview('00000000-0000-0000-0000-0000000000f1');
+  check('at once: the review’s own screen and a word, not a blank page with the sidebar', document.body.classList.contains('fr-mode') && has(undefined, 'loading your review'));
+  await q;
+  const tagName = (t.tags.find((g) => g.id === 'g1') || {}).name || '';
+  check('the card shows before the library is in: title, notes, project, tag, its place in the review', db.tasks.length < 10 && has('.fr-card', 'sort the photo folders', 'every quarter', 'click plumbing', tagName) && has('.fr-head', '1 of 2') && has(undefined, 'loading the rest of your library') && !!$('.fr-btns [data-fr="decide"]'), `${db.tasks.length} loaded · ${text('.fr-card').slice(0, 90)}`);
+  await loadAll(); app.libraryLoading = false; (await import('/js/router.js')).render();
+  check('when the library arrives the card stays and the note goes', db.tasks.length > 3400 && has('.fr-card', 'sort the photo folders') && !has(undefined, 'loading the rest of your library') && db.tasks.filter((x) => x.id === 'q0').length === 1);
+  key('1'); await until(() => has('.fr-card', 'renew the passport'));
+  check('and deciding works as ever', t.review_items.find((x) => x.id === 'iQ1').status === 'reviewed' && has('.fr-card', 'renew the passport'));
+  app.fr = null;
 }
 
 // Dailies: a checkbox that starts fresh each day, in two tiers (js/dailies.js, migration 20261101000001).

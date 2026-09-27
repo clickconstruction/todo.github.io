@@ -1582,3 +1582,4 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .hz-clip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hz-more { color: var(--muted); }
 .hz-meta { flex: none; white-space: nowrap; }
+.fr-loading { margin: 6px 0 0; }

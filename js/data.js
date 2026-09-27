@@ -1,5 +1,5 @@
 // Reads and writes. Every write goes to Supabase first, then updates `db`.
-import { sb, db, app, run, syncRow, toast, byId, isOpen, taskSort, onHoldTagFor } from './state.js';
+import { sb, db, app, run, inflight, syncRow, toast, byId, isOpen, taskSort, onHoldTagFor } from './state.js';
 import { loadSettings } from './prefs.js';
 import { openCompletionNote } from './editors/completion.js';
 import { saveReminders, refreshReminders } from './editors/notifyField.js';
@@ -10,13 +10,26 @@ import { isAvailable } from './availability.js';
 const OUTBOX_KEY = 'todo.outbox';
 
 // The API returns at most 1,000 rows a request: big tables are read a page at a time, in key order.
+// The first page also asks how many rows there are, so the rest are fetched together, not one after
+// another: a library of 8,000 actions and 9,500 tag links was ten round trips in a row, and is now two.
 const PAGE = 1000;
 async function every(query, ...keys) {
-  const out = [];
-  for (let from = 0; ; from += PAGE) {
-    let q = query();
-    keys.forEach((k) => { q = q.order(k); });
-    const rows = await run(q.range(from, from + PAGE - 1));
+  const page = (from, opts) => { let q = query(opts); keys.forEach((k) => { q = q.order(k); }); return q.range(from, from + PAGE - 1); };
+  inflight.n += 1;
+  let first;
+  try { first = await page(0, { count: 'exact' }); } finally { inflight.n -= 1; }
+  if (first.error) { toast(first.error.message); throw first.error; }
+  const out = [...first.data];
+  if (first.data.length < PAGE) return out;
+  if (Number.isFinite(first.count)) {
+    const starts = []; for (let from = PAGE; from < first.count; from += PAGE) starts.push(from);
+    const rest = await Promise.all(starts.map((from) => run(page(from))));
+    rest.forEach((rows) => out.push(...rows));
+    if (!rest.length || rest[rest.length - 1].length < PAGE) return out;
+  }
+  // No count given, or rows arrived meanwhile: carry on a page at a time.
+  for (let from = out.length; ; from += PAGE) {
+    const rows = await run(page(from));
     out.push(...rows);
     if (rows.length < PAGE) return out;
   }
@@ -25,12 +38,12 @@ async function every(query, ...keys) {
 export async function loadAll() {
   const since = new Date(Date.now() - 86400000).toISOString();
   const [tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions, taskWaits, events, dailyTicks] = await Promise.all([
-    every(() => sb.from('tasks').select('*').or(`and(completed_at.is.null,dropped_at.is.null),completed_at.gte.${since}`), 'id'),
-    every(() => sb.from('projects').select('*'), 'id'),
-    every(() => sb.from('folders').select('*'), 'id'),
-    every(() => sb.from('tags').select('*'), 'id'),
-    every(() => sb.from('task_tags').select('*'), 'task_id', 'tag_id'),
-    every(() => sb.from('project_tags').select('*'), 'project_id', 'tag_id'),
+    every((c) => sb.from('tasks').select('*', c).or(`and(completed_at.is.null,dropped_at.is.null),completed_at.gte.${since}`), 'id'),
+    every((c) => sb.from('projects').select('*', c), 'id'),
+    every((c) => sb.from('folders').select('*', c), 'id'),
+    every((c) => sb.from('tags').select('*', c), 'id'),
+    every((c) => sb.from('task_tags').select('*', c), 'task_id', 'tag_id'),
+    every((c) => sb.from('project_tags').select('*', c), 'project_id', 'tag_id'),
     run(sb.from('places').select('*')),
     run(sb.from('notifications').select('*')),
     run(sb.from('attachments').select('*').is('archived_at', null)),
@@ -46,10 +59,10 @@ export async function loadAll() {
     run(sb.from('checklist_runs').select('*').order('started_at', { ascending: false }).limit(300)),
     run(sb.from('daily_reviews').select('*').order('day', { ascending: false }).limit(60)),
     run(sb.from('imports').select('*').order('created_at', { ascending: false }).limit(20)),
-    every(() => sb.from('slipbox_notes').select('*').is('archived_at', null), 'id'),
+    every((c) => sb.from('slipbox_notes').select('*', c).is('archived_at', null), 'id'),
     run(sb.from('review_sessions').select('id,title,status,current_item,created_at').eq('status', 'active').order('created_at', { ascending: false }).limit(10)),
-    every(() => sb.from('task_waits').select('*'), 'task_id', 'waits_for'),
-    every(() => sb.from('events').select('*').is('archived_at', null), 'id'),
+    every((c) => sb.from('task_waits').select('*', c), 'task_id', 'waits_for'),
+    every((c) => sb.from('events').select('*', c).is('archived_at', null), 'id'),
     run(sb.from('daily_ticks').select('*').gte('day', new Date(Date.now() - 62 * 86400000).toISOString().slice(0, 10))),
   ]);
   Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions, taskWaits, events, dailyTicks });

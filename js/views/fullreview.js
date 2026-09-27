@@ -4,7 +4,7 @@
 // decide, s skips, u undoes. Every decision can be undone; nothing is deleted.
 import { describeDaily, isDaily, summary as dailySummary, dailyPreview } from '../dailies.js';
 import { describe } from '../repeat.js';
-import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen, openSheet } from '../state.js';
+import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen, openSheet, $ } from '../state.js';
 import { loadAll, refreshTasks } from '../data.js';
 import { fmtDate } from '../dates.js';
 import { buildQueue, priorityReason, proposalText } from '../review.js';
@@ -70,7 +70,7 @@ export function reviewNav() {
 }
 
 // ---------- load and stay live ----------
-async function loadSession(id) {
+async function loadSession(id, { draw = true } = {}) {
   const f = F();
   f.loading = true;
   try {
@@ -84,7 +84,36 @@ async function loadSession(id) {
     Object.assign(f, { id, session: session || null, items, byId: new Map(items.map((x) => [x.id, x])) });
     listen(id);
   } finally { f.loading = false; }
-  app.render();
+  if (draw) app.render();
+}
+
+// A reload lands on the card, not on a blank page: the review and the current card's action are a few small
+// reads, so they go first and the card shows while the library (thousands of actions) loads behind it.
+export async function quickReview(id) {
+  const f = F();
+  document.body.classList.add('fr-mode');
+  const view = $('#view'); if (view && !view.innerHTML.trim()) view.innerHTML = '<p class="empty">Loading your review…</p>';
+  try {
+    await loadSession(id, { draw: false });
+    const cur = f.session && f.session.current_item && f.byId.get(f.session.current_item);
+    if (!app.libraryLoading) return; // the library got there first
+    if (cur && cur.kind === 'task') {
+      await refreshCard(cur);
+      const t = byId(db.tasks, cur.task_id);
+      const tagIds = db.taskTags.filter((x) => x.task_id === cur.task_id).map((x) => x.tag_id).filter((x) => !byId(db.tags, x));
+      const [tags, projects] = await Promise.all([
+        tagIds.length ? run(sb.from('tags').select('*').in('id', tagIds)) : [],
+        t && t.project_id && !byId(db.projects, t.project_id) ? run(sb.from('projects').select('*').eq('id', t.project_id)) : [],
+      ]);
+      if (!app.libraryLoading) return;
+      tags.forEach((g) => { if (!byId(db.tags, g.id)) db.tags.push(g); });
+      projects.forEach((p) => { if (!byId(db.projects, p.id)) db.projects.push(p); });
+    } else if (cur && cur.kind === 'group') {
+      const ids = ((cur.grp && cur.grp.task_ids) || []).slice(0, 200);
+      if (ids.length) await refreshTasks(ids);
+    }
+    if (app.libraryLoading) app.render();
+  } catch { /* the full load follows and shows what went wrong */ }
 }
 function listen(id) {
   const f = F();
@@ -414,7 +443,7 @@ export function viewFullReview(id) {
       <span class="fr-pres ${seen === 'away' ? '' : 'on'} ${seen}">${presenceHtml(s)}</span>
       <button class="btn small fr-copy${seen === 'away' ? ' primary' : ''}" data-fr="invite" title="Copy the prompt that starts or resumes this review with Claude">⧉ Prompt for Claude</button>
       <a class="icon-btn fr-close" href="#${esc((s.scope && s.scope.import_id) ? `settle/${s.scope.import_id}` : s.scope && s.scope.project_id ? `project/${s.scope.project_id}` : 'inbox')}" aria-label="Close" title="Close (Esc)">✕</a></div>
-    <div class="cl-progress"><i style="width:${live.length ? Math.round((done / live.length) * 100) : 0}%"></i></div>`;
+    <div class="cl-progress"><i style="width:${live.length ? Math.round((done / live.length) * 100) : 0}%"></i></div>${app.libraryLoading ? '<p class="hint fr-loading" role="status">Loading the rest of your library…</p>' : ''}`;
   if (!cur) {
     return `<div class="fr">${head}<button class="fab fr-fab" data-fr="capture" aria-label="Capture an idea (added to this review)">+</button><div class="cl-done"><div class="cl-big">✓</div><h2>All reviewed</h2>
       <p>${n(done)} decided${skipped ? `, ${n(skipped)} skipped` : ''}.</p>

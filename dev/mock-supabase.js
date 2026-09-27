@@ -369,10 +369,10 @@
       }
       let out = rows.filter(match).map(copy);
       if (st.orders && st.orders.length) out.sort((a, b) => { for (const [k, asc] of st.orders) { const x = a[k] ?? ''; const y = b[k] ?? ''; if (x < y) return asc ? -1 : 1; if (x > y) return asc ? 1 : -1; } return 0; });
-      return { data: out.slice(st.offset, st.offset + Math.min(st.limit, 1000)), error: null }; // the server caps a request at 1,000 rows
+      return { data: out.slice(st.offset, st.offset + Math.min(st.limit, 1000)), error: null, ...(st.count ? { count: out.length } : {}) }; // the server caps a request at 1,000 rows
     };
     const b = {
-      select() { return b; },
+      select(_cols, opts) { if (opts && opts.count) st.count = true; return b; },
       order(k, o) { (st.orders ||= []).push([k, !(o && o.ascending === false)]); return b; },
       limit(x) { st.limit = x; return b; },
       range(from, to) { st.offset = from; st.limit = to - from + 1; return b; },

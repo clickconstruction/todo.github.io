@@ -29,7 +29,7 @@ import { noticeEmailPeople } from './views/capture.js';
 import { checklistAction, checklistChange } from './views/checklists.js';
 import { dailyAction, dailySubmit } from './views/daily.js';
 import { settleAction, settleKey } from './views/settle.js';
-import { fullReviewAction, fullReviewKey, startFullReview, activeSession } from './views/fullreview.js';
+import { fullReviewAction, fullReviewKey, startFullReview, activeSession, quickReview } from './views/fullreview.js';
 import { moreSheetHtml, openCustomize } from './sidebar.js';
 import { initUpdates, resumeAfterUpdate, tryApply, checkNow } from './updates.js';
 import { initPullToRefresh } from './pull.js';
@@ -376,7 +376,12 @@ async function showApp(session) {
     return;
   }
   signedIn(app.user);
-  await loadAll();
+  // Something to look at while the library loads: the Full Review card itself (a few small reads), else a word.
+  app.libraryLoading = true;
+  const full = location.hash.match(/^#full\/([0-9a-f-]{36})$/i);
+  if (full) quickReview(full[1]);
+  else if (!$('#view').innerHTML.trim()) $('#view').innerHTML = '<p class="empty">Loading…</p>';
+  try { await loadAll(); } finally { app.libraryLoading = false; }
   await flushOutbox();
   render();
   resumeAfterUpdate(); // back where you were if an update just reloaded the page
