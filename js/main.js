@@ -255,7 +255,7 @@ view.addEventListener('change', (e) => {
   if (e.target.closest('[data-hz-link-area], [data-hz-link-goal]')) { horizonsChange(e); return; }
   if (planChange(e)) return;
   if (matrixChange(e)) return;
-  if (e.target.closest('[data-cl-tick]') && location.hash.startsWith('#checklist/')) { checklistChange(e); return; }
+  if (e.target.closest('[data-cl-tick], [data-cl-note]') && location.hash.startsWith('#checklist/')) { checklistChange(e); return; }
   const doneCtl = e.target.closest('[data-done]');
   if (doneCtl) { onDoneFilterChange(doneCtl); return; }
   const withinCtl = e.target.closest('[data-within]');

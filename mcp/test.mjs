@@ -1042,6 +1042,12 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(db.tasks.find((t) => t.id === me.id).checklist_id === ck.id, 'attach to an action');
   const r1 = await tool('run_checklist', { checklist: 'Month-end close', task: me.id, tick: ['Invoice every finished job', 2] });
   assert(r1.ticked === 2 && r1.of === 3 && r1.items[0].done && !r1.items[2].done && !r1.finished, 'run_checklist ticks by text or number');
+  const rn = await tool('run_checklist', { checklist: 'Month-end close', task: me.id, notes: { 'Invoice every finished job': 'All six sent.', 3: '' } });
+  const openRun = db.checklist_runs.find((r) => r.task_id === me.id && !r.finished_at);
+  assert(rn.items[0].note === 'All six sent.' && !rn.items[2].note && openRun && Object.values(openRun.notes || {}).join() === 'All six sent.' && rn.ticked === 2, 'run_checklist notes: a line per item, kept with the run, ticks untouched');
+  const ck2 = await tool('save_checklist', { name: 'Sharpen the saw', items: ['Mental', 'Spiritual'], reflect: true, complete_action: false });
+  assert(ck2.reflect === true && !ck2.complete_action, 'save_checklist reflect: a reflection checklist');
+  await tool('save_checklist', { id: ck2.id, archived: true }); // out of the way of the counts below
   const r2 = await tool('run_checklist', { checklist: 'Month-end close', task: me.id, tick: ['reconcile'] });
   assert(r2.finished && r2.action_completed && db.tasks.find((t) => t.id === me.id).completed_at, 'last tick finishes the run and completes the action');
   const lc = await tool('list_checklists', {});

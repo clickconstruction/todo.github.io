@@ -1501,3 +1501,9 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .ptr.busy::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-right: 8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; animation: ptr-spin .8s linear infinite; }
 @keyframes ptr-spin { to { transform: rotate(360deg); } }
 .sg-steps .sg-steps { margin: 2px 0 2px 16px; padding-left: 18px; }
+
+/* Reflection checklists: a line under each item, and the lines in the run history */
+.chk-note { width: calc(100% - 42px); margin: -2px 0 6px 42px; padding: 7px 10px; font-size: 14px; }
+.chk-note-text { margin: -2px 0 6px 42px; color: var(--muted); font-size: 14px; }
+.ck-run-lines { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; font-size: 14px; }
+.ck-run-lines .on { color: var(--accent); }

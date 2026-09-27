@@ -1047,6 +1047,17 @@ async function checklists(check) {
   await tickIt(1); await tickIt(2);
   check('all ticked: the run finishes', T().checklist_runs[0].finished_at && T().checklist_runs[0].ticked.length === 3);
   check('next time starts fresh; history shows the run', has(undefined, '0 of 3', 'runs', 'last run today · 3 of 3'));
+  // A reflection checklist: a line under each item, kept with the run, shown in the history.
+  const { loadAll: reload2 } = await import('/js/data.js');
+  c.reflect = true; await reload2(); await go('#checklists'); await go(`#checklist/${c.id}`);
+  check('a reflection checklist asks for a line under each item', $$('[data-cl-note]').length === 3);
+  const nt = $$('[data-cl-note]')[0]; nt.value = 'Ordered the elbows at last.'; nt.dispatchEvent(new Event('change', { bubbles: true })); await wait(250);
+  const run2 = T().checklist_runs.find((r) => !r.finished_at && r.checklist_id === c.id);
+  check('the line starts a run and is kept by item', !!run2 && run2.notes[c.items[0].id] === 'Ordered the elbows at last.', JSON.stringify(run2 && run2.notes));
+  await tickIt(0); await tickIt(1); await tickIt(2);
+  check('the history shows the run’s lines, item by item', has('.ck-runs', 'ordered the elbows at last', 'pex elbows', 'shark-bite'));
+  c.reflect = false; await reload2(); await go('#checklists'); await go(`#checklist/${c.id}`);
+  check('a plain checklist again: no inputs, the old lines still in the history', !$('[data-cl-note]') && has('.ck-runs', 'ordered the elbows'));
   // On an action (sheet editor): the last tick completes it.
   const { openEditor } = await import('/js/editors/task.js');
   openEditor(db.tasks.find((t) => t.id === 't9')); await wait(80);

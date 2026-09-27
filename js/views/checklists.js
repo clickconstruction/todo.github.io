@@ -1,17 +1,21 @@
 // Checklists: the list (with last-run history), one checklist (run it, runs history, which action
 // carries it), the editor sheet, and the checklist inside an action's editor.
 import { db, app, esc, byId, openSheet, $, toast, isOpen } from '../state.js';
-import { liveChecklists, parseItems, itemsToText, saveChecklist, runsFor, openRun, lastFinished, actionsWith, tick, finishRun, attach, fromSteps, fmtRun, checklistById } from '../checklists.js';
+import { liveChecklists, parseItems, itemsToText, saveChecklist, runsFor, openRun, lastFinished, actionsWith, tick, finishRun, attach, fromSteps, fmtRun, checklistById, noteItem } from '../checklists.js';
 
 const progressOf = (cl, r) => { const n = r ? (r.ticked || []).length : 0; const total = cl.items.length; return { n, total, pct: total ? Math.round((n / total) * 100) : 0 }; };
 
 // The items, ticked from a run, grouped by section.
 export function itemsHtml(cl, r) {
   const on = new Set(r ? r.ticked || [] : []);
+  const notes = (r && r.notes) || {};
   let section = null;
   return cl.items.map((i) => {
     const head = (i.section || '') !== section ? (section = i.section || '', i.section ? `<h3 class="cl-sec">${esc(i.section)}</h3>` : '') : '';
-    return `${head}<label class="chk-item ${on.has(i.id) ? 'on' : ''}"><input type="checkbox" data-cl-tick="${cl.id}" data-item="${i.id}" ${on.has(i.id) ? 'checked' : ''}><span>${esc(i.text)}</span></label>`;
+    // A reflection checklist asks for a line under every item; any checklist shows a line it already has.
+    const line = cl.reflect ? `<input class="chk-note" data-cl-note="${cl.id}" data-item="${i.id}" value="${esc(notes[i.id] || '')}" placeholder="A line about it…" maxlength="500" autocomplete="off" aria-label="A line about ${esc(i.text)}">`
+      : notes[i.id] ? `<p class="chk-note-text">${esc(notes[i.id])}</p>` : '';
+    return `${head}<label class="chk-item ${on.has(i.id) ? 'on' : ''}"><input type="checkbox" data-cl-tick="${cl.id}" data-item="${i.id}" ${on.has(i.id) ? 'checked' : ''}><span>${esc(i.text)}</span></label>${line}`;
   }).join('');
 }
 const barHtml = (cl, r) => { const p = progressOf(cl, r); return `<div class="cl-progress"><i style="width:${p.pct}%"></i></div><p class="hint">${p.n} of ${p.total}${r && !r.finished_at ? ` · started ${Math.max(0, Math.round((Date.now() - Date.parse(r.started_at)) / 60000))} min ago` : ''}</p>`; };
@@ -39,7 +43,15 @@ export function viewChecklist(id) {
     ${barHtml(c, r)}
     <div class="chk-list">${itemsHtml(c, r) || '<p class="empty small">No items. Tap Edit to add some.</p>'}</div>
     <p class="head-actions">${r ? `<button class="btn" data-ck="finish" data-id="${c.id}">Finish now</button> <button class="btn small" data-ck="restart" data-id="${c.id}">Start over</button>` : ''}</p>
-    ${history.length ? `<h2 class="section-title">Runs</h2><ul class="list ck-runs">${history.map((x) => `<li class="row"><div class="row-main"><div class="row-meta"><span>${esc(fmtRun(x, c))}</span>${x.task_id && byId(db.tasks, x.task_id) ? `<span>on “${esc(byId(db.tasks, x.task_id).title)}”</span>` : ''}</div></div></li>`).join('')}</ul>` : ''}`;
+    ${history.length ? `<h2 class="section-title">Runs</h2><ul class="list ck-runs">${history.map((x) => runHtml(c, x)).join('')}</ul>` : ''}`;
+}
+
+// One past run: when it was, and for a run with lines, every item with its tick and its line.
+function runHtml(c, x) {
+  const notes = x.notes || {};
+  const on = new Set(x.ticked || []);
+  const lines = Object.keys(notes).length ? `<ul class="ck-run-lines">${c.items.map((i) => `<li><span class="${on.has(i.id) ? 'on' : ''}">${on.has(i.id) ? '✓' : '○'}</span> <b>${esc(i.text)}</b>${notes[i.id] ? `: ${esc(notes[i.id])}` : ''}</li>`).join('')}</ul>` : '';
+  return `<li class="row ck-run"><div class="row-main"><div class="row-meta"><span>${esc(fmtRun(x, c))}</span>${x.task_id && byId(db.tasks, x.task_id) ? `<span>on “${esc(byId(db.tasks, x.task_id).title)}”</span>` : ''}</div>${lines}</div></li>`;
 }
 
 export function openChecklistEditor(c, { after = () => {} } = {}) {
@@ -47,6 +59,7 @@ export function openChecklistEditor(c, { after = () => {} } = {}) {
     <label>Name<input type="text" name="name" value="${esc(c ? c.name : '')}" required maxlength="200" placeholder="Van restock" autocomplete="off"></label>
     <label>Items <span class="hint">one per line · “# Section” starts a section</span><textarea name="items" rows="12" placeholder="# Fittings&#10;1/2&quot; PEX elbows&#10;Shark-bite couplings&#10;# Tools&#10;Charge the drill batteries">${esc(c ? itemsToText(c.items) : '')}</textarea></label>
     <label class="flag-toggle"><input type="checkbox" name="complete_action" ${!c || c.complete_action ? 'checked' : ''}> When it’s on an action, ticking the last item completes the action</label>
+    <label class="flag-toggle"><input type="checkbox" name="reflect" ${c && c.reflect ? 'checked' : ''}> Ask for a line on each item, every run (a reflection: the lines are kept with the run)</label>
     <div class="actions">${c ? `<button type="button" class="btn danger" data-archive>${c.archived_at ? 'Restore' : 'Archive'}</button>` : ''}<div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div></div></form>`);
   const form = $('form', sheet);
   $('[data-cancel]', form).onclick = () => sheet.close();
@@ -57,7 +70,7 @@ export function openChecklistEditor(c, { after = () => {} } = {}) {
     const name = form.elements.name.value.trim();
     if (!name) return;
     sheet.close();
-    const row = await saveChecklist(c, { name, items: parseItems(form.elements.items.value, c ? c.items : []), complete_action: form.elements.complete_action.checked });
+    const row = await saveChecklist(c, { name, items: parseItems(form.elements.items.value, c ? c.items : []), complete_action: form.elements.complete_action.checked, reflect: form.elements.reflect.checked });
     app.render();
     after(row);
   };
@@ -90,6 +103,8 @@ export function wireChecklistField(form, task) {
     e.stopPropagation(); // not a field of the action: don't autosave the form for it
     const at = e.target.closest('[data-ck-attach]');
     if (at && at.value) { await attach(task, at.value); redraw(); return; }
+    const nt = e.target.closest('[data-cl-note]');
+    if (nt) { await noteItem(checklistById(nt.dataset.clNote), task.id, nt.dataset.item, nt.value); return; }
     const cb = e.target.closest('[data-cl-tick]');
     if (!cb) return;
     const c = checklistById(cb.dataset.clTick);
@@ -120,6 +135,8 @@ export async function checklistAction(el) {
   app.render();
 }
 export async function checklistChange(e) {
+  const nt = e.target.closest && e.target.closest('[data-cl-note]');
+  if (nt && location.hash.startsWith('#checklist/')) { await noteItem(checklistById(nt.dataset.clNote), null, nt.dataset.item, nt.value); return true; } // no redraw: the other lines keep their focus
   const cb = e.target.closest && e.target.closest('[data-cl-tick]');
   if (!cb || !location.hash.startsWith('#checklist/')) return false;
   const c = checklistById(cb.dataset.clTick);

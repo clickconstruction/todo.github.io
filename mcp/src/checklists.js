@@ -26,7 +26,7 @@ export function checklistTools({ localDate }) {
   };
   const out = (c, runs = [], actions = []) => {
     const last = runs.find((r) => r.finished_at);
-    return { id: c.id, name: c.name, items: c.items.length, sections: [...new Set(c.items.map((i) => i.section).filter(Boolean))], complete_action: c.complete_action,
+    return { id: c.id, name: c.name, items: c.items.length, sections: [...new Set(c.items.map((i) => i.section).filter(Boolean))], complete_action: c.complete_action, reflect: c.reflect || undefined,
       on_actions: actions.length ? actions.map((t) => t.title) : undefined, last_run: last ? { finished: localDate(last.finished_at, 'UTC'), ticked: last.ticked.length, of: last.total } : null, archived: !!c.archived_at || undefined };
   };
   return [
@@ -45,12 +45,13 @@ export function checklistTools({ localDate }) {
     },
     {
       name: 'save_checklist',
-      description: 'Create or edit a checklist. items: lines in order ("# Section" starts a section) — replaces the list. attach_to: an action id to carry it (a repeating action keeps it; each occurrence starts fresh). complete_action: ticking the last item completes that action (default true). archived: true archives it.',
-      inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Checklist id or name, to edit' }, name: { type: 'string' }, items: { type: 'array', items: { type: 'string' } }, complete_action: { type: 'boolean' }, attach_to: { type: ['string', 'null'] }, archived: { type: 'boolean' } } },
+      description: 'Create or edit a checklist. items: lines in order ("# Section" starts a section) — replaces the list. attach_to: an action id to carry it (a repeating action keeps it; each occurrence starts fresh). complete_action: ticking the last item completes that action (default true). reflect: ask for a line on each item every run (a reflection; run_checklist notes keeps the lines). archived: true archives it.',
+      inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Checklist id or name, to edit' }, name: { type: 'string' }, items: { type: 'array', items: { type: 'string' } }, complete_action: { type: 'boolean' }, reflect: { type: 'boolean' }, attach_to: { type: ['string', 'null'] }, archived: { type: 'boolean' } } },
       async run(api, a) {
         const body = {};
         if (a.name !== undefined) body.name = String(a.name).trim();
         if (a.complete_action !== undefined) body.complete_action = !!a.complete_action;
+        if (a.reflect !== undefined) body.reflect = !!a.reflect;
         if (a.archived !== undefined) body.archived_at = a.archived ? new Date().toISOString() : null;
         let c = a.id ? await find(api, a.id) : null;
         if (Array.isArray(a.items)) body.items = parseItemLines(a.items, c ? c.items : []);
@@ -69,7 +70,7 @@ export function checklistTools({ localDate }) {
     {
       name: 'run_checklist',
       description: 'Go through a checklist with the user: returns the items with what is ticked in the current run. tick / untick: item texts (or 1-based numbers). task: the action it is on (runs are per action). finish: end this run now. When every item is ticked the run finishes, and if the checklist completes its action, the action is completed.',
-      inputSchema: { type: 'object', properties: { checklist: { type: 'string' }, task: { type: 'string' }, tick: { type: 'array', items: { type: ['string', 'integer'] } }, untick: { type: 'array', items: { type: ['string', 'integer'] } }, finish: { type: 'boolean' } }, required: ['checklist'] },
+      inputSchema: { type: 'object', properties: { checklist: { type: 'string' }, task: { type: 'string' }, tick: { type: 'array', items: { type: ['string', 'integer'] } }, untick: { type: 'array', items: { type: ['string', 'integer'] } }, notes: { type: 'object', description: 'A line per item for this run: {"<item text or number>": "line"} (empty string clears it)' }, finish: { type: 'boolean' } }, required: ['checklist'] },
       async run(api, a) {
         const c = await find(api, a.checklist);
         const task = a.task ? await api.task(a.task) : null;
@@ -78,20 +79,24 @@ export function checklistTools({ localDate }) {
         const pick = (refs) => (refs || []).map((x) => (typeof x === 'number' || /^\d+$/.test(String(x)) ? c.items[Number(x) - 1] : c.items.find((i) => i.text.toLowerCase() === String(x).toLowerCase()) || c.items.find((i) => i.text.toLowerCase().includes(String(x).toLowerCase())))).filter(Boolean).map((i) => i.id);
         const tick = pick(a.tick); const untick = pick(a.untick);
         let completed = false;
-        if (tick.length || untick.length || a.finish) {
+        const noteMap = a.notes && typeof a.notes === 'object' && !Array.isArray(a.notes) ? a.notes : null;
+        if (tick.length || untick.length || a.finish || noteMap) {
           if (!r) [r] = await api.q('checklist_runs', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, checklist_id: c.id, task_id: task ? task.id : null, total: c.items.length, ticked: [] } });
           const set = new Set(r.ticked || []);
           tick.forEach((id) => set.add(id)); untick.forEach((id) => set.delete(id));
           const ticked = c.items.map((i) => i.id).filter((id) => set.has(id));
           const all = ticked.length === c.items.length && c.items.length > 0;
-          [r] = await api.q(`checklist_runs?${api.u}&id=eq.${r.id}`, { method: 'PATCH', prefer: 'return=representation', body: { ticked, total: c.items.length, ...(all || a.finish ? { finished_at: new Date().toISOString() } : {}) } });
+          const notes = { ...(r.notes || {}) };
+          if (noteMap) Object.entries(noteMap).forEach(([k, v]) => { const [id] = pick([k]); if (!id) return; const line = String(v || '').trim().slice(0, 500); if (line) notes[id] = line; else delete notes[id]; });
+          [r] = await api.q(`checklist_runs?${api.u}&id=eq.${r.id}`, { method: 'PATCH', prefer: 'return=representation', body: { ticked, total: c.items.length, notes, ...(all || a.finish ? { finished_at: new Date().toISOString() } : {}) } });
           if (all && task && c.complete_action && !task.completed_at && !task.dropped_at) {
             await api.q(`tasks?${api.u}&id=eq.${task.id}`, { method: 'PATCH', body: { completed_at: new Date().toISOString() } });
             completed = true;
           }
         }
         const on = new Set(r ? r.ticked || [] : []);
-        return { checklist: c.name, task: task ? task.title : undefined, items: c.items.map((i, n) => ({ n: n + 1, text: i.text, section: i.section || undefined, done: on.has(i.id) })),
+        const rn = (r && r.notes) || {};
+        return { checklist: c.name, task: task ? task.title : undefined, reflect: c.reflect || undefined, items: c.items.map((i, n) => ({ n: n + 1, text: i.text, section: i.section || undefined, done: on.has(i.id), note: rn[i.id] || undefined })),
           ticked: on.size, of: c.items.length, finished: !!(r && r.finished_at) || undefined, action_completed: completed || undefined };
       },
     },

@@ -51,6 +51,21 @@ export async function tick(cl, taskId, itemId, on) {
   syncRow('checklistRuns', r, row);
   return { run: r, all };
 }
+// A line about an item in this run (reflection checklists); like a first tick, a first line starts the run.
+export async function noteItem(cl, taskId, itemId, text) {
+  let r = openRun(cl, taskId);
+  const line = String(text || '').trim().slice(0, 500);
+  if (!r) {
+    if (!line) return null;
+    [r] = await run(sb.from('checklist_runs').insert({ checklist_id: cl.id, task_id: taskId || null, total: cl.items.length, ticked: [], notes: {} }).select());
+    (db.checklistRuns = db.checklistRuns || []).push(r);
+  }
+  const notes = { ...(r.notes || {}) };
+  if (line) notes[itemId] = line; else delete notes[itemId];
+  const [row] = await run(sb.from('checklist_runs').update({ notes }).eq('id', r.id).select());
+  syncRow('checklistRuns', r, row);
+  return r;
+}
 // Finish now (some items left), or start over (the run is kept, finished as it was).
 export async function finishRun(cl, taskId) {
   const r = openRun(cl, taskId);
