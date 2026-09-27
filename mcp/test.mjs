@@ -1551,6 +1551,17 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(two.events && two.slipbox && !two.people && !(two.actions || []).length, 'search: every word must match');
   const none = await tool('search', { query: 'zzzzqqq' });
   assert(none.none && !none.actions, 'search: nothing matched says so');
+  db.places.push({ id: 'plA', user_id: UID, name: 'Appleseed Feed Store', address: '12 Main St, Bastrop', notes: 'Closes at noon on Saturday.', archived_at: null }, { id: 'plB', user_id: UID, name: 'Old Appleseed yard', address: '', notes: '', archived_at: '2026-01-01T00:00:00.000Z' }, { id: 'plC', user_id: 'someone-else', name: 'Appleseed elsewhere', address: '', notes: '', archived_at: null });
+  db.checklists.push({ id: 'ckA', user_id: UID, name: 'Opening the farm', items: [{ id: 'i1', text: 'Unlock the gate' }, { id: 'i2', text: 'Check the Appleseed pump' }], sort: 0, archived_at: null }, { id: 'ckB', user_id: UID, name: 'Truck walk-around', items: [{ id: 'i1', text: 'Tyres' }], sort: 1, archived_at: null });
+  db.areas.push({ id: 'arA', user_id: UID, name: 'Farm', standards: 'The Appleseed orchard is pruned every winter.', archived_at: null });
+  db.goals.push({ id: 'goA', user_id: UID, title: 'Open the Appleseed farm stand', why: 'Sell what we grow.', status: 'achieved' });
+  const more = await tool('search', { query: 'appleseed' });
+  assert(more.places.length === 1 && more.places[0].id === 'plA' && more.places[0].address === '12 Main St, Bastrop', 'search: places, not archived ones or someone else\'s');
+  assert(more.checklists.length === 1 && more.checklists[0].id === 'ckA' && /Appleseed pump/.test(more.checklists[0].snippet), 'search: a checklist by one of its lines');
+  assert(more.areas[0].id === 'arA' && /orchard/.test(more.areas[0].snippet) && more.goals[0].id === 'goA' && more.goals[0].status === 'achieved', 'search: areas and goals (a goal says its status)');
+  const both = await tool('search', { query: 'farm pump' });
+  assert(both.checklists && both.checklists[0].id === 'ckA' && !both.places && !both.areas, 'search: a checklist matches across its name and lines');
+  ['places', 'checklists', 'areas', 'goals'].forEach((k) => { db[k] = db[k].filter((x) => !['plA', 'plB', 'plC', 'ckA', 'ckB', 'arA', 'goA'].includes(x.id)); });
   ['slipbox_notes', 'reference_items', 'events', 'people'].forEach((k) => { db[k] = db[k].filter((x) => !['snA', 'rfA', 'evA', 'ppA'].includes(x.id)); });
 }
 console.log('ALL PASSED');
