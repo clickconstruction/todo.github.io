@@ -459,6 +459,16 @@ async function fullReview(check) {
   key('b'); await until(() => $('#sheet2').open && has('#sheet2', 'break it down'));
   check('B opens Break it down on the card', $('#sheet2').open && has('#sheet2', 'break it down'));
   $('#sheet2').close(); await wait(30);
+  // Short notes show open on the card (a line or four you would otherwise miss); long ones fold.
+  const { loadAll: reloadAll } = await import('/js/data.js');
+  t.tasks.find((x) => x.id === 'fW').notes = '- mental\n- spiritual\n- physical\n- social';
+  await reloadAll(); await go('#inbox'); await go(`#full/${sid}`); await until(() => !!$('.fr-notes'));
+  check('short notes are open on the card, line by line', $('.fr-notes').open && has('.fr-notes', 'mental', 'social') && getComputedStyle($('.fr-notes p')).whiteSpace === 'pre-wrap');
+  t.tasks.find((x) => x.id === 'fW').notes = 'x'.repeat(700);
+  await reloadAll(); await go('#inbox'); await go(`#full/${sid}`); await until(() => !!$('.fr-notes'));
+  check('long notes fold', !$('.fr-notes').open);
+  t.tasks.find((x) => x.id === 'fW').notes = '';
+  await reloadAll(); await go('#inbox'); await go(`#full/${sid}`); await until(() => !$('.fr-notes'));
   // A card with steps shows them.
   t.tasks.push({ ...t.tasks.find((x) => x.id === 'fW'), id: 'fWs1', title: 'Find the old will', parent_id: 'fW', sort: 10, completed_at: null, dropped_at: null, steps_in_order: false });
   (await import('/js/state.js')).db.tasks.push({ ...t.tasks.find((x) => x.id === 'fWs1') }); app.render(); await wait(30);

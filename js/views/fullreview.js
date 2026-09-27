@@ -249,7 +249,7 @@ function taskCard(it) {
     ${t.flagged ? row('Flag', 'flagged', '<span class="chip flagged-chip">⚑ Flagged</span>') : ''}
     ${t.folder_path ? row('Folder', 'folder', `<span class="fr-folder">${esc(shortPath(t.folder_path))}</span>${folderButton(t.folder_path)}`) : ''}
     ${stepsRow(t, row)}
-    ${t.notes ? `<details class="fr-notes"><summary>Notes</summary><p>${esc(t.notes.slice(0, 1200))}${t.notes.length > 1200 ? '…' : ''}</p></details>` : ''}
+    ${t.notes ? `<details class="fr-notes" ${t.notes.length <= 600 ? 'open' : ''}><summary>Notes</summary><p>${esc(t.notes.slice(0, 1200))}${t.notes.length > 1200 ? '…' : ''}</p></details>` : ''}
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
     ${suggestionBar(it, t)}
     <div class="fr-btns ${pending(it) ? 'fr-btns-quiet' : ''}">${[['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
