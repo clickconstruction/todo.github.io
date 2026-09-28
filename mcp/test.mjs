@@ -87,6 +87,11 @@ globalThis.fetch = async (url, init = {}) => {
     const { applied, ...rest } = p.plan; p.plan = rest;
     return new Response(JSON.stringify({ tasks_dropped: a.task_ids.length, references_archived: 0 }), { status: 200 });
   }
+  if (String(url).includes('/rest/v1/rpc/tree_activity')) { // mirror of tree_activity (migration 20261105000001)
+    const b = JSON.parse(init.body); const by = new Map();
+    db.tasks.filter((t) => t.user_id === b.owner && t.project_id && ((t.completed_at && t.completed_at >= b.since) || (!t.completed_at && !t.dropped_at))).forEach((t) => { const r = by.get(t.project_id) || { project_id: t.project_id, done: 0, last: null, open: 0 }; if (t.completed_at) { r.done += 1; if (!r.last || t.completed_at > r.last) r.last = t.completed_at; } else r.open += 1; by.set(t.project_id, r); });
+    return new Response(JSON.stringify([...by.values()]), { status: 200 });
+  }
   if (String(url).includes('/rest/v1/rpc/tree_accept')) { // mirror of tree_accept (migration 20261103000001)
     const b = JSON.parse(init.body); const l = db.tree_links.find((x) => x.id === b.link && x.user_id === b.owner && !x.archived_at);
     if (!l) return new Response(JSON.stringify({ message: 'Link not found.' }), { status: 400 });
@@ -1270,6 +1275,16 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const sgDaily = db.review_items.find((x) => x.suggestion && x.suggestion.daily);
   let badDaily = ''; try { await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'sometimes' }); } catch (e) { badDaily = e.message; }
   assert(sgDaily && sgDaily.suggestion.daily.tier === 'should' && sgDaily.suggestion.daily.weekdays.join() === '1,3,5' && /"must".*"should"/.test(badDaily), 'full_review suggest: a suggestion can make the action daily (tier and days checked)');
+  { // a suggestion can carry additions to the tech tree
+    db.goals.push({ id: 'gTreeHave', user_id: UID, title: 'Own a home outright', kind: 'destination', status: 'active' });
+    await tool('full_review', { action: 'suggest', decision: 'keep', tree: { add: [{ title: 'Astronaut', kind: 'destination' }, { title: 'own a home outright', kind: 'destination' }, { title: 'Read the NASA requirements', kind: 'card', project: 'Estate and legacy' }], links: [{ node: 'Astronaut', requires: 'Read the NASA requirements' }, { node: 'Own a home outright', requires: 'Estate and legacy' }] } });
+    const tr = s1.suggestion.tree;
+    assert(tr && tr.items.length === 4 && !tr.items[0].exists && tr.items[1].exists.id === 'gTreeHave' && tr.items[2].project_id === 'pRE' && tr.items[3].exists.kind === 'project' && tr.links.length === 2 && tr.links[0].node === 0 && tr.links[0].requires === 2 && tr.links[1].node === 1 && tr.links[1].requires === 3, `suggest tree: new items, what is already there reused, links by place (${JSON.stringify(tr)})`);
+    assert(!db.goals.some((g) => g.title === 'Astronaut') && db.tree_links.length === 0, 'suggest tree: nothing is made until Submit');
+    const no = async (tree, re) => { try { await tool('full_review', { action: 'suggest', decision: 'keep', tree }); return false; } catch (e) { return re.test(e.message); } };
+    assert(await no({ add: [{ title: 'A', kind: 'destination' }, { title: 'B', kind: 'goal' }], links: [{ node: 'A', requires: 'B' }, { node: 'B', requires: 'A' }] }, /loop/) && await no({ add: [{ title: 'A', kind: 'project' }] }, /kind is one of/) && await no({ links: [{ node: 'Nobody knows this', requires: 'Estate and legacy' }] }, /not in tree.add/) && await no({ add: [{ title: 'C', kind: 'card' }, { title: 'D', kind: 'goal' }], links: [{ node: 'C', requires: 'D' }] }, /is a card/), 'suggest tree: loops, unknown names and kinds, and a card that would be locked are refused');
+    db.goals = db.goals.filter((g) => g.id !== 'gTreeHave');
+  }
   const sg = await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Fix the gate latch before winter', gain: 'Goats stay in', project: 'Estate and legacy', planned: '2026-10-05', flagged: false, add_tags: ['Brand new tag'], note: 'You said before the cold snap' });
   assert(sg.suggested === 1 && s1.suggestion.decision === 'keep' && s1.suggestion.project_id === 'pRE' && s1.suggestion.project_name === 'Estate and legacy' && /^2026-10-05T/.test(s1.suggestion.planned) && s1.suggestion.add_tag_names.includes('Brand new tag') && !s1.suggestion.ahead, 'suggest: resolved and stored on the card');
   assert(db.tasks.find((t) => t.id === S1).title === 'Fix the gate latch' && !db.tasks.find((t) => t.id === S1).gain, 'suggest changes nothing until the user Submits');
@@ -1622,6 +1637,24 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const counted = {}; for (const [k, args] of [['get', {}], ['find', { action: 'find' }], ['hold', { action: 'hold', project: p3.id }]]) { calls = 0; await tool('tech_tree', args); counted[k] = calls; }
   globalThis.fetch = real;
   assert(Object.values(counted).every((v) => v <= 10), `tech_tree: a handful of requests a call (${Object.entries(counted).map(([k, v]) => `${k} ${v}`).join(', ')})`);
+  { // the review: three questions
+    const now = new Date().toISOString();
+    db.tasks.push({ id: 'trA', user_id: UID, title: 'Tree done lately', project_id: pa.id, completed_at: now, dropped_at: null }, { id: 'trB', user_id: UID, title: 'Tree still open', project_id: p2.id, completed_at: null, dropped_at: null }, { id: 'trC', user_id: 'someone-else', title: 'Theirs', project_id: p2.id, completed_at: now, dropped_at: null });
+    calls = 0; globalThis.fetch = (u, ...x) => { calls += 1; return real(u, ...x); };
+    const rv = await tool('tech_tree', { action: 'review', period: 'year' });
+    globalThis.fetch = real;
+    const B = rv.open_now.find((o) => o.id === p2.id);
+    db.tasks.find((t) => t.id === 'trA').project_id = p2.id;
+    const A = (await tool('tech_tree', { action: 'review', period: 'year' })).open_now.find((o) => o.id === p2.id);
+    assert(A && A.work === 'moving' && B && B.work === 'stalled' && /3 open actions/.test(B.detail) && rv.open_now.indexOf(B) === 0, `review: what is open, stalled before moving, from one read of activity (${JSON.stringify([A, B])})`);
+    assert(rv.destinations.some((d) => d.id === dest.id) && Array.isArray(rv.unlocked) && rv.counts.need_them >= 1 && calls <= 10, `review: destinations to ask about, in a handful of requests (${calls})`);
+    const done = await tool('tech_tree', { action: 'reviewed' });
+    const st = db.user_settings.find((x) => x.user_id === UID);
+    assert(done.reviewed && st && st.tree_reviewed_at && (await tool('tech_tree', { action: 'review' })).last_reviewed === done.reviewed, 'reviewed: recorded, and the next review starts from it');
+    const some = await tool('tech_tree', { node: p2.id });
+    assert(some.nodes.some((x) => x.id === p2.id) && some.nodes.length < (await tool('tech_tree', {})).nodes.length, 'get node: just that branch');
+    db.tasks = db.tasks.filter((t) => !['trA', 'trB', 'trC'].includes(t.id));
+  }
   [p1, p2, p3, pa, pb].forEach((p) => { db.projects.find((x) => x.id === p.id).status = 'dropped'; });
   db.goals = db.goals.filter((g) => g.id !== dest.id && g.kind !== 'milestone'); db.tree_links.length = 0;
 }

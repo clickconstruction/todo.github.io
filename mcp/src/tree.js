@@ -1,6 +1,6 @@
 // Tech tree for agents: goals and projects linked by what they require (rules in js/tree-rules.js, the same
 // ones the app uses; the database refuses loops and keeps everything, migration 20261103000001).
-import { buildTree, keyOf, opensWith, wouldLoop, cardTrouble, proposeFromLibrary, live } from '../../js/tree-rules.js';
+import { buildTree, keyOf, opensWith, wouldLoop, cardTrouble, proposeFromLibrary, treeReview, live } from '../../js/tree-rules.js';
 
 const OPEN = 'completed_at=is.null&dropped_at=is.null';
 
@@ -11,7 +11,8 @@ export function treeTools() {
     ]);
     // The cards that links name (a card can be what a goal or project requires), in one read.
     const ids = [...new Set(links.filter((l) => l.requires_kind === 'task' && l.requires_id).map((l) => l.requires_id))];
-    const tasks = ids.length ? await api.q(`tasks?${api.u}&id=in.(${ids.map((x) => `"${x}"`).join(',')})&select=id,title,project_id,parent_id,completed_at,dropped_at`) : [];
+    const tasks = [];
+    for (let i = 0; i < ids.length; i += 100) tasks.push(...await api.q(`tasks?${api.u}&id=in.(${ids.slice(i, i + 100).map((x) => `"${x}"`).join(',')})&select=id,title,project_id,parent_id,completed_at,dropped_at`)); // a hundred at a time: an address has a length
     return { goals, projects, links, tasks, tree: buildTree({ goals, projects, tasks, links }) };
   };
   // A goal or project by id or exact name. kind narrows it when a goal and a project share a name.
@@ -75,10 +76,12 @@ export function treeTools() {
     name: 'tech_tree',
     description: `The user's tech tree: goals and projects linked by what they require, so doing certain things unlocks future things. States: achieved · open (everything it requires is done) · ready (a project that is unlocked but still on hold) · locked (needs something first) · held (a project on hold that requires nothing on the tree: leave it be). A milestone is a condition the user ticks ("Can afford to pay someone full time"); a destination is where a branch leads (mark either with save_goal kind). What a goal or project requires can also be a single card (an action or a step): "sometimes it's a little card that opens up a whole other project"; completing that card (complete_task) unlocks what waits on it. A card is never the locked one (cards wait on cards with update_task waits_for), and a project can't require a card inside itself.
 Locks are real for projects: a locked project belongs on hold (its actions leave the available lists) and an unlocked one can be started. NEVER hold or start a project, or accept a link, without the user saying so: propose, and tell them what would change.
-actions: get {destination?} (the tree: counts, destinations with progress and what is next, every node, proposed links) · link {node, requires | card | milestone} (an accepted link, when the user states it) · propose {links: [{node, requires | card | milestone, why}]} (your ideas: shown dashed in the app until they accept) · find {save?} (links already written in the library: "(phase 2)" in a project's name, "Start when…" in an action or notes; save: true stores them as proposals) · accept {id | all: true} · dismiss {id} · unlink {node, requires | card} · hold {project} · start {project}.
+unmapped is a destination nothing leads to yet: it is not open (nobody can just go and be an astronaut); help the user name its first step, or leave it honestly unmapped.
+actions: get {destination? | node?} (the tree: counts, destinations with progress and what is next, the nodes, proposed links; a big tree returns what is open and asks for a destination or node to see a branch) · review {period?: last | quarter | year} (the three questions of a review: what was unlocked, what is open and whether it is moving or stalled, and each destination, to ask whether they still want it) · reviewed (records that the review is done) · link {node, requires | card | milestone} (an accepted link, when the user states it) · propose {links: [{node, requires | card | milestone, why}]} (your ideas: shown dashed in the app until they accept) · find {save?} (links already written in the library: "(phase 2)" in a project's name, "Start when…" in an action or notes; save: true stores them as proposals) · accept {id | all: true} · dismiss {id} · unlink {node, requires | card} · hold {project} · start {project}.
 node and requires are names or ids of goals or projects (kind / requires_kind: goal | project when a name is both). To answer "what should I work towards?", get with the destination and read next.`,
     inputSchema: { type: 'object', properties: {
-      action: { type: 'string', enum: ['get', 'link', 'propose', 'find', 'accept', 'dismiss', 'unlink', 'hold', 'start'], default: 'get' },
+      action: { type: 'string', enum: ['get', 'review', 'reviewed', 'link', 'propose', 'find', 'accept', 'dismiss', 'unlink', 'hold', 'start'], default: 'get' },
+      period: { type: 'string', enum: ['last', 'quarter', 'year'], description: 'review: since the last review (default when there was one), the last 3 months, or the last year' },
       destination: { type: 'string', description: 'get: only this destination’s branch (goal name or id)' },
       node: { type: 'string' }, kind: { type: 'string', enum: ['goal', 'project'] },
       requires: { type: 'string' }, requires_kind: { type: 'string', enum: ['goal', 'project'] },
@@ -160,15 +163,45 @@ node and requires are names or ids of goals or projects (kind / requires_kind: g
         return { project: p.title, status: action === 'hold' ? 'on_hold' : 'active', open_actions: counts[p.id] || 0, note: action === 'hold' ? 'Its actions have left the available lists until it is started.' : 'Its actions are available again.' };
       }
 
+      if (action === 'review' || action === 'reviewed') {
+        await api.loadSettings();
+        const last = (api.settings || {}).tree_reviewed_at || null;
+        if (action === 'reviewed') {
+          const now = new Date().toISOString();
+          const had = (await api.q(`user_settings?${api.u}&select=user_id`)).length;
+          if (had) await api.q(`user_settings?${api.u}`, { method: 'PATCH', body: { tree_reviewed_at: now } });
+          else await api.q('user_settings', { method: 'POST', body: { user_id: api.userId, tree_reviewed_at: now } });
+          return { reviewed: now.slice(0, 10), before: last ? last.slice(0, 10) : null, next: 'The next review starts from today.' };
+        }
+        const mode = a.period || (last ? 'last' : 'year');
+        const since = mode === 'last' && last ? last : new Date(Date.now() - (mode === 'quarter' ? 92 : 365) * 86400000).toISOString();
+        const activity = await api.q('rpc/tree_activity', { method: 'POST', body: { since: new Date(Date.now() - 60 * 86400000).toISOString(), owner: api.userId } });
+        const openCounts = Object.fromEntries((activity || []).map((r) => [r.project_id, r.open || 0]));
+        const rv = treeReview(L.tree, { since, activity: activity || [], openCounts, projects: L.projects });
+        const cap = (list, k = 40) => list.slice(0, k);
+        return { since: since.slice(0, 10), last_reviewed: last ? last.slice(0, 10) : null, lately_means: 'the last 60 days',
+          unlocked: cap(rv.unlocked).map((u) => ({ title: u.node.title, kind: u.node.kind === 'task' ? 'card' : u.node.kind, on: String(u.at).slice(0, 10), opened: u.opened.length ? u.opened : undefined })),
+          open_now: cap(rv.open).map((o) => ({ id: o.node.id, title: o.node.title, kind: o.node.kind === 'task' ? 'card' : o.node.kind, work: o.work, detail: o.detail, towards: o.under || undefined })),
+          destinations: cap(rv.destinations).map((d) => ({ id: d.node.id, title: d.node.title, state: d.node.state, done: d.done, of: d.total, next: d.next.length ? d.next.slice(0, 3) : undefined })),
+          counts: { unlocked: rv.unlocked.length, open_now: rv.open.length, need_them: rv.open.filter((o) => ['start', 'stalled', 'todo'].includes(o.work)).length, destinations: rv.destinations.length },
+          next: 'Go through it with the user, what needs them first: stalled (offer hold, or ask what is in the way), unlocked but on hold (offer start), cards not started (offer a planned date). For each destination ask whether they still want it (save_goal reviewed: true keeps it; status dropped lets it go). Then tech_tree reviewed.' };
+      }
+
       // get
       const dest = a.destination ? find(L, a.destination, 'goal') : null;
+      const at = !dest && a.node ? find(L, a.node, a.kind) : null;
       const tree = L.tree;
-      const shown = dest ? tree.path(tree.nodes.get(keyOf('goal', dest.id)) || { key: '', requires: [] }).nodes : tree.shown;
+      const whole = !dest && !at;
+      const big = whole && tree.shown.length > 150; // a Worker has about 10 ms: a big tree answers with what is open, and a branch when asked
+      const shown = dest ? tree.path(tree.nodes.get(keyOf('goal', dest.id)) || { key: '', requires: [] }).nodes
+        : at ? tree.branchOf(keyOf(at.kind, at.id)) : big ? tree.shown.filter((x) => ['open', 'ready', 'unmapped'].includes(x.state)) : tree.shown;
       const achievable = tree.shown.filter((x) => x.state === 'open' && x.type === 'milestone').map((x) => ({ milestone: x.title, would_unlock: opensWith(tree, x.key).map((d) => d.title) })).filter((x) => x.would_unlock.length);
       return { counts: tree.counts,
         destinations: tree.destinations.map((d) => { const p = tree.path(d); return { id: d.id, title: d.title, state: d.state, done: p.done, of: p.total, next: p.next.filter((x) => x.key !== d.key).map((x) => x.title), note: p.total > 1 ? undefined : 'no path yet: nothing is linked to it' }; }),
-        nodes: shown.sort((x, y) => x.depth - y.depth || x.title.localeCompare(y.title)).slice(0, 200).map((x) => nodeOut(tree, x)),
-        proposals: tree.proposals.length ? tree.proposals.map((l) => propOut(L, l)) : undefined,
+        nodes: shown.slice().sort((x, y) => x.depth - y.depth || x.title.localeCompare(y.title)).slice(0, 200).map((x) => nodeOut(tree, x)),
+        ...(big ? { partial: `The tree has ${tree.shown.length} items: these are the ones open now. Pass destination or node to see a branch.` } : shown.length > 200 ? { partial: `${shown.length - 200} more in this branch.` } : {}),
+        proposals: tree.proposals.length ? tree.proposals.slice(0, 60).map((l) => propOut(L, l)) : undefined,
+        proposals_more: tree.proposals.length > 60 ? tree.proposals.length - 60 : undefined,
         milestones_to_tick: achievable.length ? achievable : undefined,
         ...(tree.shown.length ? {} : { next: 'The tree is empty. tech_tree find looks for links already written in the library; save_goal kind: destination marks where a branch leads.' }) };
     },

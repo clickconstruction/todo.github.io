@@ -8,6 +8,8 @@
 //   ready     a project whose requirements are met but which is still on hold: unlocked, not started
 //   held      a project on hold that requires nothing on the tree: on hold for its own reasons, not the tree's
 //   locked    something it requires isn't achieved yet
+//   unmapped  a destination nothing leads to yet: there is no path, so it is not "open" (you can't just go
+//             and be an astronaut); it asks to be mapped
 // A dropped node neither blocks nor shows. Proposed links (from Claude or the library) are drawn,
 // dashed, and block nothing until accepted.
 export const keyOf = (kind, id) => `${kind}:${id}`;
@@ -46,7 +48,8 @@ export function buildTree({ goals = [], projects = [], tasks = [], links = [] })
   const shown = [...nodes.values()].filter((n) => !n.gone);
   shown.forEach((n) => {
     n.unmet = n.requires.map((r) => nodes.get(r.key)).filter((r) => r && !r.done && !r.gone);
-    n.state = n.done ? 'achieved' : n.unmet.length ? 'locked' : n.kind === 'project' && n.held ? (n.requires.length ? 'ready' : 'held') : 'open';
+    n.state = n.done ? 'achieved' : n.unmet.length ? 'locked' : n.type === 'destination' && !n.requires.length ? 'unmapped'
+      : n.kind === 'project' && n.held ? (n.requires.length ? 'ready' : 'held') : 'open';
   });
   // Depth: the longest chain of requirements under a node (proposed links count, so they have a place to be drawn).
   const depth = new Map();
@@ -75,6 +78,7 @@ export function buildTree({ goals = [], projects = [], tasks = [], links = [] })
     if (seenB.has(n.key)) return;
     const group = []; const stack = [n.key];
     while (stack.length) { const k = stack.pop(); if (seenB.has(k)) continue; seenB.add(k); group.push(nodes.get(k)); joined.get(k).forEach((x) => stack.push(x)); }
+    group.forEach((x) => { x.branch = branches.length; });
     branches.push(group);
   });
   const loose = branches.filter((g) => g.length === 1).map((g) => g[0]);
@@ -108,7 +112,9 @@ export function buildTree({ goals = [], projects = [], tasks = [], links = [] })
   const destinations = shown.filter((n) => n.type === 'destination');
   const proposals = links.filter((l) => live(l) && l.state === 'proposed');
   const count = (s) => shown.filter((n) => n.state === s).length;
-  return { nodes, shown, loose, destinations, proposals, pending, path, counts: { achieved: count('achieved'), open: count('open') + count('ready'), ready: count('ready'), locked: count('locked'), held: count('held') } };
+  const branchOf = (key) => { const n = nodes.get(key); return n && branches[n.branch] ? branches[n.branch] : []; };
+  return { nodes, shown, loose, branches: branches.filter((g) => g.length > 1), branchOf, destinations, proposals, pending, path,
+    counts: { achieved: count('achieved'), open: count('open') + count('ready'), ready: count('ready'), locked: count('locked'), held: count('held'), unmapped: count('unmapped') } };
 }
 
 // What would open if this node were achieved now: the nodes it unlocks whose other requirements are met.
@@ -174,4 +180,38 @@ export function proposeFromLibrary({ projects = [], tasks = [], links = [] }) {
     if (!has(node, requires)) out.push({ node, requires, why: `Written in ${s.from}.` });
   });
   return out;
+}
+
+// ----- looking back over the tree -----
+// The three questions of a review, answered from the tree.
+//   since       ISO time: "this year" starts here (the last review, or a year ago)
+//   activity    [{ project_id, done, last }]: what was finished in each project lately (rpc tree_activity)
+//   openCounts  { project_id: open actions }
+//   projects    every project (to say whether a goal's projects are moving)
+// → { unlocked: [{ node, at, opened: [titles] }], open: [{ node, work, detail, under }], destinations: [{ node, done, total, next }] }
+//   work: moving | stalled | empty (nothing to do in it) | todo (a card not done) | tick (a milestone to tick) | start (unlocked, on hold)
+export function treeReview(tree, { since, activity = [], openCounts = {}, projects = [] }) {
+  const act = new Map(activity.map((a) => [a.project_id, a]));
+  const titleOf = (k) => (tree.nodes.get(k) || {}).title;
+  const unlocked = tree.shown.filter((n) => n.done && n.at && n.at >= since).sort((a, b) => String(b.at).localeCompare(String(a.at)))
+    .map((n) => ({ node: n, at: n.at, opened: n.unlocks.map((k) => tree.nodes.get(k)).filter((d) => d && !d.gone && d.state !== 'locked').map((d) => d.title) }));
+  // Which destination an item leads to (the first whose path holds it).
+  const paths = tree.destinations.map((d) => ({ d, keys: new Set(tree.path(d).nodes.map((x) => x.key)) }));
+  const under = (n) => { const p = paths.find((x) => x.keys.has(n.key) && x.d.key !== n.key); return p ? p.d.title : ''; };
+  const workOf = (n) => {
+    if (n.state === 'ready') return { work: 'start', detail: 'unlocked, still on hold' };
+    if (n.kind === 'task') return { work: 'todo', detail: n.in ? `a card in ${n.in}` : 'a card' };
+    if (n.type === 'milestone') return { work: 'tick', detail: 'tick it when it is true' };
+    const mine = n.kind === 'project' ? [n.id] : projects.filter((p) => p.goal_id === n.id && (p.status === 'active' || p.status === 'on_hold')).map((p) => p.id);
+    const done = mine.reduce((sum, id) => sum + ((act.get(id) || {}).done || 0), 0);
+    const left = mine.reduce((sum, id) => sum + (openCounts[id] || 0), 0);
+    if (n.kind === 'goal' && !mine.length) return { work: 'empty', detail: 'no project serves it yet' };
+    if (done) return { work: 'moving', detail: `${done} action${done === 1 ? '' : 's'} done lately` };
+    return left ? { work: 'stalled', detail: `nothing done lately · ${left} open action${left === 1 ? '' : 's'}` } : { work: 'empty', detail: 'nothing to do in it yet' };
+  };
+  const ORDER = { start: 0, stalled: 1, todo: 2, empty: 3, tick: 4, moving: 5 };
+  const open = tree.shown.filter((n) => n.state === 'open' || n.state === 'ready').map((n) => ({ node: n, ...workOf(n), under: under(n) }))
+    .sort((a, b) => ORDER[a.work] - ORDER[b.work] || a.node.title.localeCompare(b.node.title));
+  const destinations = tree.destinations.filter((d) => !d.done).map((d) => { const p = tree.path(d); return { node: d, done: p.done, total: p.total, next: p.next.filter((x) => x.key !== d.key).map((x) => x.title) }; });
+  return { unlocked, open, destinations, titleOf };
 }

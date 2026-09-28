@@ -258,6 +258,7 @@ view.addEventListener('submit', async (e) => {
 });
 
 view.addEventListener('change', (e) => {
+  if (e.target.closest('[data-tt-period]')) { app.ttPeriod = e.target.value; app.ttShowAll = null; render(); return; }
   if (e.target.closest('[data-hz-link-area], [data-hz-link-goal], [data-hz-tick]')) { horizonsChange(e); return; }
   if (planChange(e)) return;
   if (matrixChange(e)) return;

@@ -41,7 +41,7 @@ export async function run({ only } = {}) {
   window.prompt = () => 'Smoke tag';
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, dailies, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, treeReview, dailies, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -750,6 +750,121 @@ async function treeLinker(check) {
   if ($('#sheet').open) $('#sheet').close();
 }
 const go2 = async (hash) => { location.hash = hash; await wait(200); };
+
+// Tech tree: a destination with no path, tree changes inside a Full Review suggestion, the review's three
+// questions, and a tree too big to draw at once.
+async function treeReview(check) {
+  const { app, db } = await import('/js/state.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const iso = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  const t = T();
+  app.fr = null; app.ttActivity = null; app.ttPeriod = null; app.ttShowAll = null; window.__frPollMs = 150;
+  const P = (id, name, extra = {}) => t.projects.push({ ...t.projects[0], id, name, status: 'active', kind: 'parallel', folder_id: null, notes: '', goal_id: null, area_id: null, completed_at: null, sort: 50, created_at: iso(500), updated_at: iso(50), ...extra });
+  const G = (id, title, kind, extra = {}) => t.goals.push({ id, user_id: 'u1', title, kind, why: '', area_id: null, target_date: null, status: 'active', achieved_at: null, review_every_days: 30, last_reviewed_at: null, sort: 9, created_at: iso(500), updated_at: iso(5), ...extra });
+  const L = (n, r, extra = {}) => t.tree_links.push({ id: `rl${t.tree_links.length}`, user_id: 'u1', node_kind: n[0], node_id: n[1], requires_kind: r[0], requires_id: r[1], requires_title: null, state: 'accepted', proposed_by: 'user', why: '', archived_at: null, created_at: iso(100), updated_at: iso(100), ...extra });
+  const base = { ...t.tasks[0], notes: '', parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, daily: null, completed_at: null, dropped_at: null, gain: '', waiting_on: null, agenda_for: null, created_at: iso(400), updated_at: iso(40) };
+  P('rg', 'Life Goals'); P('r1', 'Real Estate Feeder (phase 1)', { status: 'completed', completed_at: iso(40) }); P('r2', 'RE Title Feeder (phase 2)'); P('rA', 'Animal Feeder'); P('rB', 'ButterFly Group', { status: 'on_hold' }); P('rF', 'Farm 1');
+  G('gA', 'Astronaut', 'destination'); G('gM', 'Can afford to pay someone full time', 'milestone', { status: 'achieved', achieved_at: iso(20) });
+  L(['project', 'r2'], ['project', 'r1']); L(['project', 'rA'], ['goal', 'gM']); L(['project', 'rB'], ['goal', 'gM']);
+  t.tasks.push({ ...base, id: 'rc0', project_id: 'rg', title: 'Check my Life Flowchart', notes: 'How to be an astronaut' });
+  for (let i = 0; i < 5; i++) t.tasks.push({ ...base, id: `rd${i}`, project_id: 'r2', title: `Title work ${i}`, completed_at: iso(5 + i) });
+  for (let i = 0; i < 3; i++) t.tasks.push({ ...base, id: `ro${i}`, project_id: 'rA', title: `Animal job ${i}` });
+  t.tasks.push({ ...base, id: 'rx', project_id: 'rA', title: 'Animal job done long ago', completed_at: iso(200) }, { ...base, id: 'ry', project_id: 'r2', title: 'Title work to do' });
+  t.review_sessions.push({ id: 'sT', user_id: 'u1', title: 'Full Review', scope: {}, current_item: 'iT', status: 'active', agent_seen_at: null, agent_status: '', finished_at: null, created_at: iso(0), updated_at: iso(0) });
+  t.review_items.push({ id: 'iT', session_id: 'sT', user_id: 'u1', sort: 1, kind: 'task', task_id: 'rc0', grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, created_at: iso(0), updated_at: iso(0),
+    suggestion: { decision: 'keep', title: 'Yearly: check my tech tree', at: iso(0), tree: { items: [
+      { kind: 'destination', title: 'Astronaut', exists: { kind: 'goal', id: 'gA' } }, { kind: 'destination', title: 'Significant physical assets (homes)' },
+      { kind: 'card', title: 'Map the path to astronaut', project_id: 'rg', project_name: 'Life Goals' }, { kind: 'milestone', title: 'Farm 1 paid for' },
+      { kind: 'project', title: 'Farm 1', exists: { kind: 'project', id: 'rF' } }, { kind: 'card', title: 'List the homes I want', project_id: 'rg', project_name: 'Life Goals' }],
+      links: [{ node: 1, requires: 3 }, { node: 3, requires: 4 }, { node: 0, requires: 2 }] } } });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const node = (key) => $(`[data-tt-node="${key}"]`);
+  const goal = (title) => t.goals.find((g) => g.title === title);
+  const toastBtn = (re) => $$('#toast button').find((b) => re.test(b.textContent));
+  const nav = async (hash) => { location.hash = hash; await wait(200); };
+
+  // A destination nothing leads to is not "open": it has no path, and asks to be mapped.
+  await nav('#horizons/tree');
+  check('a destination with no path says so, and is never shown as open', node('goal:gA').classList.contains('tt-unmapped') && !node('goal:gA').classList.contains('tt-open') && has('[data-tt-node="goal:gA"]', 'no path yet', 'map it') && has('.tt-dest', 'astronaut', 'no path yet') && has('.tt-counts', '1 with no path yet'));
+  $('[data-tt-node="goal:gA"] [data-tt="map"]').click(); await until(() => $('#sheet').open && !!$('#sheet [data-tl-q="req"]'));
+  check('Map it opens the linker with the destination chosen', $$('#sheet [data-tl-list="node"] .tl-row.on').some((r) => /Astronaut/.test(r.innerText)));
+  $('#sheet [data-cancel]').click();
+
+  // Full Review: the suggestion shows what it would add to the tree, before anything is added.
+  await nav('#full/sT');
+  await until(() => !!$('.sg-bar .sg-tts'));
+  const boxes = () => $$('.sg-bar .sg-tt');
+  const box = (i) => $(`.sg-bar [data-sg-tt="${i}"]`); // by its place in the suggestion: 0 Astronaut, 1 homes, 2 the card, 3 the milestone, 4 Farm 1, 5 the second card
+  const says = (i, ...needles) => has(`.sg-bar [data-sg-tt="${i}"]`, ...needles);
+  check('the suggestion says what it adds to the tree, in words', has('.sg-bar', 'tech tree: adds 1 destination, 1 milestone and 2 cards', '3 links', 'horizons → tech tree', 'nothing is added until you submit'), text('.sg-bar').slice(0, 200));
+  check('and shows each item: new ones dashed, what is already there marked', boxes().length === 6 && box(1).classList.contains('new') && says(1, 'destination · new', 'significant physical assets') && box(0).classList.contains('there') && says(0, 'already there', 'astronaut') && box(3).classList.contains('sg-tt-milestone') && box(4).classList.contains('there'));
+  check('each says what it requires, or that it has no path yet', says(1, 'requires farm 1 paid for') && says(0, 'requires map the path to astronaut') && says(5, 'in life goals') && says(3, 'requires farm 1') && says(2, 'card · new', 'in life goals'));
+  check('new things come first, what they build on after', boxes().findIndex((b) => b.classList.contains('there')) === 4 && boxes().slice(0, 4).every((b) => b.classList.contains('new')));
+  check('nothing is on the tree yet', !goal('Significant physical assets (homes)') && t.tree_links.length === 3);
+  box(5).querySelector('[data-fr="tree-drop"]').click();
+  await until(() => boxes().length === 5);
+  check('Leave out takes one new item out of the suggestion', !has('.sg-bar', 'list the homes') && has('.sg-bar', 'adds 1 destination, 1 milestone and 1 card') && t.review_items.find((x) => x.id === 'iT').suggestion.tree.items.length === 5 && t.review_items.find((x) => x.id === 'iT').suggestion.tree.links.length === 3);
+  check('what is already there can’t be left out (it isn’t being added)', !box(0).querySelector('[data-fr="tree-drop"]') && !!box(1).querySelector('[data-fr="tree-drop"]'));
+
+  $('[data-fr="submit"]').click();
+  await until(() => !!goal('Significant physical assets (homes)') && t.review_items.find((x) => x.id === 'iT').status === 'reviewed');
+  await wait(200);
+  const homes = goal('Significant physical assets (homes)'); const ms = goal('Farm 1 paid for'); const card = t.tasks.find((x) => x.title === 'Map the path to astronaut');
+  check('Submit makes the new goals and the card, and reuses Astronaut', homes.kind === 'destination' && ms.kind === 'milestone' && card && card.project_id === 'rg' && !card.in_inbox && t.goals.filter((g) => g.title === 'Astronaut').length === 1 && t.tasks.find((x) => x.id === 'rc0').title === 'Yearly: check my tech tree');
+  check('and links them', t.tree_links.filter((l) => !l.archived_at).length === 6 && t.tree_links.some((l) => l.node_id === homes.id && l.requires_id === ms.id) && t.tree_links.some((l) => l.node_id === ms.id && l.requires_id === 'rF') && t.tree_links.some((l) => l.node_id === 'gA' && l.requires_id === card.id));
+  await nav('#horizons/tree');
+  check('the tree shows them: Astronaut now has a path, through the card', node('goal:gA').classList.contains('tt-locked') && has('[data-tt-node="goal:gA"]', 'needs map the path') && !!node(`task:${card.id}`) && !!node(`goal:${homes.id}`) && has('.tt-counts', '2 achieved') && !has('.tt-counts', 'no path yet'));
+  await nav('#full/sT'); await until(() => !!$('[data-fr="undo"]') && !$('[data-fr="undo"]').disabled);
+  $('[data-fr="undo"]').click();
+  await until(() => goal('Significant physical assets (homes)').status === 'dropped' && has('#toast', 'undone'));
+  check('Undo takes back what was new, keeps what was there, deletes nothing', homes.status === 'dropped' && ms.status === 'dropped' && !!card.dropped_at && t.goals.find((g) => g.id === 'gA').status === 'active' && t.tree_links.filter((l) => !l.archived_at).length === 3 && t.tree_links.length === 6 && has('#toast', 'the tech tree', '3 new items taken back') && !!$('.sg-bar .sg-tts'), text('#toast'));
+  app.fr = null;
+
+  // The review: three questions.
+  await nav('#horizons/tree');
+  check('the tree page links to its review', !!$('a[href="#horizons/tree/review"]'));
+  await nav('#horizons/tree/review');
+  await until(() => has(undefined, 'moving'));
+  const rrow = (key) => $(`[data-tt-rv="${key}"]`);
+  check('1 · unlocked: what was achieved this year, and what each opened', has(undefined, '1 · what did i unlock?') && has('[data-tt-rv="project:r1"]', 'real estate feeder', 'done', 'opened re title feeder', 'unlocked 1') && has('[data-tt-rv="goal:gM"]', 'achieved', 'opened animal feeder, butterfly group', 'unlocked 2') && !document.body.classList.contains('wide-view'));
+  check('2 · open now: moving, stalled and unlocked are told apart, from what was done lately', has('[data-tt-rv="project:r2"]', '5 actions done lately', 'moving') && has('[data-tt-rv="project:rA"]', 'nothing done lately', '3 open actions', 'stalled') && !!$('[data-tt-rv="project:rA"] [data-tt="hold"]') && has('[data-tt-rv="project:rB"]', 'unlocked', 'still on hold') && !!$('[data-tt-rv="project:rB"] [data-tt="start"]'), text('#view').slice(0, 400));
+  const order = $$('#view [data-tt-rv^="project:"]').map((r) => r.dataset.ttRv).filter((k) => ['project:r2', 'project:rA', 'project:rB'].includes(k));
+  check('what needs you comes first', order.indexOf('project:rB') < order.indexOf('project:r2') && order.indexOf('project:rA') < order.indexOf('project:r2'), order.join());
+  check('3 · destinations: each asks whether you still want it', has('[data-tt-rv="goal:gA"]', 'astronaut', 'no path yet') && !!$('[data-tt-rv="goal:gA"] [data-tt="want"]') && !!$('[data-tt-rv="goal:gA"] [data-tt="let-go"]') && !!$('[data-tt-rv="goal:gA"] [data-tt="map"]'));
+  $('[data-tt-rv="project:rA"] [data-tt="hold"]').click(); await until(() => t.projects.find((x) => x.id === 'rA').status === 'on_hold');
+  await wait(150);
+  check('Hold from the review: the stalled project steps back, with Undo', has('#toast', 'on hold', '3 actions step back', 'undo') && has('[data-tt-rv="project:rA"]', 'unlocked'));
+  $('[data-tt-rv="goal:gA"] [data-tt="want"]').click(); await until(() => !!t.goals.find((g) => g.id === 'gA').last_reviewed_at);
+  await wait(100);
+  check('Still want it: kept, and marked for this review', has('[data-tt-rv="goal:gA"]', 'kept this review') && has('#toast', 'kept: astronaut'));
+  $('[data-tt-rv="goal:gA"] [data-tt="let-go"]').click(); await until(() => t.goals.find((g) => g.id === 'gA').status === 'dropped');
+  await wait(100);
+  check('Let it go: dropped, not deleted, with Undo', !rrow('goal:gA') && t.goals.some((g) => g.id === 'gA') && has('#toast', 'let go', 'dropped, not deleted', 'undo'));
+  toastBtn(/undo/i).click(); await until(() => t.goals.find((g) => g.id === 'gA').status === 'active'); await wait(100);
+  check('Undo brings it back', !!rrow('goal:gA'));
+  const sel = $('[data-tt-period]'); sel.value = 'quarter'; sel.dispatchEvent(new Event('change', { bubbles: true })); await wait(150);
+  check('the period can be changed: the last 3 months', has('.view-sub', 'since') && !!rrow('project:r1') && $('[data-tt-period]').value === 'quarter' && !$$('[data-tt-period] option').some((o) => o.value === 'last'));
+  $('[data-tt="review-done"]').click(); await until(() => !!(t.user_settings[0] || {}).tree_reviewed_at);
+  await wait(150);
+  check('Review done: dated, and the next review starts from there', has('#toast', 'reviewed') && has('.view-sub', 'last reviewed') && $$('[data-tt-period] option').some((o) => o.value === 'last') && has(undefined, 'nothing on the tree was achieved in this time'));
+
+  // A tree too big to draw at once opens on its branches; many proposals are grouped.
+  for (let b = 0; b < 6; b++) for (let i = 0; i < 9; i++) { P(`big${b}_${i}`, `Branch ${b} step ${i}`); if (i) L(['project', `big${b}_${i}`], ['project', `big${b}_${i - 1}`]); }
+  for (let i = 0; i < 9; i++) { P(`pp${i}`, `Proposed ${i}`); L(['project', `pp${i}`], ['project', `big0_${i % 9}`], { state: 'proposed', proposed_by: 'agent', why: 'Because.' }); }
+  await loadAll();
+  await nav('#horizons/tree');
+  check('a big tree opens on its branches, not on one drawing', !$('[data-tt-canvas]') && has(undefined, 'branches ·', 'open a branch to see it drawn') && $$('.tt-branch').length >= 6 && has('.tt-branch', 'items', 'open', 'next:'));
+  check('many proposals are grouped by branch, each accepted as one', $$('.tt-prop-group').length >= 1 && !!$('[data-tt="accept-group"]') && has('.tt-prop-group summary', 'proposed link'));
+  const br = $$('.tt-branch').find((a) => /Branch 3/.test(a.innerText)); br.click(); await until(() => !!$('[data-tt-canvas]'));
+  check('a branch opens drawn, only its own items', $$('.tt-canvas .tt-node').length === 9 && $$('.tt-canvas .tt-node').every((x) => /Branch 3/.test(x.innerText)) && $$('.tt-lines > path').length === 8 && has('.back', 'the whole tree'));
+  const t0 = performance.now(); (await import('/js/router.js')).render(); const ms1 = performance.now() - t0;
+  check('drawing a branch of a big tree is quick', ms1 < 150, `${Math.round(ms1)} ms`);
+  await nav('#horizons/tree');
+  $('[data-tt="accept-group"]').click();
+  await until(() => t.tree_links.filter((l) => !l.archived_at && l.state === 'proposed').length === 0, 5000);
+  check('Accept this branch: all of its links at once', t.tree_links.filter((l) => String(l.node_id).startsWith('pp') && l.state === 'accepted' && !l.archived_at).length === 9 && !$('.tt-props'));
+  app.ttActivity = null; app.ttPeriod = null; app.ttShowAll = null;
+}
 
 // Dailies: a checkbox that starts fresh each day, in two tiers (js/dailies.js, migration 20261101000001).
 async function dailies(check) {

@@ -4,6 +4,7 @@
 // decide, s skips, u undoes. Every decision can be undone; nothing is deleted.
 import { describeDaily, isDaily, summary as dailySummary, dailyPreview } from '../dailies.js';
 import { describe } from '../repeat.js';
+import { treeChangeHtml, treeWithout } from './tree.js';
 import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen, openSheet, $ } from '../state.js';
 import { loadAll, refreshTasks } from '../data.js';
 import { fmtDate } from '../dates.js';
@@ -219,6 +220,7 @@ function restoredText(it, t) {
       const now = tagsFor(t.id).map((g) => g.id).sort().join(); if ((e.tags || []).slice().sort().join() !== now) out.push('its tags');
     }
     if (e.t === 'daily') out.push(e.daily ? 'its daily setting' : e.repeat_rule ? 'its repeat, not daily' : 'not daily');
+    if (e.t === 'tree') { const k = (e.goals || []).length + (e.tasks || []).length; out.push(`the tech tree (${k ? `${k} new item${k === 1 ? '' : 's'} taken back` : 'its new links taken back'})`); }
     if (e.t === 'steps') out.push(`the ${n((e.ids || []).length)} added step${(e.ids || []).length === 1 ? '' : 's'} dropped`);
     if (e.t === 'checklist') out.push(e.prev ? 'its earlier checklist' : 'no checklist');
     if (e.t === 'task' && (it.decision === 'done' || it.decision === 'drop')) out.push('open again');
@@ -233,10 +235,10 @@ async function undoCard(id) {
   const [row] = await run(sb.from('review_items').select('*').eq('id', id));
   if (!row || !isDecided(row)) { if (row && f.byId.get(id)) Object.assign(f.byId.get(id), row); f.peek = null; app.render(); toast('That card is already undecided'); return; }
   if (f.byId.get(id)) Object.assign(f.byId.get(id), row);
-  const heavy = row.kind === 'group' || (row.before || []).some((e) => e.t === 'expanded' || (e.t === 'someday_tag' && (e.ids || []).length > 1));
-  if (!heavy) await refreshCard(row); // how it is now, to say what comes back
+  const heavy = row.kind === 'group' || (row.before || []).some((e) => e.t === 'tree' || e.t === 'expanded' || (e.t === 'someday_tag' && (e.ids || []).length > 1));
+  if (row.kind === 'task') await refreshCard(row); // how it is now, to say what comes back
   const title = cardTitle(row);
-  const back = heavy ? [] : restoredText(row, byId(db.tasks, row.task_id));
+  const back = row.kind === 'task' ? restoredText(row, byId(db.tasks, row.task_id)) : [];
   const label = DECISION_LABEL[row.decision] || row.decision || 'decided';
   await run(sb.rpc('review_undo', { item: id }));
   f.peek = null;
@@ -328,6 +330,7 @@ function suggestionBar(it, t) {
       row('🪜', `Break it down: ${n} step${n === 1 ? '' : 's'}${s.steps_in_order ? ', in order' : ''}${n > s.steps.length ? ' <span class="hint">(nested)</span>' : ''}${stepsOf(t).length ? ` <span class="hint">(after the ${stepsOf(t).length} it has)</span>` : ''}${stepsHtml(s.steps)}`);
     }
     if (s.daily && s.decision === 'keep') row('🔂', `Make it daily: <b>${esc(describeDaily(s.daily))}</b> <span class="hint">a checkbox that starts fresh each day</span>${t.repeat_rule || t.due_at || t.planned_at ? ` <span class="sg-old">${esc([t.repeat_rule && describe(t.repeat_rule), t.due_at && `due ${when(t.due_at)}`, t.planned_at && `planned ${when(t.planned_at)}`].filter(Boolean).join(' · '))}</span>` : ''}${dailyPreview(s.title || t.title, s.daily)}`);
+    if (s.tree && Array.isArray(s.tree.items) && s.tree.items.length && ['keep', 'someday'].includes(s.decision)) row('🌳', treeChangeHtml(s.tree));
     if (s.checklist && ['keep', 'someday'].includes(s.decision)) {
       const ck = s.checklist;
       const list = Array.isArray(ck.items) ? ck.items : [];
@@ -501,6 +504,17 @@ export async function fullReviewAction(el) {
     const ta = sheet.querySelector('textarea'); ta.focus(); ta.select();
     return;
   }
+  if (a === 'tree-drop') { // leave one new item out of what the suggestion adds to the tech tree
+    const cur = s && f.byId.get(s.current_item);
+    const sug = cur && pending(cur);
+    if (!sug || !sug.tree) return;
+    const tree = treeWithout(sug.tree, Number(el.dataset.i));
+    const next = { ...sug }; if (tree.items.length) next.tree = tree; else delete next.tree;
+    await run(sb.from('review_items').update({ suggestion: next }).eq('id', cur.id));
+    cur.suggestion = next;
+    app.render();
+    return;
+  }
   if (a === 'capture') { captureIntoReview(); return; }
   if (a === 'look-back' || a === 'look-forward') { await look(a === 'look-back' ? 'back' : 'forward'); return; }
   if (a === 'look-now') { f.peek = null; app.render(); return; }
@@ -567,7 +581,7 @@ async function act(a, el) {
     if (!sug) return;
     const r = await run(sb.rpc('review_apply', { item: cur.id }));
     const bulk = cur.kind === 'group' && sug.decision === 'accept';
-    const reload = bulk || !!(sug.add_tag_names && sug.add_tag_names.length) || !!sug.checklist; // new tags or a new checklist: load them
+    const reload = bulk || !!(sug.add_tag_names && sug.add_tag_names.length) || !!sug.checklist || !!sug.tree; // new tags, a new checklist, new goals and links: load them
     if (reload) await loadAll(); else if (cur.kind === 'task') await refreshCard(cur);
     if (sug.decision === 'one_by_one' || bulk) { await loadSession(s.id); return; }
     cur.status = sug.decision === 'skip' ? 'skipped' : 'reviewed'; cur.decision = sug.decision; cur.decided_by = 'user'; cur.reviewed_at = new Date().toISOString(); cur.suggestion = { ...sug, applied_at: new Date().toISOString() };

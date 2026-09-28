@@ -5,12 +5,18 @@
 // starts by itself: links found in the library, or proposed by Claude, wait dashed until you accept them.
 import { db, app, sb, run, esc, byId, toast, openSheet, syncRow, isOpen, taskSort, bySort, $ } from '../state.js';
 import { fmtDate } from '../dates.js';
-import { buildTree, keyOf, opensWith, wouldLoop, cardTrouble, proposeFromLibrary, live } from '../tree-rules.js';
+import { buildTree, keyOf, opensWith, wouldLoop, cardTrouble, proposeFromLibrary, treeReview, live } from '../tree-rules.js';
+import { saveSettings } from '../prefs.js';
 
 // The cards the tree needs: the ones a link names (loaded apart when they were finished a while ago).
-const cardById = (id) => byId(db.tasks, id) || byId(db.treeTasks || [], id);
+// Both are looked up once per screen draw, not once per link: with thousands of cards a scan for each link,
+// and a fresh tree for each part of the page, added up. Dropped after the current pass (microtask).
+let PASS = null;
+const pass = () => { if (!PASS) { PASS = { cards: null, tree: null }; queueMicrotask(() => { PASS = null; }); } return PASS; };
+const cardById = (id) => { const c = pass(); if (!c.cards) c.cards = new Map([...(db.treeTasks || []), ...db.tasks].map((t) => [t.id, t])); return c.cards.get(id) || null; };
 const linkedCards = () => [...new Set((db.treeLinks || []).filter((l) => live(l) && l.requires_kind === 'task').map((l) => l.requires_id))].map(cardById).filter(Boolean);
-export const treeOf = () => buildTree({ goals: db.goals || [], projects: db.projects || [], tasks: linkedCards(), links: db.treeLinks || [] });
+export const treeOf = () => { const c = pass(); if (!c.tree) c.tree = buildTree({ goals: db.goals || [], projects: db.projects || [], tasks: linkedCards(), links: db.treeLinks || [] }); return c.tree; };
+const fresh = () => { PASS = null; }; // after a write, within the same pass
 const n = (x) => Number(x || 0).toLocaleString();
 const plural = (k, one, many = `${one}s`) => `${n(k)} ${k === 1 ? one : many}`;
 const stepBack = (k) => `${plural(k, 'action')} ${k === 1 ? 'steps' : 'step'} back`;
@@ -19,12 +25,15 @@ const hrefOf = (node) => (node.kind === 'goal' ? `#goal/${node.id}` : node.kind 
 const TYPE = { goal: 'Goal', milestone: 'Milestone', destination: 'Destination', project: 'Project', card: 'Card' };
 const short = (t, max = 34) => { const s = String(t || '').replace(/\s+/g, ' ').trim(); return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s; };
 
+// Anything that changes data redraws the screen; the tree worked out before the change is then stale.
+const draw = () => { fresh(); app.render(); };
+
 // The ladder's line for this level.
 export function treeSummary() {
   const t = treeOf();
   if (!t.shown.length) return { title: 'Tech tree', sub: 'What unlocks what: do certain things to open future things.', chips: '' };
   const c = t.counts;
-  return { title: `Tech tree · ${n(c.open)} open`, sub: `${n(c.achieved)} achieved · ${n(c.locked)} locked`,
+  return { title: `Tech tree · ${n(c.open)} open`, sub: `${n(c.achieved)} achieved · ${n(c.locked)} locked${c.unmapped ? ` · ${n(c.unmapped)} with no path yet` : ''}`,
     chips: `${t.proposals.length ? `<span class="chip warn">${plural(t.proposals.length, 'proposed link')}</span>` : ''}${c.ready ? `<span class="chip acc">${n(c.ready)} unlocked</span>` : ''}` };
 }
 
@@ -36,25 +45,32 @@ function stateLine(node) {
   }
   if (node.state === 'ready') return 'unlocked · on hold';
   if (node.state === 'held') return 'on hold';
+  if (node.state === 'unmapped') return 'no path yet';
   if (node.type === 'card') return node.in ? `in ${esc(short(node.in, 26))}` : 'a card to do';
   return node.type === 'milestone' ? 'tick it when it’s true' : 'open now';
 }
-function nodeHtml(node) {
+function nodeHtml(node, place = null) {
   const btn = node.state === 'ready' ? `<button class="btn small primary" data-tt="start" data-key="${node.key}">Start it</button>`
     : node.state === 'locked' && node.kind === 'project' && !node.held ? `<button class="btn small" data-tt="hold" data-key="${node.key}" title="Put it on hold until it’s unlocked: ${stepBack(openActions(node.id))}">Hold</button>`
-      : node.state === 'open' && node.type === 'milestone' ? `<button class="btn small" data-tt="achieve" data-key="${node.key}">✓ It’s true</button>` : '';
-  return `<div class="tt-node tt-${node.state} tt-type-${node.type}" ${node.col ? `style="grid-column:${node.col};grid-row:${node.row}"` : ''} data-tt-node="${node.key}" data-tt="open" data-key="${node.key}" tabindex="0" role="button" aria-label="${esc(node.title)}: ${esc(TYPE[node.type])}, ${esc(node.state)}">
+      : node.state === 'unmapped' ? `<button class="btn small" data-tt="map" data-key="${node.key}" title="Say what it requires: the first steps of its path">Map it</button>`
+        : node.state === 'open' && node.type === 'milestone' ? `<button class="btn small" data-tt="achieve" data-key="${node.key}">✓ It’s true</button>` : '';
+  return `<div class="tt-node tt-${node.state} tt-type-${node.type}" ${place ? `style="grid-column:${place.col};grid-row:${place.row}"` : ''} data-tt-node="${node.key}" data-tt="open" data-key="${node.key}" tabindex="0" role="button" aria-label="${esc(node.title)}: ${esc(TYPE[node.type])}, ${esc(node.state)}">
     <span class="tt-kind">${esc(TYPE[node.type])}</span><b class="tt-title">${esc(node.title)}</b>
     <span class="tt-sub">${stateLine(node)}</span>${btn}</div>`;
 }
 
+// Past this many items the whole tree is not drawn at once: it opens on its branches, one to a card.
+const BIG = 40;
+const PROPS_FLAT = 6;
 export function viewTree(focus) {
+  if (focus === 'review') return viewTreeReview();
   const tree = treeOf();
-  const dest = focus && tree.nodes.get(keyOf('goal', focus));
-  const showing = dest ? tree.path(dest).nodes : tree.shown;
+  // A focus is a destination (its path) or any item ("kind:id": the branch it sits in).
+  const at = focus && (tree.nodes.get(focus.includes(':') ? focus : keyOf('goal', focus)) || null);
+  const dest = at && at.type === 'destination' && !focus.includes(':') ? at : null;
+  const keys = new Set((dest ? tree.path(dest).nodes : at ? tree.branchOf(at.key) : tree.shown).map((x) => x.key));
   // A branch also shows what is proposed to hang on it, so there is something to accept or dismiss.
-  const keys = new Set(showing.map((x) => x.key));
-  if (dest) tree.shown.forEach((x) => { if (x.proposed.some((p) => p.key && keys.has(p.key))) keys.add(x.key); });
+  if (at) tree.shown.forEach((x) => { if (x.proposed.some((p) => p.key && keys.has(p.key))) keys.add(x.key); });
   const nodes = tree.shown.filter((x) => keys.has(x.key));
   const c = tree.counts;
   const ready = tree.shown.filter((x) => x.state === 'ready');
@@ -64,28 +80,162 @@ export function viewTree(focus) {
   const destCard = (d) => {
     const p = tree.path(d);
     const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
-    return `<a class="tt-dest ${dest && dest.key === d.key ? 'on' : ''}" href="#horizons/tree/${d.id}"><b>${esc(d.title)}</b>
+    const next = p.next.filter((x) => x.key !== d.key);
+    return `<a class="tt-dest ${dest && dest.key === d.key ? 'on' : ''} ${d.state === 'unmapped' ? 'tt-dest-unmapped' : ''}" href="#horizons/tree/${d.id}"><b>${esc(d.title)}</b>
       <span class="hz-bar big"><i style="width:${pct}%"></i></span>
-      <span class="hint">${p.total > 1 ? `${n(p.done)} of ${n(p.total)}` : 'no path yet'}${p.next.filter((x) => x.key !== d.key).length ? ` · next: ${esc(p.next.filter((x) => x.key !== d.key).slice(0, 2).map((x) => short(x.title, 28)).join(', '))}` : p.total > 1 ? '' : ' · add what it requires'}</span></a>`;
+      <span class="hint">${d.state === 'unmapped' ? 'no path yet · map it' : `${n(p.done)} of ${n(p.total)}${next.length ? ` · next: ${esc(next.slice(0, 2).map((x) => short(x.title, 28)).join(', '))}` : ''}`}</span></a>`;
+  };
+  const prop = (l) => `<div class="tt-prop" data-tt-prop="${l.id}"><span class="tt-prop-main"><span><b>${esc(nameOf(l))}</b> requires <b>${esc(reqOf(l))}</b>${l.requires_id ? '' : ' <span class="chip">new milestone</span>'}${l.proposed_by === 'agent' ? ' <span class="chip sug">Claude</span>' : ''}</span>${l.why ? `<span class="hint">${esc(l.why)}</span>` : ''}</span>
+        <span class="tt-prop-btns"><button class="btn small primary" data-tt="accept" data-id="${l.id}">Accept</button><button class="btn small" data-tt="dismiss" data-id="${l.id}">Dismiss</button></span></div>`;
+  // A few proposals are a list; many are grouped by the branch they would join, each accepted as one.
+  const propsHtml = () => {
+    if (proposals.length <= PROPS_FLAT) return proposals.map(prop).join('');
+    const groups = new Map();
+    proposals.forEach((l) => { const x = tree.nodes.get(keyOf(l.node_kind, l.node_id)); const k = x && x.branch !== undefined ? x.branch : `n:${l.node_id}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(l); });
+    return [...groups.values()].sort((a, b) => b.length - a.length).map((list) => {
+      const names = [...new Set(list.map(nameOf))];
+      return `<details class="tt-prop-group"><summary><span class="tt-prop-main"><b>${esc(short(names[0], 40))}${names.length > 1 ? ` and ${n(names.length - 1)} more` : ''}</b><span class="hint">${plural(list.length, 'proposed link')}</span></span>
+        <button class="btn small primary" data-tt="accept-group" data-ids="${list.map((l) => l.id).join(',')}">Accept this branch</button></summary>${list.map(prop).join('')}</details>`;
+    }).join('');
   };
   const placed = nodes.filter((x) => x.col).sort((a, b) => a.row - b.row || a.col - b.col);
   const rows = [...new Set(placed.map((x) => x.row))].sort((a, b) => a - b); // a branch on its own starts at the top
-  placed.forEach((x) => { x.row = rows.indexOf(x.row) + 1; });
+  const rowOf = new Map(rows.map((r, i) => [r, i + 1]));
+  const cols = [...new Set(placed.map((x) => x.col))].sort((a, b) => a - b);
+  const colOf = new Map(cols.map((r, i) => [r, i + 1]));
   const loose = nodes.filter((x) => !x.col);
-  const width = Math.max(0, ...placed.map((x) => x.col));
-  return `<a class="back" href="${dest ? '#horizons/tree' : '#horizons'}">‹ ${dest ? 'The whole tree' : 'Horizons'}</a>
-    <div class="view-head"><h1 class="horizons">${dest ? esc(dest.title) : 'Tech tree'}</h1><span class="head-actions"><button class="btn small" data-tt="find" title="Look for links already written in your library: “(phase 2)” in a project’s name, “Start when…” in an action or a project’s notes">Find links in my library</button><button class="btn small primary" data-tt="link">+ Link</button></span></div>
-    <p class="view-sub">${dest ? 'What this destination rests on.' : 'Do certain things to unlock future things. A link says what a goal or project requires; a locked project belongs on hold until what it needs is done.'}</p>
-    ${tree.shown.length ? `<p class="hint tt-counts">${n(c.achieved)} achieved · ${n(c.open)} open now · ${n(c.locked)} locked</p>` : ''}
+  const big = !at && placed.length > BIG;
+  const branchCard = (g) => {
+    const ends = g.filter((x) => !x.unlocks.some((k) => keys.has(k))).sort((a, b) => b.depth - a.depth);
+    const open = g.filter((x) => x.state === 'open' || x.state === 'ready');
+    const done = g.filter((x) => x.done).length;
+    const first = ends[0] || g[0];
+    return `<a class="tt-dest tt-branch" href="#horizons/tree/${first.key}"><b>${esc(short(first.title, 48))}</b>
+      <span class="hz-bar big"><i style="width:${Math.round((done / g.length) * 100)}%"></i></span>
+      <span class="hint">${plural(g.length, 'item')} · ${n(done)} done · ${n(open.length)} open${open.length ? ` · next: ${esc(short(open.sort((a, b) => a.depth - b.depth)[0].title, 28))}` : ''}</span></a>`;
+  };
+  const canvas = placed.length ? `<div class="tt-scroll"><div class="tt-canvas" data-tt-canvas data-tt-keys="${at ? esc([...keys].join(' ')) : ''}" style="--tt-cols:${cols.length}"><svg class="tt-lines" aria-hidden="true"></svg>${placed.map((x) => nodeHtml(x, { col: colOf.get(x.col), row: rowOf.get(x.row) })).join('')}</div></div>` : '';
+  return `<a class="back" href="${at ? '#horizons/tree' : '#horizons'}">‹ ${at ? 'The whole tree' : 'Horizons'}</a>
+    <div class="view-head"><h1 class="horizons">${dest ? esc(dest.title) : at ? 'A branch' : 'Tech tree'}</h1><span class="head-actions"><a class="btn small" href="#horizons/tree/review" title="What did I unlock, what is open and am I working on it, and is every destination still one I want?">Review</a><button class="btn small" data-tt="find" title="Look for links already written in your library: “(phase 2)” in a project’s name, “Start when…” in an action or a project’s notes">Find links in my library</button><button class="btn small primary" data-tt="link">+ Link</button></span></div>
+    <p class="view-sub">${dest ? 'What this destination rests on.' : at ? 'Everything joined to it, one way or the other.' : 'Do certain things to unlock future things. A link says what a goal or project requires; a locked project belongs on hold until what it needs is done.'}</p>
+    ${tree.shown.length ? `<p class="hint tt-counts">${n(c.achieved)} achieved · ${n(c.open)} open now · ${n(c.locked)} locked${c.unmapped ? ` · ${n(c.unmapped)} with no path yet` : ''}</p>` : ''}
     ${proposals.length ? `<div class="tt-props" role="region" aria-label="Proposed links"><div class="tt-props-h"><b>${plural(proposals.length, 'proposed link')}</b><span class="hint">Nothing changes until you accept.</span><button class="btn small" data-tt="accept-all">Accept all</button></div>
-      ${proposals.map((l) => `<div class="tt-prop" data-tt-prop="${l.id}"><span class="tt-prop-main"><span><b>${esc(nameOf(l))}</b> requires <b>${esc(reqOf(l))}</b>${l.requires_id ? '' : ' <span class="chip">new milestone</span>'}${l.proposed_by === 'agent' ? ' <span class="chip sug">Claude</span>' : ''}</span>${l.why ? `<span class="hint">${esc(l.why)}</span>` : ''}</span>
-        <span class="tt-prop-btns"><button class="btn small primary" data-tt="accept" data-id="${l.id}">Accept</button><button class="btn small" data-tt="dismiss" data-id="${l.id}">Dismiss</button></span></div>`).join('')}</div>` : ''}
-    ${ready.length ? `<div class="tt-ready" role="status">${ready.map((x) => `<span><b>Unlocked:</b> ${esc(x.title)} <button class="btn small primary" data-tt="start" data-key="${x.key}">Start it</button></span>`).join('')}</div>` : ''}
-    ${!dest && tree.destinations.length ? `<h2 class="section-title">Destinations · ${tree.destinations.length}</h2><div class="tt-dests">${tree.destinations.map(destCard).join('')}</div>` : ''}
-    ${nodes.length ? `${!dest && tree.destinations.length ? '<h2 class="section-title">The tree</h2>' : ''}${placed.length ? `<div class="tt-scroll"><div class="tt-canvas" data-tt-canvas style="--tt-cols:${width}"><svg class="tt-lines" aria-hidden="true"></svg>${placed.map(nodeHtml).join('')}</div></div>` : ''}
-      ${loose.length ? `<h2 class="section-title">Not linked yet · ${loose.length}</h2><div class="tt-loose">${loose.map(nodeHtml).join('')}</div>` : ''}
+      ${propsHtml()}</div>` : ''}
+    ${ready.length ? `<div class="tt-ready" role="status">${ready.slice(0, 5).map((x) => `<span><b>Unlocked:</b> ${esc(x.title)} <button class="btn small primary" data-tt="start" data-key="${x.key}">Start it</button></span>`).join('')}${ready.length > 5 ? `<span class="hint">and ${n(ready.length - 5)} more, in the review</span>` : ''}</div>` : ''}
+    ${!at && tree.destinations.length ? `<h2 class="section-title">Destinations · ${tree.destinations.length}</h2><div class="tt-dests">${tree.destinations.map(destCard).join('')}</div>` : ''}
+    ${nodes.length ? `${big ? `<h2 class="section-title">Branches · ${tree.branches.length} <span class="hint">${n(placed.length)} items: open a branch to see it drawn</span></h2><div class="tt-dests">${tree.branches.slice().sort((a, b) => b.length - a.length).map(branchCard).join('')}</div>`
+      : `${!at && tree.destinations.length && placed.length ? '<h2 class="section-title">The tree</h2>' : ''}${canvas}`}
+      ${loose.length ? `<h2 class="section-title">Not linked yet · ${loose.length}</h2><div class="tt-loose">${loose.map((x) => nodeHtml(x)).join('')}</div>` : ''}
       <p class="hint tt-legend"><i class="tt-dot tt-achieved"></i>Achieved <i class="tt-dot tt-open"></i>Open now <i class="tt-dot tt-locked"></i>Locked <span class="tt-dash"></span>Proposed, not accepted</p>`
     : `<p class="empty">Nothing on the tree yet. Add a link (“this requires that”), mark a goal as a destination, or let the app look for links already written in your library.</p>`}`;
+}
+
+// ---------- what a suggestion would add to the tree (Full Review's "Suggested by Claude" box) ----------
+// tree = { items: [{ kind, title, project_name?, exists? }], links: [{ node: i, requires: j }] }. New items are
+// dashed, what is already there is solid; a few show at once and the rest fold away, so a big suggestion
+// doesn't bury Submit. Each new item can be taken out before you submit.
+const KIND = { goal: 'Goal', milestone: 'Milestone', destination: 'Destination', card: 'Card', project: 'Project', task: 'Card' };
+const PREVIEW = 6;
+export function treeChangeHtml(tree) {
+  const items = Array.isArray(tree && tree.items) ? tree.items : [];
+  const links = Array.isArray(tree && tree.links) ? tree.links : [];
+  if (!items.length) return '';
+  const fresh1 = items.filter((x) => !x.exists);
+  const tally = (kind, one, many) => { const k = fresh1.filter((x) => x.kind === kind).length; return k ? plural(k, one, many) : ''; };
+  const adds = [tally('destination', 'destination'), tally('milestone', 'milestone'), tally('goal', 'goal'), tally('card', 'card')].filter(Boolean);
+  const says = `${adds.length ? `adds ${adds.join(', ').replace(/, ([^,]*)$/, ' and $1')}` : 'adds nothing new'}${links.length ? `${adds.length ? ', ' : ' · '}${plural(links.length, 'link')}` : ''}`;
+  const needs = (i) => links.filter((l) => l.node === i).map((l) => items[l.requires]).filter(Boolean);
+  const box = (x, i) => {
+    const req = needs(i);
+    const unmapped = x.kind === 'destination' && !x.exists && !req.length;
+    return `<div class="sg-tt ${x.exists ? 'there' : 'new'} sg-tt-${esc(x.kind)}" data-sg-tt="${i}"><span class="tt-kind">${esc(KIND[x.kind] || 'Item')}${x.exists ? ' · already there' : ' · new'}</span><b>${esc(x.title)}</b>
+      <span class="tt-sub">${req.length ? `requires ${esc(req.map((r) => short(r.title, 30)).join(', '))}` : unmapped ? 'no path yet: map it when you know the first step' : x.kind === 'card' ? `in ${esc(x.project_name || 'the Inbox')}` : 'requires nothing'}${req.length && x.kind === 'card' ? ` · in ${esc(x.project_name || 'the Inbox')}` : ''}</span>
+      ${x.exists ? '' : `<button type="button" class="link-btn sg-tt-x" data-fr="tree-drop" data-i="${i}" aria-label="Leave out ${esc(x.title)}">Leave out</button>`}</div>`;
+  };
+  // New things first, then what they build on.
+  const order = items.map((x, i) => i).sort((a, b) => (items[a].exists ? 1 : 0) - (items[b].exists ? 1 : 0) || a - b);
+  const head = order.slice(0, PREVIEW); const rest = order.slice(PREVIEW);
+  return `Tech tree: ${esc(says)} <span class="hint">→ Horizons → Tech tree</span>
+    <div class="sg-tts">${head.map((i) => box(items[i], i)).join('')}</div>
+    ${rest.length ? `<details class="sg-tt-more"><summary>+ ${n(rest.length)} more</summary><div class="sg-tts">${rest.map((i) => box(items[i], i)).join('')}</div></details>` : ''}
+    <span class="hint">Nothing is added until you submit. Undo takes back what was new.</span>`;
+}
+// The same tree without item i: the links that touched it go, the rest keep pointing at the right places.
+export function treeWithout(tree, i) {
+  const items = tree.items.filter((_, j) => j !== i);
+  const links = (tree.links || []).filter((l) => l.node !== i && l.requires !== i).map((l) => ({ node: l.node > i ? l.node - 1 : l.node, requires: l.requires > i ? l.requires - 1 : l.requires }));
+  // What was only there to be built on, and no longer is, goes too.
+  const used = new Set(links.flatMap((l) => [l.node, l.requires]));
+  const keep = items.map((x, j) => !x.exists || used.has(j));
+  const map = new Map(); let k = 0; keep.forEach((ok, j) => { if (ok) map.set(j, k++); });
+  return { items: items.filter((_, j) => keep[j]), links: links.map((l) => ({ node: map.get(l.node), requires: map.get(l.requires) })) };
+}
+
+// ---------- the review: three questions, answered from the tree ----------
+// What did I unlock? What is open now, and am I working on it? Is every destination still one I want?
+// "Working on it" is what was finished lately, which the app doesn't hold (only the last day of finished
+// cards is loaded): one read from the database (tree_activity), kept for ten minutes.
+const LATELY = 60;
+const PERIODS = [['last', 'Since my last review'], ['quarter', 'The last 3 months'], ['year', 'The last year']];
+const SHOW = 8;
+const WORK = { moving: ['moving', 'g'], stalled: ['stalled', 'warn'], todo: ['not started', 'warn'], empty: ['nothing to do yet', ''], tick: ['to tick', ''], start: ['unlocked', 'acc'] };
+function sinceOf() {
+  const s = app.settings || {};
+  const mode = app.ttPeriod || (s.tree_reviewed_at ? 'last' : 'year');
+  const days = mode === 'quarter' ? 92 : 365;
+  return { mode, since: mode === 'last' && s.tree_reviewed_at ? s.tree_reviewed_at : new Date(Date.now() - days * 86400000).toISOString() };
+}
+async function loadActivity() {
+  const a = app.ttActivity;
+  if (a && (a.loading || Date.now() - a.at < 600000)) return;
+  app.ttActivity = { loading: true, rows: a ? a.rows : null, at: 0 };
+  try {
+    const rows = await run(sb.rpc('tree_activity', { since: new Date(Date.now() - LATELY * 86400000).toISOString() }));
+    app.ttActivity = { rows: rows || [], at: Date.now() };
+  } catch { app.ttActivity = { rows: [], at: Date.now(), failed: true }; }
+  if (location.hash.startsWith('#horizons/tree/review')) draw();
+}
+function viewTreeReview() {
+  const tree = treeOf();
+  const { mode, since } = sinceOf();
+  loadActivity();
+  const act = app.ttActivity || {};
+  const openCounts = {};
+  db.tasks.forEach((t) => { if (t.project_id && isOpen(t)) openCounts[t.project_id] = (openCounts[t.project_id] || 0) + 1; });
+  const rv = treeReview(tree, { since, activity: act.rows || [], openCounts, projects: db.projects });
+  const all = app.ttShowAll || new Set();
+  const more = (key, list, row) => `${(all.has(key) ? list : list.slice(0, SHOW)).map(row).join('')}${list.length > SHOW && !all.has(key) ? `<button class="link-btn tt-more" data-tt="show-all" data-key="${esc(key)}">Show all ${n(list.length)}</button>` : ''}`;
+  const day = (iso) => esc(fmtDate(iso));
+  const s = app.settings || {};
+  const unlockedRow = (u) => `<div class="tt-rv-row" data-tt-rv="${u.node.key}"><span class="tt-rv-ic tt-ok" aria-hidden="true">✓</span><span class="tt-rv-main"><a href="${hrefOf(u.node)}">${esc(u.node.title)}</a><span class="hint">${u.node.kind === 'goal' ? 'achieved' : 'done'} ${day(u.at)}${u.opened.length ? ` · opened ${esc(u.opened.slice(0, 3).map((x) => short(x, 30)).join(', '))}${u.opened.length > 3 ? ` +${u.opened.length - 3}` : ''}` : ''}</span></span>${u.opened.length ? `<span class="chip g">unlocked ${n(u.opened.length)}</span>` : ''}</div>`;
+  const openRow = (o) => {
+    const [label, cls] = WORK[o.work];
+    const waiting = !act.rows && (o.node.kind === 'project' || o.node.type === 'goal');
+    const btn = o.work === 'start' ? `<button class="btn small primary" data-tt="start" data-key="${o.node.key}">Start it</button>`
+      : o.work === 'stalled' && o.node.kind === 'project' ? `<button class="btn small" data-tt="hold" data-key="${o.node.key}" title="Put it on hold: ${stepBack(openActions(o.node.id))}">Hold</button>`
+        : o.work === 'todo' ? `<button class="btn small" data-tt="plan" data-key="${o.node.key}" title="Plan it for today">Plan it</button>`
+          : o.work === 'tick' ? `<button class="btn small" data-tt="achieve" data-key="${o.node.key}">✓ It’s true</button>` : '';
+    return `<div class="tt-rv-row" data-tt-rv="${o.node.key}"><span class="tt-rv-main"><a href="${hrefOf(o.node)}">${esc(o.node.title)}</a><span class="hint">${waiting ? 'checking what was done lately…' : esc(o.detail)}</span></span>${waiting ? '' : `<span class="chip ${cls}">${label}</span>`}${btn}</div>`;
+  };
+  // Open items by the destination they lead to; the ones that need you come first in each.
+  const groups = new Map();
+  rv.open.forEach((o) => { const k = o.under || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(o); });
+  const needs = (list) => list.filter((o) => ['start', 'stalled', 'todo'].includes(o.work)).length;
+  const openHtml = [...groups.entries()].sort((a, b) => needs(b[1]) - needs(a[1]) || (a[0] ? 0 : 1) - (b[0] ? 0 : 1)).map(([k, list]) =>
+    `${groups.size > 1 || k ? `<h3 class="tt-rv-h">${k ? `Towards ${esc(k)}` : 'Not leading to a destination'} <span class="hint">${n(list.length)}${needs(list) ? ` · ${n(needs(list))} need${needs(list) === 1 ? 's' : ''} you` : ''}</span></h3>` : ''}${more(`open:${k}`, list, openRow)}`).join('');
+  const destRow = (d) => `<div class="tt-rv-row" data-tt-rv="${d.node.key}"><span class="tt-rv-main"><a href="#horizons/tree/${d.node.id}">${esc(d.node.title)}</a><span class="hint">${d.node.state === 'unmapped' ? 'no path yet' : `${n(d.done)} of ${n(d.total)}${d.next.length ? ` · next: ${esc(d.next.slice(0, 2).map((x) => short(x, 28)).join(', '))}` : ''}`}${d.node.raw.last_reviewed_at && d.node.raw.last_reviewed_at >= since ? ' · kept this review' : ''}</span></span>
+    ${d.node.state === 'unmapped' ? `<button class="btn small" data-tt="map" data-key="${d.node.key}">Map it</button>` : ''}<button class="btn small ${d.node.raw.last_reviewed_at && d.node.raw.last_reviewed_at >= since ? '' : 'primary'}" data-tt="want" data-key="${d.node.key}">Still want it</button><button class="btn small" data-tt="let-go" data-key="${d.node.key}" title="Drop it (it can be reopened; nothing is deleted)">Let it go</button></div>`;
+  return `<a class="back" href="#horizons/tree">‹ Tech tree</a>
+    <div class="view-head"><h1 class="horizons">Tech tree review</h1><select class="tt-period" data-tt-period aria-label="Look back over">${PERIODS.filter(([k]) => k !== 'last' || s.tree_reviewed_at).map(([k, l]) => `<option value="${k}" ${k === mode ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <p class="view-sub">Since ${day(since)}${s.tree_reviewed_at ? ` · last reviewed ${day(s.tree_reviewed_at)}` : ' · not reviewed yet'}. “Lately” is the last ${LATELY} days.</p>
+    ${act.failed ? '<p class="persp-warning">Couldn’t read what was finished lately, so “moving” and “stalled” may be wrong. Reload to try again.</p>' : ''}
+    <h2 class="section-title">1 · What did I unlock? <span class="hint">${n(rv.unlocked.length)}</span></h2>
+    ${rv.unlocked.length ? more('unlocked', rv.unlocked, unlockedRow) : '<p class="hint">Nothing on the tree was achieved in this time.</p>'}
+    <h2 class="section-title">2 · What is open now, and am I working on it? <span class="hint">${n(rv.open.length)}</span></h2>
+    ${rv.open.length ? openHtml : '<p class="hint">Nothing is open. Everything left is locked, or has no path yet.</p>'}
+    <h2 class="section-title">3 · Is every destination still one I want? <span class="hint">${n(rv.destinations.length)}</span></h2>
+    ${rv.destinations.length ? more('dest', rv.destinations, destRow) : '<p class="hint">No destinations. Mark a goal as one (Goals → the goal → On the tech tree), or ask Claude.</p>'}
+    <div class="wk-finish"><button class="btn primary" data-tt="review-done">Review done</button></div>`;
 }
 
 // Lines from what is required to what requires it; dashed while only proposed. Drawn from where the nodes landed.
@@ -131,7 +281,7 @@ function offerHold(nodeKey) {
   const node = treeOf().nodes.get(nodeKey);
   if (!node || node.kind !== 'project' || node.state !== 'locked' || node.held) return false;
   const k = openActions(node.id);
-  toast(`“${short(node.title, 40)}” is locked now, and still active`, [{ label: `Put on hold${k ? ` (${stepBack(k)})` : ''}`, run: async () => { await setProject(node.id, 'on_hold'); app.render(); toast('On hold until it’s unlocked', [{ label: 'Undo', run: async () => { await setProject(node.id, 'active'); app.render(); } }]); } }]);
+  toast(`“${short(node.title, 40)}” is locked now, and still active`, [{ label: `Put on hold${k ? ` (${stepBack(k)})` : ''}`, run: async () => { await setProject(node.id, 'on_hold'); draw(); toast('On hold until it’s unlocked', [{ label: 'Undo', run: async () => { await setProject(node.id, 'active'); draw(); } }]); } }]);
   return true;
 }
 export async function addLink(nodeKey, reqKey, { quiet = false } = {}) {
@@ -141,14 +291,14 @@ export async function addLink(nodeKey, reqKey, { quiet = false } = {}) {
   if ((db.treeLinks || []).some((l) => live(l) && l.state === 'accepted' && l.node_kind === nk && l.node_id === ni && l.requires_id === ri)) { toast('That link is already there'); return null; }
   const [row] = await run(sb.from('tree_links').insert({ node_kind: nk, node_id: ni, requires_kind: rk, requires_id: ri }).select());
   (db.treeLinks = db.treeLinks || []).push(row);
-  app.render();
+  draw();
   if (!quiet && !offerHold(nodeKey)) toast('Linked', [{ label: 'Undo', run: () => removeLink(row.id) }]);
   return row;
 }
 export async function removeLink(id) {
   await run(sb.from('tree_links').update({ archived_at: new Date().toISOString() }).eq('id', id));
   db.treeLinks = (db.treeLinks || []).filter((l) => l.id !== id);
-  app.render();
+  draw();
 }
 async function accept(ids) {
   const before = treeOf();
@@ -159,7 +309,7 @@ async function accept(ids) {
     try { await run(sb.rpc('tree_accept', { link: id })); nodes.push(keyOf(l.node_kind, l.node_id)); } catch { /* said in a toast; the rest still go */ }
   }
   await reloadLinks();
-  app.render();
+  draw();
   const after = treeOf();
   const locked = [...new Set(nodes)].map((k) => after.nodes.get(k)).filter((x) => x && x.kind === 'project' && x.state === 'locked' && !x.held);
   if (locked.length === 1) { offerHold(locked[0].key); return; }
@@ -167,8 +317,8 @@ async function accept(ids) {
     const k = locked.reduce((s, x) => s + openActions(x.id), 0);
     toast(`${plural(nodes.length, 'link')} accepted · ${plural(locked.length, 'project')} locked and still active`, [{ label: `Put them on hold${k ? ` (${stepBack(k)})` : ''}`, run: async () => {
       for (const x of locked) await setProject(x.id, 'on_hold');
-      app.render();
-      toast(`${plural(locked.length, 'project')} on hold until unlocked`, [{ label: 'Undo', run: async () => { for (const x of locked) await setProject(x.id, 'active'); app.render(); } }]);
+      draw();
+      toast(`${plural(locked.length, 'project')} on hold until unlocked`, [{ label: 'Undo', run: async () => { for (const x of locked) await setProject(x.id, 'active'); draw(); } }]);
     } }]);
     return;
   }
@@ -181,7 +331,7 @@ async function findLinks() {
     requires_kind: f.requires.id ? f.requires.kind : null, requires_id: f.requires.id || null, requires_title: f.requires.id ? null : f.requires.title }));
   const made = await run(sb.from('tree_links').insert(rows).select());
   (db.treeLinks = db.treeLinks || []).push(...made);
-  app.render();
+  draw();
   toast(`${plural(made.length, 'link')} found · accept the ones that are right`);
 }
 async function achieve(key) {
@@ -192,11 +342,11 @@ async function achieve(key) {
   const g = byId(db.goals, node.id);
   const [row] = await run(sb.from('goals').update({ status: 'achieved' }).eq('id', node.id).select());
   syncRow('goals', g, row);
-  app.render();
+  draw();
   const held = opens.filter((x) => x.kind === 'project' && x.held);
   toast(opens.length ? `Unlocked: ${opens.map((x) => short(x.title, 30)).join(', ')}` : `Achieved: ${short(node.title, 40)}`, [
-    ...(held.length ? [{ label: held.length === 1 ? 'Start it' : `Start ${held.length}`, run: async () => { for (const x of held) await setProject(x.id, 'active'); app.render(); } }] : []),
-    { label: 'Undo', run: async () => { const [r2] = await run(sb.from('goals').update({ status: 'active' }).eq('id', node.id).select()); syncRow('goals', g, r2); app.render(); } }]);
+    ...(held.length ? [{ label: held.length === 1 ? 'Start it' : `Start ${held.length}`, run: async () => { for (const x of held) await setProject(x.id, 'active'); draw(); } }] : []),
+    { label: 'Undo', run: async () => { const [r2] = await run(sb.from('goals').update({ status: 'active' }).eq('id', node.id).select()); syncRow('goals', g, r2); draw(); } }]);
 }
 
 // ---------- linking: two browsers side by side ----------
@@ -370,7 +520,7 @@ export function openLinkSheet(nodeKey = '') {
 }
 // A card was finished somewhere in the app: what did it unlock? (data.js asks before and after.)
 export const unlockedBy = (taskId) => opensWith(treeOf(), keyOf('task', taskId));
-export async function startProjects(ids) { for (const id of ids) await setProject(id, 'active'); app.render(); }
+export async function startProjects(ids) { for (const id of ids) await setProject(id, 'active'); draw(); }
 
 function openNodeSheet(key) {
   const tree = treeOf();
@@ -391,7 +541,7 @@ function openNodeSheet(key) {
   $('[data-go]', form).onclick = () => sheet.close();
   if ($('[data-add]', form)) $('[data-add]', form).onclick = () => { sheet.close(); openLinkSheet(key); };
   form.querySelectorAll('[data-unlink]').forEach((b) => { b.onclick = async () => { sheet.close(); const id = b.dataset.unlink; const l = (db.treeLinks || []).find((x) => x.id === id); await removeLink(id); toast('Link removed', l ? [{ label: 'Undo', run: () => addLink(keyOf(l.node_kind, l.node_id), keyOf(l.requires_kind, l.requires_id), { quiet: true }) }] : []); }; });
-  if (form.elements.kind) form.elements.kind.onchange = async () => { const g = byId(db.goals, node.id); const [row] = await run(sb.from('goals').update({ kind: form.elements.kind.value }).eq('id', node.id).select()); syncRow('goals', g, row); sheet.close(); app.render(); };
+  if (form.elements.kind) form.elements.kind.onchange = async () => { const g = byId(db.goals, node.id); const [row] = await run(sb.from('goals').update({ kind: form.elements.kind.value }).eq('id', node.id).select()); syncRow('goals', g, row); sheet.close(); draw(); };
   sheet.showModal();
 }
 
@@ -403,6 +553,35 @@ export async function treeAction(el) {
   else if (a === 'accept-all') await accept(treeOf().proposals.map((l) => l.id));
   else if (a === 'dismiss') { await removeLink(el.dataset.id); toast('Dismissed'); }
   else if (a === 'achieve') await achieve(el.dataset.key);
+  else if (a === 'accept-group') await accept(String(el.dataset.ids || '').split(',').filter(Boolean));
+  else if (a === 'map') openLinkSheet(el.dataset.key);
+  else if (a === 'show-all') { (app.ttShowAll = app.ttShowAll || new Set()).add(el.dataset.key); draw(); }
+  else if (a === 'review-done') {
+    const was = (app.settings || {}).tree_reviewed_at || null;
+    await saveSettings({ tree_reviewed_at: new Date().toISOString() }, { quiet: true });
+    app.ttPeriod = null; app.ttShowAll = null;
+    draw();
+    toast('Reviewed · the next one starts from today', [{ label: 'Undo', run: async () => { await saveSettings({ tree_reviewed_at: was }, { quiet: true }); draw(); } }]);
+  } else if (a === 'want' || a === 'let-go') {
+    const node = treeOf().nodes.get(el.dataset.key);
+    const g = node && node.kind === 'goal' && byId(db.goals, node.id);
+    if (!g) return;
+    const before = { status: g.status, last_reviewed_at: g.last_reviewed_at };
+    const [row] = await run(sb.from('goals').update(a === 'want' ? { last_reviewed_at: new Date().toISOString() } : { status: 'dropped' }).eq('id', g.id).select());
+    syncRow('goals', g, row);
+    draw();
+    toast(a === 'want' ? `Kept: ${short(node.title, 40)}` : `Let go: ${short(node.title, 40)} · dropped, not deleted`, [{ label: 'Undo', run: async () => { const [r2] = await run(sb.from('goals').update(before).eq('id', g.id).select()); syncRow('goals', g, r2); draw(); } }]);
+  } else if (a === 'plan') {
+    const node = treeOf().nodes.get(el.dataset.key);
+    const t = node && node.kind === 'task' && cardById(node.id);
+    if (!t) return;
+    const { updateTask } = await import('../data.js');
+    const { HOURS } = await import('../dates.js');
+    const d = new Date(); d.setHours(HOURS.planned_at || 9, 0, 0, 0);
+    await updateTask(t, { planned_at: d.toISOString() });
+    draw();
+    toast(`Planned for today: ${short(node.title, 40)}`);
+  }
   else if (a === 'open') openNodeSheet(el.dataset.key);
   else if (a === 'start' || a === 'hold') {
     const node = treeOf().nodes.get(el.dataset.key);
@@ -410,7 +589,7 @@ export async function treeAction(el) {
     const to = a === 'start' ? 'active' : 'on_hold'; const back = a === 'start' ? 'on_hold' : 'active';
     const k = openActions(node.id);
     await setProject(node.id, to);
-    app.render();
-    toast(a === 'start' ? `Started: ${short(node.title, 40)}${k ? ` · ${plural(k, 'action')} available again` : ''}` : `On hold until it’s unlocked${k ? ` · ${stepBack(k)}` : ''}`, [{ label: 'Undo', run: async () => { await setProject(node.id, back); app.render(); } }]);
+    draw();
+    toast(a === 'start' ? `Started: ${short(node.title, 40)}${k ? ` · ${plural(k, 'action')} available again` : ''}` : `On hold until it’s unlocked${k ? ` · ${stepBack(k)}` : ''}`, [{ label: 'Undo', run: async () => { await setProject(node.id, back); draw(); } }]);
   }
 }

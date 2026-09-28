@@ -1659,3 +1659,33 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .tl-bad { color: var(--due); font-size: 13px; }
 .tt-type-card { border-style: dashed; padding-top: 8px; padding-bottom: 8px; }
 .tt-type-card .tt-title { font-size: 13px; font-weight: 600; }
+/* Tech tree: no path yet, branches, and the review */
+.tt-unmapped { border-style: dashed; }
+.tt-unmapped .tt-sub { color: var(--flag); }
+.tt-dest-unmapped { border-style: dashed; }
+.tt-prop-group { border-top: 1px solid var(--line); padding-top: 8px; }
+.tt-prop-group > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; list-style: none; }
+.tt-prop-group > summary::-webkit-details-marker { display: none; }
+.tt-prop-group[open] > summary { margin-bottom: 8px; }
+.tt-period { max-width: 220px; }
+.tt-rv-h { margin: 14px 0 2px; font-size: 13px; font-weight: 700; }
+.tt-rv-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.tt-rv-main { flex: 1; min-width: 0; display: grid; gap: 1px; overflow-wrap: anywhere; }
+.tt-rv-main a { color: var(--text); text-decoration: none; font-weight: 600; }
+.tt-rv-main a:hover { text-decoration: underline; }
+.tt-rv-ic { flex: none; width: 20px; text-align: center; }
+.tt-ok { color: #0d9488; }
+.tt-rv-row .chip, .tt-rv-row .btn { flex: none; }
+.chip.g { background: color-mix(in srgb, #0d9488 16%, transparent); color: #0d9488; }
+.tt-more { margin: 6px 0 0; }
+@media (max-width: 560px) { .tt-rv-row { flex-wrap: wrap; } .tt-rv-main { flex-basis: 100%; } }
+/* Full Review: what a suggestion would add to the tech tree */
+.sg-tts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin: 8px 0 6px; }
+.sg-tt { display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; border: 1px dashed var(--muted); font-size: 13px; line-height: 1.3; align-content: start; }
+.sg-tt.there { border-style: solid; border-color: var(--line); }
+.sg-tt.there b { color: var(--muted); }
+.sg-tt-destination.new { border-color: var(--accent); border-width: 2px; }
+.sg-tt-milestone { border-radius: 22px; padding-left: 14px; padding-right: 14px; }
+.sg-tt b { overflow-wrap: anywhere; }
+.sg-tt-x { justify-self: start; font-size: 12px; margin-top: 2px; }
+.sg-tt-more > summary { cursor: pointer; font-size: 13px; color: var(--muted); }

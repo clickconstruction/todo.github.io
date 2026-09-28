@@ -2,6 +2,7 @@
 // Read the card, talk it through with the user, annotate it (gain, project, dates, tags, a one-line
 // note) and decide it; the app updates live. Every decision can be undone; nothing is deleted.
 import { readDaily } from '../../js/daily-rules.js';
+import { wouldLoop, live as liveLink } from '../../js/tree-rules.js';
 import { buildQueue, priorityReason, proposalText } from '../../js/review.js';
 import { parseItemLines } from './checklists.js';
 
@@ -13,13 +14,70 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
   // ---------- suggestions: Claude proposes, the user Submits in the app ----------
   const TASK_DECISIONS = ['keep', 'someday', 'done', 'drop', 'skip', 'reading', 'slipbox'];
   const GROUP_DECISIONS = ['accept', 'one_by_one', 'keep_all', 'skip'];
-  async function lookups(api, { checklists: needChecklists = false } = {}) {
-    const [projects, tags, checklists] = await Promise.all([
+  async function lookups(api, { checklists: needChecklists = false, tree: needTree = false } = {}) {
+    const [projects, tags, checklists, goals, treeLinks] = await Promise.all([
       api.q(`projects?${api.u}&status=in.(active,on_hold)&select=id,name`), api.q(`tags?${api.u}&status=neq.dropped&select=id,name,parent_id`),
       needChecklists ? api.q(`checklists?${api.u}&archived_at=is.null&select=id,name,items,reflect`) : [],
+      needTree ? api.q(`goals?${api.u}&status=neq.dropped&select=id,title,kind,status`) : [],
+      needTree ? api.q(`tree_links?${api.u}&archived_at=is.null&select=id,node_kind,node_id,requires_kind,requires_id,state,archived_at`) : [],
     ]);
     const label = (g) => { const p = g.parent_id && tags.find((x) => x.id === g.parent_id); return p ? `${p.name} : ${g.name}` : g.name; };
-    return { projects, tags, checklists, label };
+    return { projects, tags, checklists, goals, treeLinks, label };
+  }
+  // What a suggestion adds to the tech tree: { add: [{ title, kind, project? }], links: [{ node, requires }] }, names
+  // in links being either something in add or a goal or project that is already there. → the stored shape:
+  // { items: [{ kind, title, project_id?, project_name?, exists? }], links: [{ node: i, requires: j }] }.
+  const TREE_KINDS = ['destination', 'milestone', 'goal', 'card'];
+  function treeFrom(t, L) {
+    const add = Array.isArray(t.add) ? t.add : [];
+    const links = Array.isArray(t.links) ? t.links : [];
+    if (!add.length && !links.length) throw new Error('tree needs add: [{title, kind}] and / or links: [{node, requires}]');
+    if (add.length + links.length > 60) throw new Error('A suggestion adds up to 40 items to the tech tree: split it across cards.');
+    const same = (x, y) => String(x).trim().toLowerCase() === String(y).trim().toLowerCase();
+    const goalBy = (title) => L.goals.find((g) => g.id === title) || L.goals.find((g) => same(g.title, title));
+    const projectBy = (name) => L.projects.find((p) => p.id === name) || L.projects.find((p) => same(p.name, name));
+    const items = [];
+    add.forEach((x) => {
+      const title = String((x && x.title) || '').trim();
+      const kind = x && x.kind;
+      if (!title) throw new Error('Each item in tree.add needs a title.');
+      if (!TREE_KINDS.includes(kind)) throw new Error(`“${title}”: kind is one of ${TREE_KINDS.join(', ')} (a project is made with create_project, then linked by name).`);
+      if (items.some((i) => same(i.title, title))) throw new Error(`“${title}” is in tree.add twice.`);
+      if (kind === 'card') {
+        const p = x.project ? projectBy(x.project) : null;
+        if (x.project && !p) throw new Error(`“${title}”: no project called “${x.project}”.`);
+        items.push({ kind, title: title.slice(0, 1000), ...(p ? { project_id: p.id, project_name: p.name } : {}) });
+      } else {
+        const g = goalBy(title); // already there: build on it, don't make a second one
+        items.push(g ? { kind: g.kind || 'goal', title: g.title, exists: { kind: 'goal', id: g.id } } : { kind, title: title.slice(0, 300) });
+      }
+    });
+    const place = (name, side) => {
+      const n = String(name || '').trim();
+      if (!n) throw new Error(`A link needs ${side === 'node' ? 'node (what gets unlocked)' : 'requires (what it needs)'}.`);
+      let i = items.findIndex((x) => same(x.title, n));
+      if (i >= 0) return i;
+      const g = goalBy(n); const p = projectBy(n);
+      if (g && p) throw new Error(`“${n}” is both a goal and a project. Add one of them to tree.add by its exact kind, or rename one.`);
+      if (!g && !p) throw new Error(`“${n}” is not in tree.add and is no goal or project of theirs. Add it to tree.add, or use list_projects / list_horizons for the exact name.`);
+      items.push(g ? { kind: g.kind || 'goal', title: g.title, exists: { kind: 'goal', id: g.id } } : { kind: 'project', title: p.name, exists: { kind: 'project', id: p.id } });
+      return items.length - 1;
+    };
+    const keyAt = (i) => (items[i].exists ? `${items[i].exists.kind}:${items[i].exists.id}` : `new:${i}`);
+    const soFar = L.treeLinks.filter(liveLink).map((l) => ({ ...l }));
+    const out = [];
+    links.forEach((l) => {
+      const a = place(l.node, 'node'); const b = place(l.requires, 'requires');
+      if (items[a].kind === 'card') throw new Error(`“${items[a].title}” is a card: only a goal or a project can be locked by the tree (cards wait on cards with update_task waits_for).`);
+      if (items[a].kind === 'project' && items[b].kind === 'card' && items[b].project_id === items[a].exists.id) throw new Error(`“${items[a].title}” can’t require a card inside itself.`);
+      if (out.some((x) => x.node === a && x.requires === b)) return;
+      const [nk, ni] = keyAt(a).split(':'); const [rk, ri] = keyAt(b).split(':');
+      if (wouldLoop(soFar, keyAt(a), keyAt(b))) throw new Error(a === b ? `“${items[a].title}” can’t require itself.` : `That would make a loop: “${items[b].title}” already rests on “${items[a].title}”.`);
+      soFar.push({ node_kind: nk, node_id: ni, requires_kind: rk, requires_id: ri, state: 'accepted', archived_at: null });
+      out.push({ node: a, requires: b });
+    });
+    if (items.length > 40) throw new Error('A suggestion adds up to 40 items to the tech tree: split it across cards.');
+    return { items, links: out };
   }
   // One suggestion from tool arguments; throws on anything that doesn't resolve (nothing is saved then).
   function suggestionFrom(api, a, kind, L) {
@@ -48,6 +106,7 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
     const hours = { planned: api.hours.planned, due: api.hours.due, defer: api.hours.defer };
     ['planned', 'due', 'defer'].forEach((k) => { if (a[k] !== undefined) s[k] = a[k] === null || a[k] === '' ? null : zonedToIso(a[k], hours[k], api.tz); });
     if (a.flagged !== undefined) s.flagged = !!a.flagged;
+    if (a.tree !== undefined && a.tree !== null) s.tree = treeFrom(a.tree, L); // additions to the tech tree, made on Submit (keep / someday)
     if (a.daily !== undefined && a.daily !== null) s.daily = readDaily(a.daily); // a daily checkbox on Submit (keep only); its repeat and dates go
     if (a.steps !== undefined) { // break it down: added under the action on Submit (keep / someday only); a step can carry its own steps
       let count = 0;
@@ -161,7 +220,7 @@ Draft ahead: call "upcoming" and "suggest" with items [...] for the next few car
 actions:
   start {import_id | project | all:true, min_age_days?, title?} → a new session (give the user app_link)
   status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
-  suggest {decision, title?, daily? ("must" = have to, every day | "should" = should, most days, or {tier, weekdays: [0-6]}: with keep, the action becomes a daily checkbox that starts fresh each day and its repeat and dates are cleared; for habits and daily obligations that came in as repeating actions), task_notes? (the action's new notes, replacing the old; ≤6000 characters; omitted or null = unchanged), gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down; a step can be {title, steps: [...], in_order?} to nest), steps_in_order?, checklist? ({name, items: [lines; "# Section" starts a section], reflect?, complete_action?} to make one, or an existing checklist's name: attached on Submit; use it for routines the card repeats), mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
+  suggest {decision, title?, tree? ({add: [{title, kind: destination | milestone | goal | card, project? (a card's project)}], links: [{node, requires}]}: additions to the tech tree, shown on the card as a preview and made on Submit with keep; names in links are items in add or goals / projects already there, which are reused, never duplicated; a destination you add with no link has "no path yet", which is honest when the first step isn't known), daily? ("must" = have to, every day | "should" = should, most days, or {tier, weekdays: [0-6]}: with keep, the action becomes a daily checkbox that starts fresh each day and its repeat and dates are cleared; for habits and daily obligations that came in as repeating actions), task_notes? (the action's new notes, replacing the old; ≤6000 characters; omitted or null = unchanged), gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down; a step can be {title, steps: [...], in_order?} to nest), steps_in_order?, checklist? ({name, items: [lines; "# Section" starts a section], reflect?, complete_action?} to make one, or an existing checklist's name: attached on Submit; use it for routines the card repeats), mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
   submit {item_id? (default current)} → apply the pending suggestion as the app's Submit does (only when the user says "submit"), then the next card
   upcoming {count? ≤10} → the next cards in full, for drafting ahead
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
@@ -182,6 +241,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
         task_notes: { type: ['string', 'null'], maxLength: MAX_NOTES, description: 'suggest / annotate: new notes for the card\'s action, replacing its current notes (on Submit for suggest). Plain text, line breaks kept, at most 6000 characters; omitted, null or blank leaves the notes unchanged. Not the one-line reason (note), and not add\'s notes.' },
         gain: { type: 'string' }, gain_suggested: { type: 'boolean' },
         tags: { type: 'array', items: { type: 'string' } }, add_tags: { type: 'array', items: { type: 'string' } }, remove_tags: { type: 'array', items: { type: 'string' } },
+        tree: { type: ['object', 'null'], description: 'suggest: additions to the tech tree, made on Submit (keep / someday) and taken back by Undo', properties: { add: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, kind: { type: 'string', enum: ['destination', 'milestone', 'goal', 'card'] }, project: { type: 'string', description: 'card: the project it goes in (name or id); none = the Inbox' } }, required: ['title', 'kind'] } }, links: { type: 'array', items: { type: 'object', properties: { node: { type: 'string', description: 'what gets unlocked: a goal or project' }, requires: { type: 'string', description: 'what it needs: a goal, project or card' } }, required: ['node', 'requires'] } } } },
         daily: { type: ['string', 'object', 'null'], description: 'suggest: make the action a daily checkbox on Submit (keep): "must" or "should", or {tier, weekdays: [0-6]}' },
         steps: { type: 'array', items: { type: ['string', 'object'], properties: { title: { type: 'string' }, steps: { type: 'array' }, in_order: { type: 'boolean' } } }, description: 'suggest: break the action down: step titles, first to last (added on Submit). A step can be {title, steps: [...], in_order?} to carry its own steps, three levels under the card.' },
         checklist: { type: ['object', 'string', 'null'], description: 'suggest: a checklist for the action, attached on Submit (keep / someday). {name, items: [lines, "# Section" starts a section], reflect?: a line per item each run, complete_action?: last tick completes the action (default true)} makes a new one; a string is an existing checklist’s name or id.', properties: { name: { type: 'string' }, items: { type: 'array', items: { type: 'string' } }, reflect: { type: 'boolean' }, complete_action: { type: 'boolean' } } },
@@ -242,7 +302,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
       if (action === 'suggest') {
         // One card (item_id, default the current one) or several: items [{item_id, decision, …}].
         const wanted = Array.isArray(a.items) && a.items.length ? a.items.slice(0, 25) : [{ ...a, item_id: a.item_id || (cur && cur.id) }];
-        const L = await lookups(api, { checklists: wanted.some((w) => typeof w.checklist === 'string') });
+        const L = await lookups(api, { checklists: wanted.some((w) => typeof w.checklist === 'string'), tree: wanted.some((w) => w.tree) });
         const rows = await api.q(`review_items?${api.u}&session_id=eq.${s.id}&id=in.(${wanted.map((w) => `"${w.item_id}"`).join(',')})&select=id,kind,status`);
         const planned = wanted.map((w) => {
           const row = rows.find((r) => r.id === w.item_id);

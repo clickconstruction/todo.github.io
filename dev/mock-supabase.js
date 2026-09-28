@@ -571,6 +571,11 @@
         // Mirrors reading_set() / slipbox_from_task() (migration 20261017000001).
         const guessType = (s) => (/\b(watch|video|youtube|film|movie|documentary)\b/i.test(s) ? 'video' : /\b(listen|podcast|episode|audiobook)\b/i.test(s) ? 'podcast' : /\b(book|novel)\b|archive\.org/i.test(s) ? 'book' : /https?:\/\//i.test(s) ? 'article' : /^\s*read\b/i.test(s) ? 'book' : 'other');
         const somedayOf = (create) => { let g = tables.tags.find((x) => !x.parent_id && /^someday/i.test(x.name)); if (!g && create) { g = { ...DEFAULTS.tags(), id: id(), user_id: uid, name: 'Someday', status: 'on_hold', sort: 0, created_at: now() }; tables.tags.push(g); } return g; };
+        if (name === 'tree_activity') { // mirrors tree_activity (20261105000001)
+          const by = new Map();
+          tables.tasks.filter((x) => x.user_id === uid && x.project_id && ((x.completed_at && x.completed_at >= args.since) || (!x.completed_at && !x.dropped_at))).forEach((x) => { const r = by.get(x.project_id) || { project_id: x.project_id, done: 0, last: null, open: 0 }; if (x.completed_at) { r.done += 1; if (!r.last || x.completed_at > r.last) r.last = x.completed_at; } else r.open += 1; by.set(x.project_id, r); });
+          return { data: [...by.values()], error: null };
+        }
         if (name === 'tree_accept') {
           const l = tables.tree_links.find((x) => x.id === args.link && x.user_id === uid && !x.archived_at);
           if (!l) return { data: null, error: { message: 'Link not found.' } };
@@ -626,7 +631,7 @@
           if (it.status !== 'pending') return { data: null, error: { message: 'That card was already decided (undo it first).' } };
           const s = it.suggestion;
           if (!s || !s.decision) return { data: null, error: { message: 'No suggestion to submit on this card.' } };
-          let snap = null; let stepsSnap = null; let ckSnap = null; let dySnap = null;
+          let snap = null; let stepsSnap = null; let ckSnap = null; let dySnap = null; let trSnap = null;
           if (it.kind === 'group') { if (s.proposal) it.grp = { ...it.grp, proposal: s.proposal }; }
           else {
             const t = tables.tasks.find((x) => x.id === it.task_id);
@@ -650,6 +655,26 @@
               stepsSnap = { t: 'steps', id: t.id, ids, steps_in_order: !!t.steps_in_order };
               if ('steps_in_order' in s) t.steps_in_order = !!s.steps_in_order;
             }
+            if (s.tree && Array.isArray(s.tree.items) && ['keep', 'someday'].includes(s.decision)) { // mirrors review_tree_apply (20261105000001)
+              const made = { t: 'tree', goals: [], tasks: [], links: [] }; const at = [];
+              const undoMade = () => { tables.goals = tables.goals.filter((g) => !made.goals.includes(g.id)); tables.tasks = tables.tasks.filter((x) => !made.tasks.includes(x.id)); tables.tree_links = tables.tree_links.filter((l) => !made.links.includes(l.id)); };
+              for (const x of s.tree.items) {
+                if (x.exists) { const list = x.exists.kind === 'goal' ? tables.goals : x.exists.kind === 'project' ? tables.projects : tables.tasks; if (!list.some((r) => r.id === x.exists.id && r.user_id === uid)) { undoMade(); return { data: null, error: { message: `Something this suggestion builds on is gone: ${x.title}` } }; } at.push([x.exists.kind, x.exists.id]); }
+                else if (x.kind === 'card') { const r = { ...DEFAULTS.tasks(), id: id(), user_id: uid, title: x.title, project_id: x.project_id || null, in_inbox: !x.project_id, source: 'review', sort: 0, created_at: now(), updated_at: now() }; tables.tasks.push(r); made.tasks.push(r.id); at.push(['task', r.id]); }
+                else { const r = { ...DEFAULTS.goals(), id: id(), user_id: uid, title: x.title, kind: x.kind, created_at: now(), updated_at: now() }; tables.goals.push(r); made.goals.push(r.id); at.push(['goal', r.id]); }
+              }
+              for (const l of s.tree.links || []) {
+                const [nk, ni] = at[l.node]; const [rk, ri] = at[l.requires];
+                if (tables.tree_links.some((x) => !x.archived_at && x.state === 'accepted' && x.node_id === ni && x.requires_id === ri)) continue;
+                const was = tables.tree_links.find((x) => !x.archived_at && x.state === 'proposed' && x.node_id === ni && x.requires_id === ri);
+                if (was) { was.state = 'accepted'; made.links.push(was.id); continue; }
+                const r = { ...DEFAULTS.tree_links(), id: id(), user_id: uid, node_kind: nk, node_id: ni, requires_kind: rk, requires_id: ri, proposed_by: 'agent', created_at: now(), updated_at: now() };
+                const err = linkGuard(r, null);
+                if (err) { undoMade(); return { data: null, error: { message: err } }; }
+                tables.tree_links.push(r); made.links.push(r.id);
+              }
+              trSnap = made;
+            }
             if (s.checklist && typeof s.checklist === 'object' && ['keep', 'someday'].includes(s.decision)) { // mirrors 20261030000001
               let made = null; let ckid = s.checklist.id || null;
               if (!ckid) { const c = { ...DEFAULTS.checklists(), id: id(), user_id: uid, name: s.checklist.name, items: s.checklist.items || [], reflect: !!s.checklist.reflect, complete_action: s.checklist.complete_action !== false, created_at: now(), updated_at: now() }; tables.checklists.push(c); made = ckid = c.id; }
@@ -659,7 +684,7 @@
           }
           const res = await this.rpc('review_decide', { item: it.id, decision: s.decision, by: 'user', note: s.note });
           if (res.error) return res;
-          if (snap) it.before = [...(it.before || []), ...(dySnap ? [dySnap] : []), snap, ...(stepsSnap ? [stepsSnap] : []), ...(ckSnap ? [ckSnap] : [])];
+          if (snap) it.before = [...(it.before || []), ...(dySnap ? [dySnap] : []), snap, ...(stepsSnap ? [stepsSnap] : []), ...(ckSnap ? [ckSnap] : []), ...(trSnap ? [trSnap] : [])];
           it.suggestion = { ...s, applied_at: now() };
           return res;
         }
@@ -681,6 +706,7 @@
               if (e.t === 'slipbox') { const n = tables.slipbox_notes.find((x) => x.id === e.note); if (n) n.archived_at = now(); tables.tasks.find((t) => t.id === e.id).dropped_at = e.dropped_at; }
               if (e.t === 'checklist') { const tk = tables.tasks.find((x) => x.id === e.id); if (tk) tk.checklist_id = e.prev || null; const mc = e.made && tables.checklists.find((c) => c.id === e.made); if (mc) mc.archived_at = now(); }
               if (e.t === 'steps') { tables.tasks.forEach((c) => { if (e.ids.includes(c.id) && !c.completed_at && !c.dropped_at) c.dropped_at = now(); }); const p0 = tables.tasks.find((t) => t.id === e.id); if (p0) p0.steps_in_order = !!e.steps_in_order; }
+              if (e.t === 'tree') { tables.tree_links.forEach((l) => { if ((e.links || []).includes(l.id)) l.archived_at = now(); }); tables.goals.forEach((g) => { if ((e.goals || []).includes(g.id)) g.status = 'dropped'; }); tables.tasks.forEach((x) => { if ((e.tasks || []).includes(x.id) && !x.completed_at) x.dropped_at = now(); }); }
               if (e.t === 'daily') Object.assign(tables.tasks.find((t) => t.id === e.id), { daily: e.daily || null, repeat_rule: e.repeat_rule || null });
               if (e.t === 'fields') { Object.assign(tables.tasks.find((t) => t.id === e.id), { folder_path: e.folder_path ?? null, title: e.title, ...('notes' in e ? { notes: e.notes ?? '' } : {}), gain: e.gain, gain_by: e.gain_by, project_id: e.project_id, in_inbox: e.in_inbox, planned_at: e.planned_at, due_at: e.due_at, defer_at: e.defer_at, flagged: e.flagged });
                 tables.task_tags = tables.task_tags.filter((l) => l.task_id !== e.id).concat(e.tags.map((g) => ({ task_id: e.id, tag_id: g, user_id: uid }))); }
