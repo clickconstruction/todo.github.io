@@ -1283,6 +1283,8 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
     assert(!db.goals.some((g) => g.title === 'Astronaut') && db.tree_links.length === 0, 'suggest tree: nothing is made until Submit');
     const no = async (tree, re) => { try { await tool('full_review', { action: 'suggest', decision: 'keep', tree }); return false; } catch (e) { return re.test(e.message); } };
     assert(await no({ add: [{ title: 'A', kind: 'destination' }, { title: 'B', kind: 'goal' }], links: [{ node: 'A', requires: 'B' }, { node: 'B', requires: 'A' }] }, /loop/) && await no({ add: [{ title: 'A', kind: 'project' }] }, /kind is one of/) && await no({ links: [{ node: 'Nobody knows this', requires: 'Estate and legacy' }] }, /not in tree.add/) && await no({ add: [{ title: 'C', kind: 'card' }, { title: 'D', kind: 'goal' }], links: [{ node: 'C', requires: 'D' }] }, /is a card/), 'suggest tree: loops, unknown names and kinds, and a card that would be locked are refused');
+    await tool('full_review', { action: 'suggest', decision: 'keep', tree: JSON.stringify({ add: [{ title: 'Astronaut', kind: 'destination' }] }) });
+    assert(s1.suggestion.tree.items.length === 1 && await no('not json', /tree is an object/), 'suggest tree: text from a client that sends objects as text is read');
     db.goals = db.goals.filter((g) => g.id !== 'gTreeHave');
   }
   const sg = await tool('full_review', { action: 'suggest', decision: 'keep', title: 'Fix the gate latch before winter', gain: 'Goats stay in', project: 'Estate and legacy', planned: '2026-10-05', flagged: false, add_tags: ['Brand new tag'], note: 'You said before the cold snap' });

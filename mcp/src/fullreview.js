@@ -29,6 +29,8 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
   // { items: [{ kind, title, project_id?, project_name?, exists? }], links: [{ node: i, requires: j }] }.
   const TREE_KINDS = ['destination', 'milestone', 'goal', 'card'];
   function treeFrom(t, L) {
+    if (typeof t === 'string') { try { t = JSON.parse(t); } catch (e) { throw new Error('tree is an object: {add: [{title, kind}], links: [{node, requires}]}'); } } // some clients send objects as text
+    if (!t || typeof t !== 'object') throw new Error('tree is an object: {add: [{title, kind}], links: [{node, requires}]}');
     const add = Array.isArray(t.add) ? t.add : [];
     const links = Array.isArray(t.links) ? t.links : [];
     if (!add.length && !links.length) throw new Error('tree needs add: [{title, kind}] and / or links: [{node, requires}]');
