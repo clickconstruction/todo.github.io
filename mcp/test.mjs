@@ -200,6 +200,10 @@ const call = async (method, params, token = TOKEN) => {
   return { status: r.status, body: r.status === 202 ? null : await r.json() };
 };
 const tool = async (name, args) => { const r = await call('tools/call', { name, arguments: args }); const c = r.body.result; if (c.isError) throw new Error(c.content[0].text); return JSON.parse(c.content[0].text); };
+// A day n days from now in the user's zone, and an instant read in that zone ('YYYY-MM-DDTHH:MM'): dates in
+// the tests are relative, so the suite doesn't stop passing as the calendar moves on.
+const plusDays = (n) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(Date.now() + n * 86400000)).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
+const chicago = (iso) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(iso)).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`; };
 const localToday = () => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
 const assert = (c, m) => { if (!c) throw new Error('FAIL: ' + m); console.log('ok -', m); };
 
@@ -223,9 +227,9 @@ const tags = await tool('list_tags', {});
 assert(tags.find(t => t.label === 'Waiting : Hiro').open_tasks === 1, 'list_tags counts');
 const projs = await tool('list_projects', {});
 assert(projs[0].folder === 'PRIORITIES' && projs[0].open_actions === 1, 'list_projects with folder + counts');
-const oneShot = await tool('capture', { title: 'Schedule backflow test', project: 'click plumbing', tags: ['Phone', 'Waiting : Hiro'], due: '2026-10-01', planned: '2026-09-28', flagged: true });
-assert(oneShot.planned === '2026-09-28' && db.tasks.find((x) => x.id === oneShot.id).planned_at === '2026-09-28T14:00:00.000Z', 'capture: planned date at 9am local');
-assert(!oneShot.in_inbox && oneShot.project === 'Click Plumbing' && oneShot.tags.length === 2 && oneShot.due === '2026-10-01' && oneShot.flagged, 'capture sets project, tags, due, flag in one call');
+const oneShot = await tool('capture', { title: 'Schedule backflow test', project: 'click plumbing', tags: ['Phone', 'Waiting : Hiro'], due: plusDays(4), planned: plusDays(1), flagged: true });
+assert(oneShot.planned === plusDays(1) && chicago(db.tasks.find((x) => x.id === oneShot.id).planned_at) === `${plusDays(1)}T09:00`, 'capture: planned date at 9am local');
+assert(!oneShot.in_inbox && oneShot.project === 'Click Plumbing' && oneShot.tags.length === 2 && oneShot.due === plusDays(4) && oneShot.flagged, 'capture sets project, tags, due, flag in one call');
 assert((await tool('list_tasks', { search: 'backflow hiro' })).count === 1, 'search: words across title + tag must all match');
 assert((await tool('list_tasks', { search: 'plumbing' })).items.some((x) => x.title === 'Schedule backflow test'), 'search: matches project name');
 assert((await tool('list_tasks', { search: 'backflow nope' })).count === 0, 'search: every word must match');
@@ -251,7 +255,7 @@ assert(pTagged.flagged && pTagged.tags.join() === 'Errands', 'update_project: fl
 const viaTag = await tool('list_tasks', { tag: 'Errands' });
 assert(viaTag.count === 2 && viaTag.items[0].project_tags.includes('Errands'), 'tag filter includes actions inherited from project tags');
 const fc = await tool('forecast', { days: 30 });
-assert(fc.days['2026-09-28'] && fc.days['2026-09-28'].planned.some((x) => x.title === 'Schedule backflow test') && fc.days['2026-10-01'].due.some((x) => x.title === 'Schedule backflow test'), 'forecast: planned and due land on their days');
+assert(fc.days[plusDays(1)] && fc.days[plusDays(1)].planned.some((x) => x.title === 'Schedule backflow test') && fc.days[plusDays(4)].due.some((x) => x.title === 'Schedule backflow test'), 'forecast: planned and due land on their days');
 db.projects.forEach((x) => { if (!x.next_review_at) x.next_review_at = '2020-01-01T00:00:00Z'; });
 const lr = await tool('list_review', {});
 const seqReview = lr.projects.find((x) => x.name === 'Seq');
@@ -639,7 +643,7 @@ assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'r
 
 // ---------- on-hold tags ----------
 {
-  await tool('create_project', { name: 'Home' });
+  const home0 = await tool('create_project', { name: 'Home' });
   const a = await tool('capture', { title: 'Fix gate latch', project: 'Home' });
   const b = await tool('capture', { title: 'Learn Spanish', project: 'Home', tags: ['Someday'] });
   const c = await tool('capture', { title: 'Build a boat', project: 'Home', tags: ['Someday : Big'] });
@@ -656,6 +660,21 @@ assert((await tool('get_task', { id: oneShot.id })).attachments.length === 2, 'r
   assert(home.next_action.title === 'Fix gate latch', 'next action skips parked items');
   const pv = await tool('run_perspective', { rules: { match: 'all', rules: [{ type: 'on_hold' }] }, options: { show: 'remaining', group_by: 'none' } });
   assert(pv.count === 2, 'perspective rule on_hold');
+  // today: parked items are counted, not listed; rows are short; limit and full
+  await tool('update_task', { id: a.id, flagged: true, notes: 'n'.repeat(300) });
+  await tool('update_task', { id: b.id, flagged: true });
+  await tool('update_task', { id: c.id, flagged: true, due: localToday() });
+  const td = await tool('today', {});
+  const shown = JSON.stringify([td.overdue, td.due_today, td.planned, td.flagged]);
+  assert(td.flagged.some((x) => x.id === a.id) && !shown.includes(b.id) && !shown.includes(c.id) && td.parked.count === 2 && td.parked.tags.Someday === 1 && td.parked.tags['Someday : Big'] === 1, 'today hides parked items from every section and counts them by tag');
+  const row = td.flagged.find((x) => x.id === a.id);
+  assert(!Object.values(row).some((v) => v === null || v === false) && !('created_at' in row) && !('project_id' in row) && row.project === 'Home' && row.flagged === true && row.notes.length === 160 && row.notes.endsWith('…'), 'today rows are short: no nulls, no timestamps, a clipped note');
+  const fullRow = (await tool('today', { full: true })).flagged.find((x) => x.id === a.id);
+  assert(fullRow.created_at && fullRow.notes.length === 300 && fullRow.project_id === home0.id, 'today full: every field, as list_tasks returns them');
+  const allFlagged = (await tool('today', { limit: 500 })).flagged.length;
+  const td1 = await tool('today', { limit: 1 });
+  assert(td1.flagged.length === 1 && td1.more.flagged === allFlagged - 1 && /Raise limit/.test(td1.more.note), 'today limit caps each section and more says how many were cut');
+  for (const t of [a, b, c]) await tool('update_task', { id: t.id, flagged: false, due: null });
   await tool('update_tag', { tag: 'Someday', status: 'dropped' });
   assert(await avail() === 'Build a boat|Fix gate latch|Learn Spanish' && !(await tool('list_tags', {})).some((t) => t.label === 'Someday') && (await tool('list_tags', { include_dropped: true })).some((t) => t.label === 'Someday'), 'dropped: retired, hidden, holds nothing');
   await tool('update_tag', { tag: 'Someday', status: 'active' });

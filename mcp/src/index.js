@@ -799,6 +799,22 @@ class Api {
 }
 
 const OPEN = 'completed_at=is.null&dropped_at=is.null';
+// A short row for a list a reader scans (today): what it takes to pick or act on an item, with nothing
+// null, false or empty. The full shape (get_task, list_tasks, today with full: true) has the rest.
+function briefRow(t) {
+  const clip = (s) => (s && s.length > 160 ? `${s.slice(0, 159)}…` : s || undefined);
+  const row = {
+    id: t.id, title: t.title, project: t.project || undefined, tags: t.tags,
+    due: t.due || undefined, planned: t.planned || undefined, flagged: t.flagged || undefined,
+    estimate_minutes: t.estimate_minutes, energy: t.energy,
+    waiting_on: t.waiting_on, follow_up: t.follow_up, agenda_for: t.agenda_for,
+    scheduled: t.scheduled, repeat: t.repeat ? t.repeat.summary : undefined,
+    gain: t.gain, gain_suggested: t.gain_suggested, notes: clip(t.notes),
+    step_of: t.parent_id, waits_for: t.waits_for ? t.waits_for.filter((w) => !w.done).map((w) => w.title || w.id) : undefined,
+    on_hold: t.on_hold,
+  };
+  return Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined && !(Array.isArray(v) && !v.length)));
+}
 
 // Mirror of the app's js/availability.js. available = open, not deferred (nor any ancestor),
 // project active and not deferred, no open steps of its own, and not waiting its turn in an
@@ -1058,9 +1074,9 @@ const TOOLS = [
   },
   {
     name: 'today',
-    description: 'What needs attention today: overdue items, items due today, items planned for today or earlier, flagged items, and the daily checkboxes asked for today (daily: have_to and should, each with ticked; tick with the dailies tool). Deferred items are hidden.',
-    inputSchema: { type: 'object', properties: {} },
-    async run(api) {
+    description: 'What needs attention today: overdue items, items due today, items planned for today or earlier, flagged items, the daily checkboxes asked for today (daily: have_to and should, each with ticked; tick with the dailies tool) and projects due. Deferred items are hidden, and so are parked ones (on an on-hold tag such as Someday): parked says how many and under which tags, and list_flagged or list_tasks shows them. Rows are short (id, title, project, tags, dates, estimate, energy, who it waits on, gain, a clipped note); pass full for every field, or get_task for one item. Each section shows up to limit items and more says what was cut.',
+    inputSchema: { type: 'object', properties: { limit: { type: 'integer', default: 50, description: 'Items per section (1 to 500)' }, full: { type: 'boolean', default: false, description: 'Every field on each item, as list_tasks returns them' } } },
+    async run(api, { limit = 50, full = false } = {}) {
       const today = localDate(new Date().toISOString(), api.tz);
       const endOfToday = zonedToIso(today, 24, api.tz);
       const now = new Date().toISOString();
@@ -1073,17 +1089,37 @@ const TOOLS = [
       const startOfToday = zonedToIso(today, 0, api.tz);
       const dl = await dailiesFor(api, today);
       const dailyToday = (tier) => dl.tasks.filter((t) => onDay(t.daily, today) && (t.daily.tier === 'must') === (tier === 'must')).map((t) => { const o = dailyOut(t, dl.ticked(t), today); return { id: o.id, title: o.title, ticked: o.ticked, summary: o.summary }; });
-      const shapedDue = await api.shape(due);
       const dueIds = new Set(due.map((t) => t.id));
+      const plannedIds = new Set(planned.map((t) => t.id));
+      const shapedDue = await api.shape(due);
+      const shapedPlanned = await api.shape(planned.filter((t) => !dueIds.has(t.id)));
+      const shapedFlagged = await api.shape(flagged.filter((t) => !dueIds.has(t.id) && !plannedIds.has(t.id)));
+      // Parked items (an on-hold tag such as Someday) don't nag, as in the app's Forecast: counted by tag, not listed.
+      // Sections are capped and rows are short, so a library with hundreds of flagged items still reads in one go.
+      const parked = { count: 0, tags: {} };
+      const n = Math.min(Math.max(1, Math.round(+limit) || 50), 500);
+      const more = {};
+      const section = (name, rows) => {
+        const kept = rows.filter((t) => {
+          const m = t.on_hold && /tag “(.+)” is on hold$/.exec(t.on_hold);
+          if (!m) return true;
+          parked.count += 1; parked.tags[m[1]] = (parked.tags[m[1]] || 0) + 1;
+          return false;
+        });
+        if (kept.length > n) more[name] = kept.length - n;
+        return (full ? kept : kept.map(briefRow)).slice(0, n);
+      };
       return {
         date: today,
         daily: dl.tasks.length ? { have_to: dailyToday('must'), should: dailyToday('should') } : undefined,
-        overdue: shapedDue.filter((_, i) => due[i].due_at < startOfToday),
-        due_today: shapedDue.filter((_, i) => due[i].due_at >= startOfToday),
-        planned: await api.shape(planned.filter((t) => !dueIds.has(t.id))),
-        flagged: await api.shape(flagged.filter((t) => !dueIds.has(t.id) && !planned.some((p) => p.id === t.id))),
+        overdue: section('overdue', shapedDue.filter((_, i) => due[i].due_at < startOfToday)),
+        due_today: section('due_today', shapedDue.filter((_, i) => due[i].due_at >= startOfToday)),
+        planned: section('planned', shapedPlanned),
+        flagged: section('flagged', shapedFlagged),
         projects_due: (await api.q(`projects?${api.u}&status=in.(active,on_hold)&due_at=lt.${endOfToday}&order=due_at.asc&select=id,name,due_at`))
           .map((p) => ({ id: p.id, name: p.name, due: localDate(p.due_at, api.tz), overdue: p.due_at < startOfToday })),
+        more: Object.keys(more).length ? { ...more, note: `Items beyond the first ${n} of a section. Raise limit, or use forecast and list_flagged.` } : undefined,
+        parked: parked.count ? { ...parked, note: 'On an on-hold tag, so they don’t nag (as in the app). list_flagged or list_tasks shows them.' } : undefined,
       };
     },
   },
