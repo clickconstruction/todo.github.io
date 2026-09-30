@@ -211,7 +211,7 @@
   }
   function taskRules(t, before) {
     if (t.daily) {
-      if (!['must', 'should'].includes(t.daily.tier)) { t.daily = before ? before.daily || null : null; }
+      if (!['must', 'should'].includes(t.daily.tier) || (t.daily.every && t.daily.every !== 'week')) { t.daily = before ? before.daily || null : null; } // every: 20261107000001
       else { t.repeat_rule = null; t.due_at = null; t.planned_at = null; t.defer_at = null; if (!t.daily.since) t.daily = { ...t.daily, since: (before && before.daily && before.daily.since) || dayStr(new Date()) }; }
     }
     // tasks_people_guard: delegated_at when waiting_on changes; no follow-up without a person.
@@ -647,7 +647,7 @@
             t.updated_at = now();
             if (s.daily && typeof s.daily === 'object' && s.decision === 'keep') { // mirrors 20261101000001
               dySnap = { t: 'daily', id: t.id, daily: t.daily || null, repeat_rule: t.repeat_rule || null };
-              const b = { ...t }; t.daily = { tier: s.daily.tier, ...(s.daily.weekdays ? { weekdays: s.daily.weekdays } : {}) }; taskRules(t, b);
+              const b = { ...t }; t.daily = { tier: s.daily.tier, ...(s.daily.weekdays ? { weekdays: s.daily.weekdays } : {}), ...(s.daily.every ? { every: s.daily.every } : {}) }; taskRules(t, b); // every: 20261107000001
             }
             if (Array.isArray(s.steps) && s.steps.length && ['keep', 'someday'].includes(s.decision)) { // mirrors migration 20261020000001
               const addSteps = (parent, list) => { const base = Math.max(-1, ...tables.tasks.filter((c) => c.parent_id === parent.id).map((c) => c.sort || 0)) + 1; let i = 0; return list.flatMap((x) => { const o = x && typeof x === 'object' ? x : { title: x }; const title = String(o.title || '').trim(); if (!title) return []; const row = { ...DEFAULTS.tasks(), id: id(), user_id: uid, title, parent_id: parent.id, project_id: parent.project_id, in_inbox: false, sort: base + i++, steps_in_order: !!o.in_order, created_at: now(), updated_at: now() }; tables.tasks.push(row); return [row.id, ...(Array.isArray(o.steps) ? addSteps(row, o.steps) : [])]; }); }; // mirrors 20261028000001 (nested)

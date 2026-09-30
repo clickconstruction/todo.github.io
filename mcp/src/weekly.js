@@ -44,20 +44,29 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
       api.q(`slipbox_notes?${api.u}&kind=eq.fleeting&archived_at=is.null&limit=200&select=id,title`),
       api.q(`tasks?${api.u}&reading_state=eq.finished&reading_notes_done=is.false&limit=200&select=id,title`),
     ]);
-    const count = { horizons: dueHz.length, inbox: inbox.length, stale: stale.length, waiting: waiting.length, projects: due.length + stuck.length, someday: sd.items.length + sd.onHold.length, notes: fleetingNotes.length + toWrite.length };
-    const auto = { horizons: !dueHz.length, inbox: !inbox.length, stale: !stale.length, waiting: !waiting.some((t) => t.follow_up_at && t.follow_up_at < end), projects: !due.length && !stuck.length, notes: !fleetingNotes.length && !toWrite.length };
+    // Weekly checks (daily.every = 'week'): ticked since this review started (today when none is open).
+    const weekly = open.filter((t) => t.daily && t.daily.every === 'week').sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || (a.created_at < b.created_at ? -1 : 1));
+    const today = localDate(now, api.tz);
+    const since = r && localDate(r.started_at, api.tz) < today ? localDate(r.started_at, api.tz) : today;
+    const ticks = weekly.length ? await api.q(`daily_ticks?${api.u}&state=eq.done&day=gte.${since}&task_id=in.(${weekly.map((t) => `"${t.id}"`).join(',')})&select=task_id`) : [];
+    const tickedIds = new Set(ticks.map((x) => x.task_id));
+    const checks = weekly.map((t) => ({ id: t.id, title: t.title, ticked: tickedIds.has(t.id) }));
+    const worked = { checks: checks.length > 0 && checks.every((c) => c.ticked) }; // done by doing it: every one ticked
+    const count = { checks: checks.length, horizons: dueHz.length, inbox: inbox.length, stale: stale.length, waiting: waiting.length, projects: due.length + stuck.length, someday: sd.items.length + sd.onHold.length, notes: fleetingNotes.length + toWrite.length };
+    const auto = { checks: !checks.length, horizons: !dueHz.length, inbox: !inbox.length, stale: !stale.length, waiting: !waiting.some((t) => t.follow_up_at && t.follow_up_at < end), projects: !due.length && !stuck.length, notes: !fleetingNotes.length && !toWrite.length };
     const data = {
       inbox: { count: inbox.length, items: inbox.slice(0, 15).map((t) => ({ id: t.id, title: t.title })) },
       stale: { count: stale.length, items: stale.slice(0, 20).map((t) => ({ id: t.id, title: t.title, project: (projects.find((p) => p.id === t.project_id) || {}).name || null, days_untouched: days(t.updated_at || t.created_at) })), note: 'For each: keep (update_task with no change touches it), complete, move to someday (clarify_item decision someday) or drop.' },
       waiting: { count: waiting.length, follow_ups_due: waiting.filter((t) => t.follow_up_at && t.follow_up_at < end).map((t) => ({ id: t.id, title: t.title, follow_up: localDate(t.follow_up_at, api.tz) })) },
       projects: { due_for_review: due.map((p) => p.name), stuck: stuck.map((p) => p.name), note: 'Use list_review and mark_reviewed; give stuck projects a next action.' },
+      checks: { count: checks.length, items: checks, note: 'Ask each one and tick it as they answer (dailies tick with its id). Each review starts them fresh; an action becomes a weekly check with dailies set every: "week".' },
       someday: { count: count.someday, note: 'Use list_someday; activate_someday or drop.' },
       sweep: { note: 'Use mind_sweep_prompts and capture what the user says.' },
       notes: { fleeting: fleetingNotes.slice(0, 20).map((n) => n.title), finished_notes_to_write: toWrite.slice(0, 20).map((t) => t.title), note: 'Help turn each into permanent notes (slipbox update kind permanent; reading take_notes / notes_done).' },
       horizons: { due: dueHz.map((x) => x.big || (x.name ? `area: ${x.name}` : `goal: ${x.title}`)), note: 'Use list_horizons; save_area / save_goal with reviewed: true.' },
     };
     const steps = STEPS.map((s) => {
-      const done = !!(r && r.steps && r.steps[s.key]) || !!auto[s.key];
+      const done = !!(r && r.steps && r.steps[s.key]) || !!auto[s.key] || !!worked[s.key];
       return { key: s.key, stage: STAGES.find(([k]) => k === s.stage)[1], title: s.title, hint: s.hint, done, nothing_to_do: !(r && r.steps && r.steps[s.key]) && !!auto[s.key] || undefined, minutes: s.minutes(count[s.key] || 0), ...(done ? {} : { data: data[s.key] }) };
     });
     return steps;
@@ -66,7 +75,7 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
   return [
     {
       name: 'weekly_review',
-      description: 'The GTD Weekly Review, saved so the user can continue in the app. action: status (default; each step with what it has to go through), start, done_step (step key), finish, restart. Walk the user through the steps in order: Get clear (papers, mind sweep, inbox), Get current (past and next calendar, stale actions, waiting, projects), Get creative (someday, anything new). Steps with nothing to do are already done. Calendar steps include events.',
+      description: 'The GTD Weekly Review, saved so the user can continue in the app. action: status (default; each step with what it has to go through), start, done_step (step key), finish, restart. Walk the user through the steps in order: Get clear (papers, mind sweep, inbox), Get current (past and next calendar, stale actions, waiting, projects, weekly checks: the questions they tick once a week, with dailies tick), Get creative (someday, anything new). Steps with nothing to do are already done. Calendar steps include events.',
       inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['status', 'start', 'done_step', 'finish', 'restart'] }, step: { type: 'string', enum: STEPS.map((s) => s.key) } } },
       async run(api, { action = 'status', step }) {
         let r = await openReview(api);

@@ -907,7 +907,7 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
 // ---------- Weekly Review, mind sweep, Someday/Maybe ----------
 {
   const st0 = await tool('weekly_review', {});
-  assert(!st0.in_progress && st0.steps.length === 12 && st0.steps[0].key === 'papers' && st0.steps.some((x) => x.key === 'notes') && st0.minutes_left > 0, 'weekly_review status before starting');
+  assert(!st0.in_progress && st0.steps.length === 13 && st0.steps[0].key === 'papers' && st0.steps.find((x) => x.key === 'checks').nothing_to_do && st0.steps.some((x) => x.key === 'notes') && st0.minutes_left > 0, 'weekly_review status before starting');
   const started = await tool('weekly_review', { action: 'start' });
   assert(started.in_progress && db.weekly_reviews.length === 1, 'weekly_review start saves a review');
   const inboxStep = started.steps.find((x) => x.key === 'inbox');
@@ -1292,6 +1292,9 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   await tool('full_review', { action: 'goto', item_id: s1.id });
   await tool('full_review', { action: 'suggest', decision: 'keep', daily: { tier: 'should', weekdays: [1, 3, 5] } });
   const sgDaily = db.review_items.find((x) => x.suggestion && x.suggestion.daily);
+  await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'weekly' });
+  assert(db.review_items.find((x) => x.id === s1.id).suggestion.daily.every === 'week' && db.review_items.find((x) => x.id === s1.id).suggestion.daily.tier === 'should', 'full_review suggest: daily "weekly" makes a weekly check');
+  await tool('full_review', { action: 'suggest', decision: 'keep', daily: { tier: 'should', weekdays: [1, 3, 5] } });
   let badDaily = ''; try { await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'sometimes' }); } catch (e) { badDaily = e.message; }
   assert(sgDaily && sgDaily.suggestion.daily.tier === 'should' && sgDaily.suggestion.daily.weekdays.join() === '1,3,5' && /"must".*"should"/.test(badDaily), 'full_review suggest: a suggestion can make the action daily (tier and days checked)');
   { // a suggestion can carry additions to the tech tree
@@ -1772,6 +1775,40 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const counted = {}; for (const [k, args] of [['list', {}], ['tick', { action: 'tick', id: meds.id }], ['set', { action: 'set', id: walk.id, tier: 'should' }]]) { calls = 0; await tool('dailies', args); counted[k] = calls; }
   globalThis.fetch = real;
   assert(Object.values(counted).every((v) => v <= 10), `dailies: a handful of requests a call (${Object.entries(counted).map(([k, v]) => `${k} ${v}`).join(', ')})`);
+  { // weekly checks: ticked once per Weekly Review, never in Today; each review starts them fresh
+    const wk = await tool('capture', { title: 'Am I reviewing?', due: dstr(3), repeat: { every: 1, unit: 'week' } });
+    const setW = await tool('dailies', { action: 'set', id: wk.id, every: 'week' });
+    const krow = db.tasks.find((t) => t.id === wk.id);
+    assert(setW.daily === 'Every week, in the Weekly Review' && krow.daily.every === 'week' && krow.daily.tier === 'should' && krow.daily.since && krow.repeat_rule === null && krow.due_at === null && setW.ticked === false && /Weekly Review/.test(setW.next), 'dailies set every week: the action becomes a weekly check; its repeat and due date are cleared');
+    db.daily_ticks.push({ id: 'tkw', user_id: UID, task_id: wk.id, day: dstr(3), state: 'done' }); // ticked three days ago, no review open
+    const l2 = await tool('dailies', {});
+    const td2 = await tool('today', {});
+    assert(l2.weekly.length === 1 && l2.weekly[0].id === wk.id && l2.weekly[0].ticked === false && l2.weekly[0].last_ticked === dstr(3) && l2.left.weekly === 1 && ![...l2.have_to, ...l2.should].some((x) => x.id === wk.id)
+      && !JSON.stringify(td2.daily || {}).includes(wk.id) && !JSON.stringify(td2.overdue).includes(wk.id), 'a weekly check is listed apart, never among today’s; a tick from before this review doesn’t count');
+    assert((await tool('get_task', { id: wk.id })).daily.summary === 'Every week, in the Weekly Review' && !(await tool('list_tasks', { available_only: true, limit: 500 })).items.some((t) => t.id === wk.id), 'get_task says it is weekly; it is never an available action');
+    // a review that started four days ago: the tick from three days ago is this review's
+    db.weekly_reviews.forEach((r) => { if (!r.completed_at && !r.abandoned_at) r.abandoned_at = new Date().toISOString(); });
+    const rev = { id: 'wrW', user_id: UID, started_at: new Date(Date.now() - 4 * 86400000).toISOString(), steps: {}, completed_at: null, abandoned_at: null };
+    db.weekly_reviews.push(rev);
+    const real2 = globalThis.fetch; let calls2 = 0; globalThis.fetch = (u, ...x) => { calls2 += 1; return real2(u, ...x); };
+    let wr; try { wr = await tool('weekly_review', {}); } finally { globalThis.fetch = real2; }
+    const ck = wr.steps.find((x) => x.key === 'checks');
+    assert(ck.done && !ck.nothing_to_do && ck.stage === 'Get current' && (await tool('dailies', {})).weekly[0].ticked === true && calls2 <= 30, `weekly_review: Weekly checks is a step, done once every check is ticked since the review started (${calls2} requests)`);
+    const unW = await tool('dailies', { action: 'untick', id: wk.id });
+    const ck2 = (await tool('weekly_review', {})).steps.find((x) => x.key === 'checks');
+    assert(!unW.ticked && db.daily_ticks.find((x) => x.id === 'tkw').state === 'cleared' && !ck2.done && ck2.data.count === 1 && ck2.data.items[0].id === wk.id && ck2.data.items[0].ticked === false && /dailies tick/.test(ck2.data.note), 'untick: the tick from the earlier day is cleared, not deleted, and the step lists what is left');
+    const tkW = await tool('dailies', { action: 'tick', title: 'am i reviewing?' });
+    assert(tkW.ticked && tkW.last_ticked === localToday() && db.daily_ticks.some((x) => x.task_id === wk.id && x.day === localToday() && x.state === 'done') && !krow.completed_at && (await tool('weekly_review', {})).steps.find((x) => x.key === 'checks').done, 'tick: for this review; the action stays open');
+    rev.completed_at = new Date().toISOString();
+    db.daily_ticks.filter((x) => x.task_id === wk.id).forEach((x) => { x.day = x.day === localToday() ? dstr(1) : x.day; });
+    assert((await tool('dailies', {})).weekly[0].ticked === false, 'the review finished: the next one starts it fresh');
+    const viaU = await tool('update_task', { id: plain.id, daily: 'weekly' });
+    assert(viaU.daily.every === 'week' && viaU.daily.summary === 'Every week, in the Weekly Review', 'update_task daily "weekly" makes a weekly check');
+    const backD = await tool('dailies', { action: 'set', id: plain.id, every: 'day', tier: 'must' });
+    assert(backD.daily === 'Have to, every day' && !db.tasks.find((t) => t.id === plain.id).daily.every && await refuse('dailies', { action: 'set', id: plain.id, every: 'month' }, /"day" or "week"/), 'set every day makes it daily again; every is day or week');
+    await tool('dailies', { action: 'clear', id: plain.id });
+    krow.dropped_at = new Date().toISOString();
+  }
   [walk.id, meds.id, plain.id].forEach((x) => { const t = db.tasks.find((y) => y.id === x); t.dropped_at = new Date().toISOString(); });
   db.daily_ticks.length = 0;
 }

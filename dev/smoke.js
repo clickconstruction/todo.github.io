@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, treeReview, dailies, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -1959,18 +1959,102 @@ async function whatNow(check) {
   check('Done completes it', !!T().tasks.find((x) => x.id === second).completed_at);
 }
 
+// Weekly checks: a checkbox ticked once per Weekly Review (daily.every = 'week'). Never in Today; each review starts it fresh.
+async function weeklyChecks(check) {
+  const { app, db } = await import('/js/state.js');
+  const av = await import('/js/availability.js');
+  const D = await import('/js/dailies.js');
+  const { loadAll } = await import('/js/data.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const day = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - n); return D.dayKey(d); };
+  const iso = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  const t = T();
+  const task = (id) => t.tasks.find((x) => x.id === id);
+  const local = (id) => db.tasks.find((x) => x.id === id);
+  const base = { ...t.tasks[0], notes: '', project_id: null, parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, completed_at: null, dropped_at: null, gain: '', waiting_on: null, agenda_for: null, scheduled_at: null, checklist_id: null, created_at: iso(30), updated_at: iso(30) };
+  const tick = (id, taskId, n, state = 'done') => t.daily_ticks.push({ id, user_id: 'u1', task_id: taskId, day: day(n), state, created_at: iso(n), updated_at: iso(n) });
+  t.tasks.push({ ...base, id: 'wA', title: 'Am I reviewing?', daily: { tier: 'should', every: 'week', since: day(20) } });
+  t.tasks.push({ ...base, id: 'wR', title: 'Does my daily routine support good work?', project_id: 'p1', due_at: iso(2), repeat_rule: { every: 1, unit: 'week', from: 'completion', n: 1 } });
+  tick('tw9', 'wA', 9);
+  await loadAll();
+
+  await go('#forecast');
+  check('a weekly check is not in Today and not an available action', !$$('#view .row').some((r) => r.dataset.task === 'wA') && !av.isAvailable(local('wA')) && D.isWeekly(local('wA')));
+  await go('#weekly');
+  const stepLink = () => $('a.wk-step[href="#weekly/checks"]');
+  check('Weekly Review: Weekly checks is a step under Get current, counting what is ticked', $$('.wk-step').length === 13 && !!stepLink() && !stepLink().classList.contains('done') && has('a.wk-step[href="#weekly/checks"]', 'weekly checks', '0 of 1 ticked')
+    && $$('.wk-step').map((a) => a.getAttribute('href')).indexOf('#weekly/checks') === $$('.wk-step').map((a) => a.getAttribute('href')).indexOf('#weekly/projects') + 1, text('a.wk-step[href="#weekly/checks"]'));
+  await go('#weekly/checks');
+  check('the step lists each check with its box and when it was last ticked', $$('.wk-checks .dly-row').length === 1 && has('.dly-row[data-task="wA"]', 'am i reviewing?', 'last ticked') && $('.dly-row[data-task="wA"] [data-dly-tick]').getAttribute('aria-pressed') === 'false' && has(undefined, 'starts them fresh'));
+  $('.dly-row[data-task="wA"] [data-dly-tick]').click();
+  await until(() => t.daily_ticks.some((x) => x.task_id === 'wA' && x.day === day(0) && x.state === 'done')); await wait(100);
+  check('tick: recorded, the action stays open, the box is on', !task('wA').completed_at && $('.dly-row[data-task="wA"] [data-dly-tick]').getAttribute('aria-pressed') === 'true' && has('#toast', 'this week’s review') && has('.dly-row[data-task="wA"]', 'ticked today'));
+  await go('#weekly');
+  check('every check ticked: the step is done without pressing Step done', stepLink().classList.contains('done') && has('a.wk-step[href="#weekly/checks"]', '1 of 1 ticked', 'done') && !has('a.wk-step[href="#weekly/checks"]', 'nothing to do'));
+  await go('#weekly/checks');
+  $('.dly-row[data-task="wA"] [data-dly-tick]').click();
+  await until(() => t.daily_ticks.some((x) => x.task_id === 'wA' && x.day === day(0) && x.state === 'cleared')); await wait(100);
+  check('un-tick: the tick is cleared, not deleted', t.daily_ticks.filter((x) => x.task_id === 'wA').length === 2 && $('.dly-row[data-task="wA"] [data-dly-tick]').getAttribute('aria-pressed') === 'false');
+
+  // Ticked means ticked since this review started: a review open for three days counts a tick from two days ago.
+  t.weekly_reviews.push({ id: 'wr1', user_id: 'u1', started_at: iso(3), completed_at: null, abandoned_at: null, steps: {}, stats: {}, created_at: iso(3), updated_at: iso(3) });
+  tick('tw2', 'wA', 2);
+  await loadAll(); app.render(); await wait(50);
+  check('a tick since the review started counts; one from before it does not', D.isTicked(local('wA')) && $('.dly-row[data-task="wA"] [data-dly-tick]').getAttribute('aria-pressed') === 'true' && t.daily_ticks.find((x) => x.id === 'tw9').state === 'done');
+  $('.dly-row[data-task="wA"] [data-dly-tick]').click();
+  await until(() => t.daily_ticks.find((x) => x.id === 'tw2').state === 'cleared'); await wait(100);
+  check('un-ticking clears the tick from the earlier day', t.daily_ticks.find((x) => x.id === 'tw2').state === 'cleared' && t.daily_ticks.find((x) => x.id === 'tw9').state === 'done' && !D.isTicked(local('wA')));
+  tick('tw1', 'wA', 1);
+  t.weekly_reviews.find((r) => r.id === 'wr1').completed_at = iso(0);
+  await loadAll(); app.render(); await wait(50);
+  check('the review is finished: the next one starts it fresh', !D.isTicked(local('wA')) && has('.dly-row[data-task="wA"]', 'last ticked'));
+
+  // The editor: a weekly repeating question becomes a weekly check.
+  await go('#project/p1');
+  $('.row[data-task="wR"] .row-title').click(); await wait(200);
+  const form = $('#sheet form');
+  form.elements.daily_tier.value = 'week'; form.elements.daily_tier.dispatchEvent(new Event('change', { bubbles: true }));
+  check('editor: “Every week, in the Weekly Review” hides the days and says where it goes', [...form.elements.daily_tier.options].some((o) => o.value === 'week' && /every week, in the weekly review/i.test(o.textContent)) && $('.dly-days', form).hidden && /weekly review/i.test($('[data-dly-hint]', form).textContent));
+  form.requestSubmit();
+  await until(() => task('wR').daily); await wait(150);
+  check('saved: a weekly check, its repeat and due date cleared', task('wR').daily.every === 'week' && task('wR').daily.tier === 'should' && !!task('wR').daily.since && task('wR').repeat_rule === null && task('wR').due_at === null, JSON.stringify(task('wR').daily));
+  check('in its project the row has a checkbox, not Complete, and says it is weekly', !!$('.row[data-task="wR"] [data-dly-tick]') && !$('.row[data-task="wR"] [data-check]') && has('.row[data-task="wR"]', 'every week'));
+  $('.row[data-task="wR"] .row-title').click(); await wait(200);
+  check('the editor opens it as weekly', $('#sheet form').elements.daily_tier.value === 'week' && $('.dly-days', $('#sheet form')).hidden);
+  $('#sheet').close(); await wait(50);
+  await go('#weekly/checks');
+  check('both checks are in the step', $$('.wk-checks .dly-row').length === 2);
+
+  // Full Review: a suggestion makes it a weekly check on Submit; Undo puts the repeat and due date back.
+  t.tasks.push({ ...base, id: 'wF', title: 'Did I send everyone their items?', due_at: iso(2), repeat_rule: { every: 1, unit: 'week', from: 'completion', n: 1 }, import_id: 'imW' });
+  t.review_sessions.push({ id: 'sW', user_id: 'u1', title: 'Full Review', scope: {}, current_item: 'iW', status: 'active', agent_seen_at: null, agent_status: '', finished_at: null, created_at: iso(0), updated_at: iso(0) });
+  t.review_items.push({ id: 'iW', session_id: 'sW', user_id: 'u1', sort: 1, kind: 'task', task_id: 'wF', grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: { decision: 'keep', daily: { tier: 'should', every: 'week' }, at: iso(0) }, created_at: iso(0), updated_at: iso(0) });
+  await loadAll(); app.fr = null;
+  await go('#full/sW');
+  await until(() => has(undefined, 'did i send everyone') && !!$('.sg-bar'));
+  check('Full Review: the suggestion says it becomes a weekly check, previews the box and says where it goes', has('.sg-bar', 'make it a weekly check', 'every week, in the weekly review', 'starts fresh each review') && !!$('.sg-bar [data-dly-preview="weekly"] .dly-box') && has('.sg-bar .sg-dly-where', 'weekly review', 'weekly checks'), text('.sg-bar'));
+  $('[data-fr="submit"]').click();
+  await until(() => task('wF').daily);
+  check('Submit: the action is a weekly check, its repeat and due date gone', task('wF').daily && task('wF').daily.every === 'week' && task('wF').repeat_rule === null && task('wF').due_at === null, JSON.stringify(task('wF').daily));
+  await wait(300);
+  const undo = $('[data-fr="undo"]');
+  if (undo) { undo.click(); await until(() => !task('wF').daily); }
+  check('Undo: an ordinary repeating action again, due date back', !!undo && !task('wF').daily && task('wF').repeat_rule && task('wF').repeat_rule.unit === 'week' && !!task('wF').due_at);
+  app.fr = null;
+}
+
 // Weekly Review: guided steps, saved progress, auto-done steps, stale actions, summary.
 async function weeklyReview(check) {
   const { db } = await import('/js/state.js');
   T().tasks.find((t) => t.id === 't5').updated_at = new Date(Date.now() - 90 * 86400000).toISOString(); // stale
   const { loadAll } = await import('/js/data.js'); await loadAll();
   await go('#weekly');
-  check('overview: three stages, twelve steps, time estimate, start button', has(undefined, 'weekly review', 'get clear', 'get current', 'get creative', 'about') && $$('.wk-step').length === 12 && !!$('[data-weekly="start"]'), text());
+  check('overview: three stages, thirteen steps, time estimate, start button', has(undefined, 'weekly review', 'get clear', 'get current', 'get creative', 'about') && $$('.wk-step').length === 13 && !!$('[data-weekly="start"]'), text());
   check('steps with nothing to do are already ticked (waiting)', $('a.wk-step[href="#weekly/waiting"]').classList.contains('done'));
   $('[data-weekly="start"]').click(); await wait(250);
-  check('starting saves a review row', T().weekly_reviews.length === 1 && !T().weekly_reviews[0].completed_at && has(undefined, '2 of 10 steps') === false && has(undefined, 'of 12 steps'));
+  check('starting saves a review row', T().weekly_reviews.length === 1 && !T().weekly_reviews[0].completed_at && has(undefined, '2 of 10 steps') === false && has(undefined, 'of 13 steps'));
   await go('#weekly/papers');
-  check('a step page: title, step 1 of 10, hint, capture box', has(undefined, 'collect loose papers', '1 of 12', 'receipts') && !!$('[data-wk-capture]'));
+  check('a step page: title, step 1 of 10, hint, capture box', has(undefined, 'collect loose papers', '1 of 13', 'receipts') && !!$('[data-wk-capture]'));
   const cap = $('[data-wk-capture] input'); cap.value = 'Receipt from the supply house'; cap.closest('form').requestSubmit(); await wait(250);
   check('capture from a step lands in the Inbox', T().tasks.some((t) => t.title === 'Receipt from the supply house' && t.in_inbox));
   $('[data-weekly="step-done"]').click(); await wait(300);

@@ -17,6 +17,7 @@ import { somedayListHtml } from './someday.js';
 import { parkCount } from './matrix.js';
 import { horizonsDue, liveAreas, bigDue, quarterlyBody } from './horizons.js';
 import { readingNow, notesToWrite, ensureFinished } from './reading.js';
+import { weeklyChecks, weeklyRow, isTicked } from '../dailies.js';
 
 // ---------- the review row ----------
 export const openReview = () => (db.weeklyReviews || []).find((r) => !r.completed_at && !r.abandoned_at) || null;
@@ -68,10 +69,15 @@ function ctx() {
   ensureFinished();
   const fleeting = (db.slipbox || []).filter((n) => n.kind === 'fleeting' && !n.archived_at).length;
   const toWrite = notesToWrite().length;
-  const count = { inbox, stale, waiting: waiting.length, projects: projectsDue + stuck, someday: some.tasks.length + some.projects.length, horizons: hz, notes: fleeting + toWrite };
+  const checks = weeklyChecks();
+  const ticked = checks.filter((t) => isTicked(t)).length;
+  const count = { inbox, stale, waiting: waiting.length, projects: projectsDue + stuck, checks: checks.length, someday: some.tasks.length + some.projects.length, horizons: hz, notes: fleeting + toWrite };
   // Nothing to do = done without a click.
-  const auto = { inbox: inbox === 0, stale: stale === 0, waiting: dueFollow === 0, projects: projectsDue === 0 && stuck === 0, horizons: hz === 0, notes: fleeting + toWrite === 0 };
+  const auto = { inbox: inbox === 0, stale: stale === 0, waiting: dueFollow === 0, projects: projectsDue === 0 && stuck === 0, checks: checks.length === 0, horizons: hz === 0, notes: fleeting + toWrite === 0 };
+  // Done by doing the work, without pressing "Step done": every weekly check ticked.
+  const worked = { checks: checks.length > 0 && ticked === checks.length };
   const note = {
+    checks: checks.length ? `${ticked} of ${checks.length} ticked` : 'none set up',
     inbox: inbox ? `${inbox} to clarify` : 'empty',
     stale: stale ? `${stale}` : 'none',
     waiting: waiting.length ? `${waiting.length}${dueFollow ? ` · ${dueFollow} to follow up` : ' · none due'}` : 'nothing',
@@ -80,12 +86,12 @@ function ctx() {
     notes: fleeting + toWrite ? [fleeting && `${fleeting} fleeting`, toWrite && `${toWrite} finished`].filter(Boolean).join(' · ') : 'nothing waiting',
     horizons: hz ? `${hz} due` : liveAreas().length ? 'none due' : 'not set up',
   };
-  return { count, auto, note };
+  return { count, auto, worked, note };
 }
 export function stepStatus(r = openReview()) {
   const c = ctx();
   return STEPS.map((s) => {
-    const done = !!(r && r.steps && r.steps[s.key]) || !!c.auto[s.key];
+    const done = !!(r && r.steps && r.steps[s.key]) || !!c.auto[s.key] || !!c.worked[s.key];
     return { ...s, done, auto: !(r && r.steps && r.steps[s.key]) && !!c.auto[s.key], note: c.note[s.key] || '', mins: s.minutes(c.count[s.key] || 0) };
   });
 }
@@ -192,6 +198,13 @@ const STEP_BODY = {
     return `${due ? `<div class="wk-card"><p class="wk-big">${due}</p><p>project${due === 1 ? '' : 's'} due for review</p><a class="btn primary" href="#review">Review projects</a></div>` : '<div class="wk-card"><p class="wk-big">✓</p><p>No projects due for review.</p></div>'}
       ${stuck.length ? `<h2 class="section-title">Stuck · ${stuck.length} <span class="hint">no next action</span></h2>${stuck.map((p) => `<div class="wk-stuck">${projectRow(p)}
         <form class="capture" data-capture data-project="${p.id}"><input type="text" name="title" placeholder="Next action for ${esc(p.name)}…" autocomplete="off" enterkeyhint="done"><button class="btn">Add</button></form></div>`).join('')}` : ''}`;
+  },
+  checks: () => {
+    const list = weeklyChecks();
+    if (!list.length) return `<div class="wk-card"><p class="wk-big">☑</p><p>No weekly checks yet.</p></div>
+      <p class="hint">A weekly check is a question or routine you tick once a week, here, instead of a repeating action that goes overdue. To make one, open an action → Repeat and alerts → Every day → “Every week, in the Weekly Review”, or ask Claude.</p>`;
+    return `<ul class="list dly-list wk-checks">${list.map((t) => weeklyRow(t)).join('')}</ul>
+      <p class="hint">Ticks are for this review only: the next one starts them fresh. Tap a line to open it.</p>`;
   },
   someday: () => { const n = parkCount(); return `${n ? `<p class="wk-park">🔲 ${n.toLocaleString()} action${n === 1 ? ' is' : 's are'} neither urgent nor important. <a href="#matrix/park">Park them?</a></p>` : ''}${somedayListHtml({ embedded: true })}`; },
   notes: () => {
