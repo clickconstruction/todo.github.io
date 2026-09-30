@@ -1,7 +1,7 @@
 // Slipbox (#slipbox, #slipbox/<id>): one idea per note, in your own words, linked with [[Title]].
 // Fleeting notes (just captured) wait to be processed into permanent ones; notes are archived, never
 // deleted, and never show up in your lists. Export gives an Obsidian-ready folder of Markdown files.
-import { db, app, sb, run, esc, byId, toast, syncRow } from '../state.js';
+import { db, app, sb, run, esc, byId, toast, syncRow, ask } from '../state.js';
 import { searchNotes, outgoing, backlinks, exportFiles, zip, linkTitles } from '../slipbox.js';
 import { fmtDate } from '../dates.js';
 
@@ -101,11 +101,11 @@ export async function slipAction(el) {
   }
   if (a === 'new-linked') { const row = await addNote({ title: el.dataset.title.slice(0, 300) }); location.hash = `#slipbox/${row.id}`; return; }
   if (a === 'insert-link') {
+    const title = await ask('Link which note?', { placeholder: 'Part of its title', ok: 'Insert link' });
     const box = document.querySelector('.sl-note textarea');
-    const title = prompt('Link which note? (type part of its title)');
     if (!box || !title) return;
-    const hit = notes().find((x) => x.title.toLowerCase().includes(title.trim().toLowerCase()));
-    const t = hit ? hit.title : title.trim();
+    const hit = notes().find((x) => x.title.toLowerCase().includes(title.toLowerCase()));
+    const t = hit ? hit.title : title;
     const at = box.selectionStart ?? box.value.length;
     box.value = `${box.value.slice(0, at)}[[${t}]]${box.value.slice(at)}`;
     box.focus();

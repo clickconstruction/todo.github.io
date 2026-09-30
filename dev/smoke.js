@@ -9,6 +9,13 @@ const text = (s = '#view') => ($(s) ? $(s).innerText.replace(/\s+/g, ' ').toLowe
 const has = (s, ...needles) => { const t = text(s); return needles.every((n) => t.includes(n.toLowerCase())); };
 const go = async (hash) => { location.hash = hash; await wait(120); };
 const T = () => window.__mock.tables;
+// Answer the app's one-line question sheet (ask() in js/state.js); null presses Cancel.
+const answer = async (value) => {
+  for (let i = 0; i < 20 && !$('#sheet2').open; i++) await wait(50);
+  if (value === null) $('#sheet2 [data-cancel]').click();
+  else { $('#sheet2 [name=answer]').value = value; $('#sheet2 form').requestSubmit(); }
+  await wait(80);
+};
 
 // Reset mock data and reload it through the app's own modules (same instances the page uses).
 async function reload() {
@@ -38,7 +45,7 @@ async function reload() {
 
 export async function run({ only } = {}) {
   window.confirm = () => true;
-  window.prompt = () => 'Smoke tag';
+  window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
   const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, treeReview, dailies, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
@@ -1744,8 +1751,18 @@ async function captureAnywhere(check) {
   await go('#settings');
   for (let i = 0; i < 20 && !has(undefined, 'capture from anywhere'); i++) await wait(100);
   check('Settings: Capture from anywhere and Waiting For by email', has(undefined, 'capture from anywhere', 'create a capture key', 'waiting for by email', 'bcc', '[3d]'));
-  window.prompt = () => 'iPhone';
-  $('[data-act="new-capture-key"]').click();
+  // Naming a token: the app's own sheet, not the browser's prompt box.
+  $('[data-act="new-token"]').click(); await wait(80);
+  check('Create token asks for a name in the app’s sheet', $('#sheet2').open && has('#sheet2', 'name this token', 'create token') && document.activeElement === $('#sheet2 [name=answer]'));
+  await answer(null);
+  check('Cancel makes no token', !$('#sheet2').open && !T().api_tokens.length);
+  $('[data-act="new-token"]').click(); await answer('  grace-macbookpro ');
+  for (let i = 0; i < 20 && !$('#sheet').open; i++) await wait(100);
+  check('a named token is saved (trimmed) and shown once with its command', T().api_tokens.some((t) => t.name === 'grace-macbookpro' && !t.scope) && has('#sheet', 'token created', 'claude code command') && $$('#sheet textarea')[1].value.startsWith('claude mcp add'));
+  $('#sheet').close(); await wait(300);
+  $('[data-act="new-capture-key"]').click(); await wait(80);
+  check('a capture key is named in the app’s own sheet, with this device filled in', $('#sheet2').open && has('#sheet2', 'which device is this key for') && ['iPhone', 'iPad'].includes($('#sheet2 [name=answer]').value));
+  await answer('iPhone');
   for (let i = 0; i < 20 && !$('#sheet').open; i++) await wait(100);
   const key = T().api_tokens.find((t) => t.scope === 'capture');
   check('capture key saved (Inbox-only scope, hashed)', key && key.name === 'iPhone (capture)' && key.token_hash && key.token_hash.length === 64);
@@ -1759,7 +1776,6 @@ async function captureAnywhere(check) {
   check('capture keys listed apart from agent tokens', has(undefined, 'iphone (capture)', 'inbox only'));
   const sel = $('[data-setting-waiting-days]'); sel.value = '3'; sel.dispatchEvent(new Event('change', { bubbles: true })); await wait(250);
   check('default follow-up for emailed Waiting For saves', T().user_settings[0].waiting_followup_days === 3);
-  window.prompt = () => 'Smoke tag';
   // Photo from quick capture.
   const { openQuickEntry } = await import('/js/editors/task.js');
   openQuickEntry(); await wait(80);
@@ -4038,8 +4054,9 @@ async function reminders(check) {
   check('preset added with its fire time', has('#editor [data-notify-list]', '1 hour before due') && /4:00/.test(text('#editor [data-notify-list]')), text('#editor [data-notify-list]'));
   pick(f, 'before_planned:0');
   check('warns when the date it needs is missing', has('#editor [data-notify-list]', 'needs a planned date'));
-  window.prompt = () => '3h';
-  pick(f, 'custom');
+  pick(f, 'custom'); await wait(80);
+  check('custom offset is asked over the editor, which stays open', $('#sheet2').open && $('#sheet').open && has('#sheet2', 'how long before'));
+  await answer('3h');
   check('custom offset (3h) added', has('#editor [data-notify-list]', '3 hours before due'));
   pick(f, 'at');
   $('[data-notify-at]', f).value = '2026-12-24T08:00';
@@ -4052,7 +4069,6 @@ async function reminders(check) {
   check('three reminders saved', mine('t3').length === 3, mine('t3').map((n) => n.kind).join());
   const hourBefore = mine('t3').find((n) => n.kind === 'before_due' && n.offset_minutes === 60);
   check('fire time = due − 1 hour', new Date(task('t3').due_at) - new Date(hourBefore.fire_at) === 3600e3);
-  window.prompt = () => 'Smoke tag';
 
   await go('#project/p1');
   check('row shows 🔔', !!$('[data-task="t3"] .meta-bell'));

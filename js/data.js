@@ -1,5 +1,5 @@
 // Reads and writes. Every write goes to Supabase first, then updates `db`.
-import { sb, db, app, run, inflight, syncRow, toast, byId, isOpen, taskSort, onHoldTagFor } from './state.js';
+import { sb, db, app, run, inflight, syncRow, toast, ask, byId, isOpen, taskSort, onHoldTagFor } from './state.js';
 import { loadSettings } from './prefs.js';
 import { openCompletionNote } from './editors/completion.js';
 import { saveReminders, refreshReminders } from './editors/notifyField.js';
@@ -383,7 +383,7 @@ export async function ensureTag(label) {
 }
 
 export async function createTag() {
-  const label = prompt('Tag name (use "Parent : Child" to nest, e.g. Waiting : Hiro)');
+  const label = await ask('New tag', { placeholder: 'Tag name', hint: 'Use “Parent : Child” to nest, e.g. Waiting : Hiro', ok: 'Add tag' });
   if (!label) return;
   await ensureTag(label);
   app.render();

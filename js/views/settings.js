@@ -4,7 +4,7 @@ import { keyboardHtml, shortcutListHtml } from '../shortcuts.js';
 import { localTz } from '../repeat.js';
 import { activePlaces } from '../places.js';
 import { liveCalendars, maskUrl, COLORS, checkLink, addCalendar, updateCalendar, archiveCalendar, fmtEventTime } from '../calendars.js';
-import { sb, app, esc, run, toast, openSheet, $, sortedTags, tagLabel } from '../state.js';
+import { sb, app, esc, run, toast, openSheet, ask, $, sortedTags, tagLabel } from '../state.js';
 import { fmtDate } from '../dates.js';
 import { resultLines, stripIcon, when, timeOnly } from '../pushResult.js';
 import { captureSection, createCaptureKey, openCaptureGuide } from './capture.js';
@@ -80,8 +80,8 @@ export function viewSettings() {
 }
 
 export async function createToken() {
-  const name = prompt('Name this token (e.g. "Claude Code on MacBook")');
-  if (!name || !name.trim()) return;
+  const name = await ask('Name this token', { placeholder: 'Claude Code on MacBook', hint: 'Make one per computer, so you can revoke one without breaking the others.', ok: 'Create token' });
+  if (!name) return;
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   const token = 'tt_' + btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));

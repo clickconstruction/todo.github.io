@@ -1,7 +1,7 @@
 // Notifications field (custom reminders) for the action and project editors. Reminders are
 // kept in the notifications table; the editor collects the wanted list and the save diffs it
 // (unchanged reminders are kept, so one that already fired isn't sent again).
-import { sb, db, $, esc, run } from '../state.js';
+import { sb, db, $, esc, run, ask, toast } from '../state.js';
 import { fromDateInput, fromDateTimeInput, toDateTimeInput, HOURS } from '../dates.js';
 
 const OPTIONS = [
@@ -73,10 +73,11 @@ export function wireNotifyField(form, existing, onChange = () => {}) {
       return;
     }
     if (v === 'custom') {
-      const s = prompt('How long before it’s due? e.g. 45m, 3h, 2d', '2h');
-      const m = s && s.trim().match(/^(\d+)\s*([mhd])?$/i);
-      if (!m) return;
-      push({ kind: 'before_due', offset_minutes: Number(m[1]) * ({ m: 1, h: 60, d: 1440 }[(m[2] || 'm').toLowerCase()]), at: null });
+      ask('How long before it’s due?', { value: '2h', hint: 'For example 45m, 3h or 2d', ok: 'Add reminder' }).then((s) => {
+        const m = s && s.match(/^(\d+)\s*([mhd])?$/i);
+        if (!m) { if (s) toast('Use a number and m, h or d, like 45m, 3h or 2d'); return; }
+        push({ kind: 'before_due', offset_minutes: Number(m[1]) * ({ m: 1, h: 60, d: 1440 }[(m[2] || 'm').toLowerCase()]), at: null });
+      });
       return;
     }
     const [kind, mins] = v.split(':');

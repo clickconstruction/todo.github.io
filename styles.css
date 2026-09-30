@@ -410,6 +410,8 @@ h1.review { color: #3b82f6; }
 .place-form input[type=range] { width: 100%; accent-color: var(--here); }
 .form-error { color: var(--due); margin: 0; font-size: 14px; }
 .sheet-top { z-index: 20; }
+/* A one-line question (ask() in js/state.js) */
+.ask-form .hint { margin: 0; }
 /* Location field inside editors */
 .loc-field { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 12px; margin: 0; display: grid; gap: 10px; min-width: 0; }
 .loc-field legend { font-size: 13px; font-weight: 600; color: var(--muted); padding: 0 4px; }

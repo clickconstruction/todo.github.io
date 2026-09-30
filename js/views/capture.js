@@ -1,7 +1,7 @@
 // Capture from anywhere: capture keys (scope 'capture': can only add to the Inbox) and the step-by-step
 // guide to the iPhone Shortcut "Add to Todo" (Siri, lock screen, Action button, Share sheet).
 // Plus things shared to the app (Android / desktop Share menu), which the service worker hands over.
-import { db, app, sb, run, esc, toast, openSheet, $ } from '../state.js';
+import { db, app, sb, run, esc, toast, openSheet, ask, $ } from '../state.js';
 import { uploadFiles } from '../editors/attachField.js';
 
 export const CAPTURE_URL = 'https://mcp.todotooling.com/capture';
@@ -15,8 +15,8 @@ async function newToken() {
 
 // One key per device, so a lost phone can be revoked without breaking the others.
 export async function createCaptureKey(after = () => {}) {
-  const name = prompt('Which device is this key for?', /iPad/.test(navigator.userAgent) ? 'iPad' : 'iPhone');
-  if (!name || !name.trim()) return;
+  const name = await ask('Which device is this key for?', { value: /iPad/.test(navigator.userAgent) ? 'iPad' : 'iPhone', ok: 'Create key' });
+  if (!name) return;
   const { token, token_hash } = await newToken();
   await run(sb.from('api_tokens').insert({ name: `${name.trim()} (capture)`, token_hash, token_hint: token.slice(-4), scope: 'capture' }));
   await after();

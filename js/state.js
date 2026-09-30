@@ -120,3 +120,30 @@ export function openSheet(html) {
   sheet.innerHTML = html;
   return sheet;
 }
+
+// One short answer, asked in the app's own sheet (the browser's prompt() box is unstyled and white
+// on the dark app in Safari). Resolves with the trimmed answer, or null when cancelled or left empty.
+// It uses #sheet2, so it can sit on top of an open editor.
+export function ask(title, { value = '', placeholder = '', hint = '', ok = 'OK' } = {}) {
+  const dlg = $('#sheet2');
+  dlg.innerHTML = `<form method="dialog" class="ask-form">
+    <h2>${esc(title)}</h2>
+    <input type="text" name="answer" value="${esc(value)}" placeholder="${esc(placeholder)}" aria-label="${esc(title)}" autocomplete="off" required>
+    ${hint ? `<p class="hint">${esc(hint)}</p>` : ''}
+    <div class="actions"><div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">${esc(ok)}</button></div></div>
+  </form>`;
+  const form = $('form', dlg);
+  const input = form.elements.answer;
+  return new Promise((resolve) => {
+    // Answered here, not in the close event: browsers send that with the next frame, which a
+    // hidden tab never draws. The close event still covers Escape.
+    let settled = false;
+    const done = (answer) => { if (settled) return; settled = true; if (dlg.open) dlg.close(); resolve(answer); };
+    form.onsubmit = (e) => { e.preventDefault(); done(input.value.trim() || null); };
+    $('[data-cancel]', form).onclick = () => done(null);
+    dlg.addEventListener('close', () => done(null), { once: true });
+    dlg.showModal();
+    input.focus();
+    input.select();
+  });
+}
