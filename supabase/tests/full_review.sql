@@ -1,4 +1,4 @@
--- Full Review (migrations 20261015000001/2). One rolled-back transaction; every row should be ok = true.
+-- Full Review (migrations 20261015000001/2, and 20261106000001 for Keep Claude ahead). One rolled-back transaction; every row should be ok = true.
 begin;
 insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000f5','00000000-0000-0000-0000-000000000000','authenticated','authenticated','fr@test.invalid');
 insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000f6','00000000-0000-0000-0000-000000000000','authenticated','authenticated','fr2@test.invalid');
@@ -44,10 +44,15 @@ insert into r (test, ok, detail) select 'accept keep_newest 1: the two older →
   and (select status = 'done' and current_item is null from public.review_sessions where id = '00000000-0000-0000-0000-00000000f201'), (select v::text from res where k = 'd4');
 do $$ begin delete from public.review_items where session_id = '00000000-0000-0000-0000-00000000f201'; insert into r (test, ok) values ('cards are never deleted', (select count(*) from public.review_items where session_id = '00000000-0000-0000-0000-00000000f201') = 5);
 exception when others then insert into r (test, ok, detail) values ('cards are never deleted', true, sqlerrm); end $$;
+insert into r (test, ok, detail) select 'Keep Claude ahead: off on a new review', (select draft_ahead = false from public.review_sessions where id = '00000000-0000-0000-0000-00000000f201'), '';
+update public.review_sessions set draft_ahead = true where id = '00000000-0000-0000-0000-00000000f201';
+insert into r (test, ok, detail) select 'Keep Claude ahead: its owner turns it on', (select draft_ahead from public.review_sessions where id = '00000000-0000-0000-0000-00000000f201'), '';
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000f6","role":"authenticated"}', true);
+update public.review_sessions set draft_ahead = false where id = '00000000-0000-0000-0000-00000000f201';
 do $$ begin perform public.review_undo('00000000-0000-0000-0000-00000000f302'); insert into r (test, ok) values ('another user: not found', false);
 exception when others then insert into r (test, ok, detail) values ('another user: not found', sqlerrm like 'Card not found%', sqlerrm); end $$;
 insert into r (test, ok, detail) select 'another user sees no sessions', count(*) = 0, '' from public.review_sessions;
 reset role;
+insert into r (test, ok, detail) select 'Keep Claude ahead: another user cannot turn it off', (select draft_ahead from public.review_sessions where id = '00000000-0000-0000-0000-00000000f201'), '';
 select count(*) filter (where ok) as passed, count(*) as total, string_agg(case when not ok then test || ': ' || coalesce(detail, '') end, '; ') as failed from r;
 rollback;

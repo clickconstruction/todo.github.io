@@ -18,6 +18,7 @@ A GTD (Getting Things Done) to-do app at **[todotooling.com](https://todotooling
 - **Every day, without the pile-up:** a daily action is a checkbox that starts fresh each morning, not a repeating action that goes overdue. *Have to, every day* (medication, logging hours) shows a missed day and counts as a must-do; *Should, most days* (a walk, reading) just shows how the week is going. Both sit at the top of Forecast → Today.
 - **Your own events:** an airshow, a trip, an appointment. Forecast shows them on every day they cover, next to the calendars you subscribe to (private iCal links from Google, iCloud or Outlook), the Events list shows what's coming by month, and they reach your phone through the calendar feed. Add them with + Event or ask Claude.
 - **Reviews:** Daily, Weekly (the full GTD checklist), per-project Review, and Full Review, which walks you through a whole library card by card with Claude suggesting and you approving.
+- **Claude a few cards ahead:** tick **Keep Claude ahead** at the top of a Full Review and Claude keeps a suggestion waiting on each of the next 10 cards, so a card already has one when you reach it and you only press Submit, Edit or Dismiss. The count beside the box ("7 of 10 drafted") shows how far ahead it is. Drafts come from your patterns, not your words, so Claude never drafts Drop or Done for something you haven't let go of.
 - **Places:** actions tied to locations, with Nearby, errand runs and location alerts.
 - **Reminders:** notifications on your devices that follow an item's dates.
 - **Attachments:** files on an action or project.
@@ -42,6 +43,8 @@ A GTD (Getting Things Done) to-do app at **[todotooling.com](https://todotooling
 Make one token per computer, so you can revoke each on its own. The token is shown only once; if you lose it, make a new one and revoke the old one.
 
 To pick up a Full Review on another computer, open the review in the app, copy the prompt it offers, and paste it into a new chat there.
+
+**Keep Claude ahead** needs Claude to be running, because Claude only acts while its chat is working: the app cannot wake it. Tick the box, press **Copy prompt** (or **Prompt for Claude**) and paste it into Claude once. In Claude Code it then checks the review about every 30 seconds (with `/loop` or a scheduled wake-up) and drafts whatever is missing; a check with nothing to do is one small call. In a chat that cannot loop, it tops up each time you send a message. Untick the box and it stops. It leaves the card you are on alone, so a draft you dismissed does not come back.
 
 ## Repository layout
 

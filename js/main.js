@@ -29,7 +29,7 @@ import { noticeEmailPeople } from './views/capture.js';
 import { checklistAction, checklistChange } from './views/checklists.js';
 import { dailyAction, dailySubmit } from './views/daily.js';
 import { settleAction, settleKey } from './views/settle.js';
-import { fullReviewAction, fullReviewKey, startFullReview, activeSession, quickReview } from './views/fullreview.js';
+import { fullReviewAction, fullReviewChange, fullReviewKey, startFullReview, activeSession, quickReview } from './views/fullreview.js';
 import { moreSheetHtml, openCustomize } from './sidebar.js';
 import { initUpdates, resumeAfterUpdate, tryApply, checkNow } from './updates.js';
 import { initPullToRefresh } from './pull.js';
@@ -261,6 +261,7 @@ view.addEventListener('change', (e) => {
   if (e.target.closest('[data-tt-period]')) { app.ttPeriod = e.target.value; app.ttShowAll = null; render(); return; }
   if (e.target.closest('[data-hz-link-area], [data-hz-link-goal], [data-hz-tick]')) { horizonsChange(e); return; }
   if (planChange(e)) return;
+  if (e.target.closest('[data-fr-ahead]')) { fullReviewChange(e); return; }
   if (matrixChange(e)) return;
   if (e.target.closest('[data-cl-tick], [data-cl-note]') && location.hash.startsWith('#checklist/')) { checklistChange(e); return; }
   const doneCtl = e.target.closest('[data-done]');

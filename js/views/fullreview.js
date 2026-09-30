@@ -2,6 +2,8 @@
 // Claude in another window; it reads the same current card over the MCP (full_review), annotates it and
 // decides it with you, and the card here updates live (Realtime, with a polling fallback). Keys 1–4
 // decide, s skips, u undoes. Every decision can be undone; nothing is deleted.
+// "Keep Claude ahead" (review_sessions.draft_ahead): a box in the header. While it is ticked and Claude is
+// running, Claude keeps a suggestion waiting on each of the next cards, so a card has one when you reach it.
 import { describeDaily, isDaily, summary as dailySummary, dailyPreview } from '../dailies.js';
 import { describe } from '../repeat.js';
 import { treeChangeHtml, treeWithout } from './tree.js';
@@ -32,6 +34,7 @@ const guide = () => (guideHidden()
 const n = (x) => Number(x || 0).toLocaleString();
 const RECENT = 2 * 60000; // a field Claude changed in the last two minutes is highlighted
 const PAGE = 1000;
+const AHEAD = 10; // Keep Claude ahead: how many cards past the current one (as mcp/src/fullreview.js)
 // The live connection and the poll live here, not in app.fr, so they're always stopped (even if app.fr is reset).
 const L = { channel: null, poll: null };
 
@@ -143,6 +146,29 @@ async function poll() {
   refreshPresence();
   const cur = s && s.current_item;
   if (cur) { const [it] = await run(sb.from('review_items').select('*').eq('id', cur)); if (it) await onItem(it); }
+  if (s && s.draft_ahead) await refreshAhead();
+}
+// Keep Claude ahead: the next cards, and how many already have a suggestion waiting.
+function aheadOf(cur) {
+  const next = cur ? F().items.filter((x) => x.status === 'pending' && x.sort > cur.sort).slice(0, AHEAD) : [];
+  return { next, drafted: next.filter((x) => pending(x)).length };
+}
+// Their suggestions, read fresh: live updates usually bring them, and this is the safety net.
+async function refreshAhead() {
+  const f = F();
+  const ids = aheadOf(f.session && f.byId.get(f.session.current_item)).next.map((x) => x.id);
+  if (!ids.length) return;
+  const rows = await run(sb.from('review_items').select('id,status,suggestion,updated_at').in('id', ids));
+  let changed = false;
+  rows.forEach((row) => { const old = f.byId.get(row.id); if (old && old.updated_at !== row.updated_at) { Object.assign(old, row); changed = true; } });
+  if (changed) redraw();
+}
+// Landing on the next card: its action fresh and, while keeping ahead, the card itself, so a suggestion
+// drafted a moment ago is on it when it shows.
+async function arrive(it) {
+  const f = F();
+  const [, rows] = await Promise.all([refreshCard(it), f.session && f.session.draft_ahead ? run(sb.from('review_items').select('*').eq('id', it.id)) : []]);
+  if (rows[0]) Object.assign(it, rows[0]);
 }
 async function onItem(row) {
   const f = F();
@@ -159,12 +185,13 @@ async function onSession(row, { quiet = false } = {}) {
   if (!row) return;
   const moved = f.session && f.session.current_item !== row.current_item;
   const left = moved ? f.session.current_item : null;
-  const before = f.session && `${f.session.agent_seen_at}|${f.session.agent_status}|${f.session.status}`;
+  const key = (x) => `${x.agent_seen_at}|${x.agent_status}|${x.status}|${!!x.draft_ahead}`;
+  const before = f.session && key(f.session);
   f.session = row;
   if (moved) { const it = f.byId.get(row.current_item); if (it) await refreshCard(it); }
   // The card just left was decided somewhere (here, another device, Claude): fetch it, so Undo and Back know.
   if (left) { const [was] = await run(sb.from('review_items').select('*').eq('id', left)); if (was) { const old = f.byId.get(was.id); if (old) Object.assign(old, was); } }
-  if (moved || !quiet || before !== `${row.agent_seen_at}|${row.agent_status}|${row.status}`) redraw();
+  if (moved || !quiet || before !== key(row)) redraw();
 }
 async function refreshCard(it) {
   if (it.kind === 'task' && it.task_id) {
@@ -188,7 +215,9 @@ export const resumePrompt = (s) => `Let's continue my Full Review in Todo Toolin
 
 Use the full_review tool (Todo Tooling MCP). Start with action "status" and tell me the current card.
 
-How we work: I tell you what to do with each card in a few words. You turn it into a suggestion (action "suggest") on the current card, and I press Submit in the app. When I say "submit" (for example "submit, next card"), press Submit for me (action "submit"). Only apply changes directly if I say "just do it". Name the card in every reply, because I may have moved on in the app. Draft ahead with "upcoming" and "suggest" when I ask. Nothing gets deleted; drop means drop.`;
+How we work: I tell you what to do with each card in a few words. You turn it into a suggestion (action "suggest") on the current card, and I press Submit in the app. When I say "submit" (for example "submit, next card"), press Submit for me (action "submit"). Only apply changes directly if I say "just do it". Name the card in every reply, because I may have moved on in the app. Draft ahead with "upcoming" and "suggest" when I ask. Nothing gets deleted; drop means drop.
+
+Keep ahead${s.draft_ahead ? ' (it is on now)' : ''}: when status says draft_ahead is on (the "Keep Claude ahead" box in the app), keep a suggestion waiting on each of the next ${AHEAD} cards without being asked. Draft the ones status lists as missing ("upcoming", then "suggest" with items), then check status again about every 30 seconds for as long as it stays on (in Claude Code: /loop, or a scheduled wake-up). Leave the card I'm on alone unless I ask, and stop when I untick it.`;
 
 // ---------- undo and looking back ----------
 // Undo follows the review, not this tab: it takes back the card decided last, whoever decided it (you here,
@@ -441,9 +470,12 @@ export function viewFullReview(id) {
   const peek = f.peek && f.byId.get(f.peek);
   const last = decided[0];
   const undoBtn = (cls = 'btn small') => `<button class="${cls}" data-fr="undo" ${last ? `title="Take back the last decision (U)"` : 'disabled'}>↶ Undo${last && cardTitle(last) ? `: ${esc(short(cardTitle(last)))}` : ''}</button>`;
+  const ah = aheadOf(cur);
+  const aheadBox = `<label class="fr-ahead" title="While Claude is running, it keeps a suggestion waiting on each of the next ${AHEAD} cards, so a card has one when you reach it"><input type="checkbox" data-fr-ahead ${s.draft_ahead ? 'checked' : ''}> Keep Claude ahead${s.draft_ahead && ah.next.length ? ` <span class="hint">${ah.drafted} of ${ah.next.length} drafted</span>` : ''}</label>`;
   const backBtn = `<button class="btn small" data-fr="look-back" ${decided.length && (!peek || decided[decided.length - 1].id !== peek.id) ? '' : 'disabled'} title="Look at the card before, without changing anything (←)">← Back</button>`;
   const head = `<div class="fr-head"><div><b>${esc(s.title)}</b> <span class="hint">· ${n(pos)} of ${n(live.length)} · ${n(done)} reviewed${skipped ? ` · ${n(skipped)} skipped` : ''}</span></div>
       <span class="fr-pres ${seen === 'away' ? '' : 'on'} ${seen}">${presenceHtml(s)}</span>
+      ${aheadBox}
       <button class="btn small fr-copy${seen === 'away' ? ' primary' : ''}" data-fr="invite" title="Copy the prompt that starts or resumes this review with Claude">⧉ Prompt for Claude</button>
       <a class="icon-btn fr-close" href="#${esc((s.scope && s.scope.import_id) ? `settle/${s.scope.import_id}` : s.scope && s.scope.project_id ? `project/${s.scope.project_id}` : 'inbox')}" aria-label="Close" title="Close (Esc)">✕</a></div>
     <div class="cl-progress"><i style="width:${live.length ? Math.round((done / live.length) * 100) : 0}%"></i></div>${app.libraryLoading ? '<p class="hint fr-loading" role="status">Loading the rest of your library…</p>' : ''}`;
@@ -490,6 +522,20 @@ export async function captureIntoReview() {
 }
 
 // ---------- actions ----------
+const copyPrompt = async () => { try { await navigator.clipboard.writeText(resumePrompt(F().session)); toast('Copied: paste it into Claude'); } catch { const b = document.querySelector('[data-fr="invite"]'); if (b) b.click(); } };
+// The "Keep Claude ahead" box. Claude only acts while its chat is running, so turning it on says how to start it.
+export async function fullReviewChange(e) {
+  const box = e.target.closest('[data-fr-ahead]');
+  const f = F();
+  if (!box || !f.session) return;
+  const on = box.checked;
+  box.blur(); // a focused box would hold back live redraws and the number keys
+  try { await run(sb.from('review_sessions').update({ draft_ahead: on }).eq('id', f.session.id)); } catch { app.render(); return; }
+  f.session = { ...f.session, draft_ahead: on };
+  app.render();
+  if (on) toast(`Claude keeps the next ${AHEAD} cards drafted while it’s running. Paste the prompt once to start it.`, { label: 'Copy prompt', run: copyPrompt });
+  else toast('Claude stops drafting ahead');
+}
 export async function fullReviewAction(el) {
   const f = F();
   const a = el.dataset.fr;
@@ -588,7 +634,7 @@ async function act(a, el) {
     run(sb.from('review_items').select('*').eq('id', cur.id)).then(([row]) => { if (row) Object.assign(cur, row); }).catch(() => {}); // its record of how things were, for Undo's message
     f.session = { ...s, current_item: r.next, status: r.next ? 'active' : 'done' };
     const nx = r.next && f.byId.get(r.next);
-    if (nx) await refreshCard(nx);
+    if (nx) await arrive(nx);
     app.render();
     return;
   }
@@ -615,7 +661,7 @@ async function act(a, el) {
       cur.status = decision === 'skip' ? 'skipped' : 'reviewed'; cur.decision = decision; cur.decided_by = 'user'; cur.reviewed_at = new Date().toISOString();
       f.session = { ...s, current_item: r.next, status: r.next ? 'active' : 'done' };
       const nx = r.next && f.byId.get(r.next);
-      if (nx) await refreshCard(nx);
+      if (nx) await arrive(nx);
       app.render();
     }
   }

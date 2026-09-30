@@ -7,6 +7,7 @@ import { buildQueue, priorityReason, proposalText } from '../../js/review.js';
 import { parseItemLines } from './checklists.js';
 
 const MAX_NOTES = 6000; // as everywhere notes are taken
+const AHEAD = 10; // "Keep Claude ahead": how many cards past the current one get a suggestion drafted (as js/views/fullreview.js)
 // New notes for a card's action: plain text with its line breaks; blank means "leave the notes alone".
 const taskNotes = (v) => (v === undefined || v === null ? '' : String(v).replace(/\r\n?/g, '\n').replace(/^\s*\n/, '').trimEnd().slice(0, MAX_NOTES));
 
@@ -198,10 +199,24 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
         added: day(raw.created_at), age_days: raw.created_at ? Math.floor((Date.now() - Date.parse(raw.created_at)) / 86400000) : undefined },
       decisions: 'keep | someday | done | drop | skip | reading | slipbox' };
   }
+  // Keep Claude ahead (review_sessions.draft_ahead): which of the next cards have no suggestion waiting.
+  // One read, and only while it is on, so a quiet check stays cheap.
+  async function aheadOut(api, s, next) {
+    if (!s.draft_ahead) return { on: false };
+    if (s.status !== 'active' || !next.length) return { on: true, cards: 0, drafted: 0, missing: [], next: s.status === 'active' ? 'No cards after this one: nothing to draft.' : 'The review is finished: stop checking.' };
+    const rows = await api.q(`review_items?${api.u}&id=in.(${next.map((x) => `"${x.id}"`).join(',')})&select=id,suggestion`);
+    const has = new Set(rows.filter((r) => r.suggestion && !r.suggestion.applied_at).map((r) => r.id));
+    const missing = next.filter((x) => !has.has(x.id)).map((x) => x.id);
+    return { on: true, cards: next.length, drafted: next.length - missing.length, missing,
+      next: missing.length
+        ? `Draft these now: action "upcoming" (count ${AHEAD}) gives the cards in full, then "suggest" with items [{item_id, decision, …}] for the ones in missing. Then check status again in about 30 seconds, for as long as on is true.`
+        : 'Every one of the next cards has a suggestion waiting. Check status again in about 30 seconds; stop when on is false or the review is finished.' };
+  }
   async function stateOut(api, s, list) {
     const live = list.filter((x) => x.status !== 'void');
     const cur = live.find((x) => x.id === s.current_item);
-    const after = cur ? live.filter((x) => x.status === 'pending' && x.sort > cur.sort).slice(0, 3) : [];
+    const later = cur ? live.filter((x) => x.status === 'pending' && x.sort > cur.sort) : [];
+    const after = later.slice(0, 3);
     const singles = after.filter((x) => x.kind === 'task');
     const titles = singles.length ? await api.q(`tasks?${api.u}&id=in.(${singles.map((x) => `"${x.task_id}"`).join(',')})&select=id,title`) : [];
     const upcoming = after.map((x) => (x.kind === 'group' ? `group: ${x.label || 'similar actions'}` : (titles.find((r) => r.id === x.task_id) || {}).title)).filter(Boolean);
@@ -209,6 +224,7 @@ export function fullReviewTools({ OPEN, localDate, zonedToIso, tool }) {
       session_id: s.id, title: s.title, status: s.status, app_link: `https://todotooling.com/#full/${s.id}`,
       progress: { position: cur ? live.filter((x) => x.sort <= cur.sort).length : live.length, total: live.length, reviewed: live.filter((x) => x.status === 'reviewed').length, skipped: live.filter((x) => x.status === 'skipped').length },
       current: await cardOut(api, cur ? await itemFull(api, cur.id) : null), upcoming,
+      draft_ahead: await aheadOut(api, s, later.slice(0, AHEAD)),
     };
   }
 
@@ -219,12 +235,14 @@ Default way of working: SUGGEST, the user approves. When the user tells you what
 Big actions: when the user describes the parts ("cut the spot, run power, then…"), put them in the suggestion as steps (in order if they said so) rather than applying break_down; Submit adds them.
 Notes: task_notes in a suggestion REPLACES the action's whole notes on Submit (Undo puts the old ones back), so write the full text you want kept, as plain text with line breaks, ready to copy and paste (no Markdown). Use it to tidy an import whose text was split across the title and the notes: a short title, and the whole text in task_notes. "note" is something else: your one-line reason, shown on the card.
 Draft ahead: call "upcoming" and "suggest" with items [...] for the next few cards from the user's patterns; these show as "drafted ahead" so the user can Submit quickly and only talk to you when they disagree. Never suggest drop/done for something the user hasn't clearly let go of; the gain should be the user's words (set gain_suggested when it's yours).
+Keep ahead: the user can tick "Keep Claude ahead" in the app (or ask you to: action "ahead"). status then carries draft_ahead {on, cards, drafted, missing}. While on is true, keep a suggestion waiting on each of the next ${AHEAD} cards without being asked, so every card already has one when they reach it: draft the ones in missing (upcoming, then suggest with items), then look again about every 30 seconds for as long as it is on, if your client lets you wait or loop (Claude Code: /loop, or a scheduled wake-up); if it doesn't, top up every time the user speaks. A check with nothing missing is one status call. The card they are on is theirs: don't draft on it unless they ask (they may have just dismissed your draft). Stop when on is false or the review is finished.
 actions:
   start {import_id | project | all:true, min_age_days?, title?} → a new session (give the user app_link)
   status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
   suggest {decision, title?, tree? ({add: [{title, kind: destination | milestone | goal | card, project? (a card's project)}], links: [{node, requires}]}: additions to the tech tree, shown on the card as a preview and made on Submit with keep; names in links are items in add or goals / projects already there, which are reused, never duplicated; a destination you add with no link has "no path yet", which is honest when the first step isn't known), daily? ("must" = have to, every day | "should" = should, most days, or {tier, weekdays: [0-6]}: with keep, the action becomes a daily checkbox that starts fresh each day and its repeat and dates are cleared; for habits and daily obligations that came in as repeating actions), task_notes? (the action's new notes, replacing the old; ≤6000 characters; omitted or null = unchanged), gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down; a step can be {title, steps: [...], in_order?} to nest), steps_in_order?, checklist? ({name, items: [lines; "# Section" starts a section], reflect?, complete_action?} to make one, or an existing checklist's name: attached on Submit; use it for routines the card repeats), mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
   submit {item_id? (default current)} → apply the pending suggestion as the app's Submit does (only when the user says "submit"), then the next card
   upcoming {count? ≤10} → the next cards in full, for drafting ahead
+  ahead {on: true | false} → tick or untick "Keep Claude ahead" for this review (only when the user asks), then the status
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
   annotate {…same fields…} / decide {decision, note?} → apply now (only when asked to just do it)
   prioritize {task_ids (up to 20)} · goto {item_id | "next" | "previous"} · undo {item_id?} · list
@@ -232,7 +250,8 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['start', 'status', 'suggest', 'submit', 'upcoming', 'add', 'annotate', 'decide', 'prioritize', 'goto', 'undo', 'list'], default: 'status' },
+        action: { type: 'string', enum: ['start', 'status', 'suggest', 'submit', 'upcoming', 'ahead', 'add', 'annotate', 'decide', 'prioritize', 'goto', 'undo', 'list'], default: 'status' },
+        on: { type: 'boolean', description: 'ahead: true to keep the next cards drafted, false to stop' },
         notes: { type: 'string', description: 'add: notes for the new idea' },
         items: { type: 'array', description: 'suggest: several cards at once, each {item_id, decision, title?, task_notes?, gain?, project?, planned?, due?, defer?, flagged?, add_tags?, remove_tags?, steps?, steps_in_order?, proposal?, note?}', items: { type: 'object' } },
         ahead: { type: 'boolean', description: 'suggest: drafted before talking it through (shown as “drafted ahead”)' },
@@ -290,6 +309,12 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
       let list = await items(api, s.id);
       const cur = await itemFull(api, (list.find((x) => x.id === s.current_item) || {}).id);
       if (action === 'status') { await touch(api, s.id); return stateOut(api, s, list); }
+      if (action === 'ahead') {
+        // The app's "Keep Claude ahead" box, set for the user: the same switch, seen live in the app.
+        if (typeof a.on !== 'boolean') throw new Error('ahead needs on: true or false');
+        await touch(api, s.id, { draft_ahead: a.on });
+        return stateOut(api, { ...s, draft_ahead: a.on }, list);
+      }
       if (action === 'add') {
         // A new idea during the review: captured to the Inbox (with its gain) and added as the last card.
         if (!a.title || !String(a.title).trim()) throw new Error('title is required');

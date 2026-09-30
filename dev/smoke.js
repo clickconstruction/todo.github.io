@@ -1009,6 +1009,21 @@ async function fullReview(check) {
   $('[data-fr="invite"]').click(); await wait(50);
   check('“Prompt for Claude” copies the resume prompt: session, link, how we work', clip.includes(sid) && clip.includes(`#full/${sid}`) && clip.includes('full_review') && clip.includes('"suggest"') && clip.includes('just do it'));
   await until(() => has(undefined, 'claude is here') || true);
+  // Keep Claude ahead: a box in the header, saved on the review; the count is what's drafted on the next cards.
+  { const box = () => $('.fr-head [data-fr-ahead]'); const row = () => t.review_sessions.find((x) => x.id === sid);
+    check('Keep Claude ahead: a box in the header, off to start', !!box() && !box().checked && has('.fr-ahead', 'keep claude ahead') && !has('.fr-ahead', 'drafted'));
+    box().click(); await until(() => row().draft_ahead === true && has('.fr-ahead', 'drafted'));
+    check('ticking it saves on the review, counts the next cards and says how to start Claude', row().draft_ahead === true && box().checked && has('.fr-ahead', '0 of 3 drafted') && has('#toast', 'paste the prompt', 'copy prompt') && document.activeElement !== box());
+    clip = ''; $('#toast button').click(); await wait(50);
+    check('its prompt tells Claude to keep ahead, and that it is on', clip.includes('Keep ahead (it is on now)') && clip.includes('draft_ahead') && clip.includes('every 30 seconds'));
+    const later = t.review_items.filter((x) => x.session_id === sid && x.status === 'pending').sort((a, b) => a.sort - b.sort)[1];
+    Object.assign(later, { suggestion: { decision: 'accept', ahead: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() });
+    await until(() => has('.fr-ahead', '1 of 3 drafted'));
+    check('a suggestion drafted on a later card shows in the count', has('.fr-ahead', '1 of 3 drafted') && !$('.sg-bar'));
+    Object.assign(later, { suggestion: null, updated_at: new Date(Date.now() + 5).toISOString() });
+    await until(() => has('.fr-ahead', '0 of 3 drafted'));
+    box().click(); await until(() => row().draft_ahead === false && !has('.fr-ahead', 'drafted'));
+    check('unticking turns it off', row().draft_ahead === false && !box().checked && !has('.fr-ahead', 'drafted') && has('#toast', 'stops drafting ahead')); }
   // Claude annotates over the MCP: the card updates live, with the change highlighted and a note.
   const ses = t.review_sessions.find((x) => x.id === sid);
   const cur = t.review_items.find((x) => x.id === ses.current_item);

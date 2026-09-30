@@ -1365,6 +1365,33 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
     assert(ah.items[0].ahead === true && nextTask.suggestion.ahead === true, 'drafted ahead: marked as such');
     assert(nextTask.suggestion.task_notes === 'Seen the trailer.\nAsk Sam first.', 'suggest items [...]: task_notes on each card');
   }
+  { // Keep Claude ahead: the app's box, reported by status, settable here, cheap to check
+    const wasOn = ses.current_item; // the last card: start from the first one still to do, so there are cards ahead
+    const curRow = db.review_items.filter((x) => x.session_id === st.session_id && x.status === 'pending').sort((x, y) => x.sort - y.sort)[0];
+    await tool('full_review', { action: 'goto', item_id: curRow.id });
+    const later = () => db.review_items.filter((x) => x.session_id === st.session_id && x.status === 'pending' && x.sort > curRow.sort).sort((x, y) => x.sort - y.sort).slice(0, 10);
+    const waiting = (x) => x.suggestion && !x.suggestion.applied_at;
+    const off = await tool('full_review', { action: 'status' });
+    assert(off.draft_ahead && off.draft_ahead.on === false && off.draft_ahead.missing === undefined, 'status: draft_ahead off says only that');
+    let badA = ''; try { await tool('full_review', { action: 'ahead' }); } catch (e) { badA = e.message; }
+    const on = await tool('full_review', { action: 'ahead', on: true });
+    const want = later().filter((x) => !waiting(x)).map((x) => x.id);
+    assert(/on: true or false/.test(badA) && ses.draft_ahead === true && on.draft_ahead.on === true && on.draft_ahead.cards === later().length && later().length >= 1
+      && on.draft_ahead.missing.join() === want.join() && on.draft_ahead.drafted === later().length - want.length && !on.draft_ahead.missing.includes(curRow.id) && /upcoming/.test(on.draft_ahead.next),
+      `ahead on: the switch is saved and status lists the next cards with no suggestion, never the current one (${on.draft_ahead.drafted} of ${on.draft_ahead.cards} drafted)`);
+    if (want.length) {
+      const target = db.review_items.find((x) => x.id === want[0]);
+      await tool('full_review', { action: 'suggest', items: [{ item_id: target.id, decision: target.kind === 'group' ? 'accept' : 'someday' }] });
+      const real = globalThis.fetch; let calls = 0; globalThis.fetch = (u, ...x) => { calls += 1; return real(u, ...x); };
+      let after; try { after = await tool('full_review', { action: 'status' }); } finally { globalThis.fetch = real; }
+      assert(target.suggestion.ahead === true && !after.draft_ahead.missing.includes(target.id) && after.draft_ahead.drafted === on.draft_ahead.drafted + 1 && calls <= 15, `ahead: a drafted card leaves missing, and a check stays far inside 50 requests (${calls})`);
+      if (!after.draft_ahead.missing.length) assert(/has a suggestion waiting/.test(after.draft_ahead.next), 'ahead: nothing missing says to look again later');
+      target.suggestion = null;
+    }
+    const stop = await tool('full_review', { action: 'ahead', on: false });
+    assert(ses.draft_ahead === false && stop.draft_ahead.on === false, 'ahead off: status says so, and Claude stops');
+    await tool('full_review', { action: 'goto', item_id: wasOn });
+  }
   const before2 = db.review_items.length;
   const ad = await tool('full_review', { action: 'add', title: 'Ask the bank about a HELOC', gain: 'Cash for the barn without selling' });
   const newTask = db.tasks.find((t) => t.title === 'Ask the bank about a HELOC');
