@@ -27,7 +27,7 @@ A GTD (Getting Things Done) to-do app at **[todotooling.com](https://todotooling
 - **A purpose you can tick:** your purpose and vision are written plainly (`# title`, `## section`, `**bold**`, `*italic*`, `- bullet`) with buttons for each, and read formatted; while you edit, the page as it will read sits beside the text. A line that starts with `[ ]` is a checkbox: tick them as you read, and "Mark as read today" clears them for next time.
 - **Horizons, perspectives, the Eisenhower matrix, checklists, templates, a slipbox and a reading list.**
 - **An OmniFocus import** with a guided sort afterwards.
-- **Nothing is ever deleted.** Actions are completed or dropped, projects are completed or dropped, and folders are archived. The database enforces this.
+- **Nothing is ever deleted.** Actions are completed or dropped, projects are completed or dropped, and everything else (folders, places, events, calendars, attachments, perspectives) is archived. The database enforces this.
 
 ## Connect Claude
 
@@ -59,7 +59,7 @@ To pick up a Full Review on another computer, open the review in the app, copy t
 | `supabase/migrations/` | The database schema, rules and functions |
 | `supabase/tests/` | SQL rule tests; each runs in a transaction and rolls back |
 | `mcp/` | The MCP server, a Cloudflare Worker (also email capture, reminders, calendar feed, push) |
-| `dev/` | The in-memory Supabase mock, UI smoke tests and import tools |
+| `dev/` | The in-memory Supabase mock, UI smoke tests, import tools, and `sbq.py`, which runs SQL on the project with the Supabase CLI's saved login |
 
 `mcp/`, `supabase/` and `dev/` are excluded from the published site in `_config.yml`.
 
@@ -89,6 +89,12 @@ node mcp/test.mjs
 
 **Database tests:** run any file in `supabase/tests/` against the project. Every row of its final `select` should say `ok = true`.
 
+```bash
+python3 dev/sbq.py supabase/tests/dailies.sql
+```
+
+`dev/sbq.py` uses the Supabase CLI's saved login (`supabase login` once), so nothing is pasted into the SQL editor.
+
 ## Deploying
 
 - **The app** deploys when you push to `main` (GitHub Pages). Bump `VERSION` in `sw.js` whenever a shell file changes, or phones keep the old cached copy.
@@ -99,4 +105,10 @@ node mcp/test.mjs
   ```
 
   Worker secrets (set with `wrangler secret put`): `SUPABASE_SECRET_KEY`, `VAPID_PRIVATE_JWK`, and optionally `GOOGLE_SERVER_KEY`.
-- **Database changes:** add a new file in `supabase/migrations/` and apply it to the Supabase project.
+- **Database changes:** add a new file in `supabase/migrations/` and apply it to the Supabase project:
+
+  ```bash
+  python3 dev/sbq.py supabase/migrations/<file>.sql
+  ```
+
+  Then record its version in `supabase_migrations.schema_migrations`. Don't use `supabase db push`; the history table holds the Supabase MCP's own version numbers.
