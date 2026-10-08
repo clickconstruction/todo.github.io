@@ -359,7 +359,7 @@ function decideBtns(it, list, cls) {
   return `<div class="${cls} ${!looking && pending(it) ? 'fr-btns-quiet' : ''}">${list.map(([d, l], i) => {
     const chosen = looking && it.decision === d;
     const title = !looking ? '' : chosen ? 'What you decided' : stuck ? 'Undo the cards decided after this group first' : `Change it to ${l.replace(/^→ /, '')}`;
-    return `<button class="btn ${chosen || (!looking && i === 0 && cls === 'fr-btns') ? 'primary' : ''} ${chosen ? 'fr-chosen' : ''}" data-fr="decide" data-decision="${d}" ${title ? `title="${esc(title)}"` : ''} ${stuck && !chosen ? 'disabled' : ''}>${chosen ? '✓' : `<kbd>${i + 1}</kbd>`} ${l}</button>`;
+    return `<button class="btn ${chosen || (!looking && i === 0 && cls === 'fr-btns') ? 'primary' : ''} ${chosen ? 'fr-chosen' : ''}" data-fr="decide" data-decision="${d}" ${title ? `title="${esc(title)}"` : ''} ${stuck && !chosen ? 'disabled' : ''}>${chosen ? '✓' : `<kbd>${i + 1}</kbd>`} ${esc(l)}</button>`;
   }).join('')}</div>`;
 }
 
@@ -464,7 +464,7 @@ function taskCard(it) {
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
     ${suggestionBar(it, t)}
     ${decideBtns(it, [['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']], 'fr-btns')}
-    ${F().peek === it.id ? decideBtns(it, [['reading', '→ Reading &amp; watching'], ['slipbox', '→ Slipbox']], 'fr-btns2')
+    ${F().peek === it.id ? decideBtns(it, [['reading', '→ Reading & watching'], ['slipbox', '→ Slipbox']], 'fr-btns2')
     : `<div class="fr-btns2 ${pending(it) ? 'fr-btns-quiet' : ''}"><button class="btn small" data-fr="decide" data-decision="reading" title="Something to read, watch or listen to: onto Reading &amp; watching (up next)"><kbd>5</kbd> → Reading &amp; watching</button><button class="btn small" data-fr="decide" data-decision="slipbox" title="An idea to think with, not an action: a fleeting note in your slipbox"><kbd>6</kbd> → Slipbox</button></div>`}
     <p class="hint fr-edit"><button class="link-btn" data-fr="breakdown">🪜 Break it down <kbd>B</kbd></button> · <button class="link-btn" data-task="${t.id}">Edit details</button></p>
     ${guide()}
