@@ -928,6 +928,8 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .cl-done { text-align: center; padding: 30px 0; }
 .cl-big { font-size: 56px; }
 .cl-done p { color: var(--muted); }
+/* Buttons on a done screen sit in a row that wraps with room between them, never over each other. */
+.cl-done p:has(.btn) { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 
 /* Tickler */
 .tk-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 8px; }
