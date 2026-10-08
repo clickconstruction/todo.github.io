@@ -391,7 +391,7 @@ async function reviewUndo(check) {
   // Back: look, change nothing.
   $('[data-fr="look-back"]').click(); await until(() => !!$('.fr-look'));
   const hidden = (sel) => $$(sel).every((el) => getComputedStyle(el).display === 'none' || getComputedStyle(el.closest('.fr-btns, .fr-btns2') || el).display === 'none');
-  check('Back shows the last decided card, marked as looking back', has('.fr-look', 'looking back', 'someday', 'by claude', '1 back of 2') && has('.fr-card', 'learn to weld') && hidden('.fr-looking [data-fr="decide"]'));
+  check('Back shows the last decided card, marked as looking back, its choice ticked and the others offered', has('.fr-look', 'looking back', 'someday', 'by claude', '1 back of 2') && has('.fr-card', 'learn to weld') && !hidden('.fr-looking [data-fr="decide"]') && $('.fr-looking .fr-chosen').dataset.decision === 'someday' && $$('.fr-looking [data-fr="decide"]').length === 6 && /change it to done/i.test($('.fr-looking [data-decision="done"]').title));
   key('1'); key('s'); await wait(250);
   check('looking back changes nothing: the keys don’t decide', item('iuC').status === 'pending' && item('iuB').status === 'reviewed' && t.review_sessions.find((x) => x.id === 'sU').current_item === 'iuC' && !!$('.fr-look'));
   key('ArrowLeft'); await until(() => has('.fr-card', 'sharpen the chainsaw'));
@@ -424,6 +424,21 @@ async function reviewUndo(check) {
   const looking = $('.fr-look [data-fr="undo"]').dataset.id;
   $('.fr-look [data-fr="undo"]').click(); await until(() => item(looking).status === 'pending' && !$('.fr-look'));
   check('Undo this card: the one you were looking at is undecided and current', item(looking).status === 'pending' && t.review_sessions.find((x) => x.id === 'sU').current_item === looking && item('iuC').status === 'reviewed' && !$('.fr-look'));
+
+  // Decide a card you look back at again: the old decision is taken back, the new one made, and you are back
+  // on the card you were on. The ticked choice does nothing but say so.
+  key('1'); await until(() => app.fr && app.fr.byId.get(looking).status === 'reviewed' && !!app.fr.byId.get(looking).reviewed_at && has('.fr-card', 'paint the barn door'));
+  const onBefore = t.review_sessions.find((x) => x.id === 'sU').current_item;
+  key('ArrowLeft'); await until(() => !!$('.fr-look') && !!$('.fr-looking .fr-chosen'));
+  check('looking back at a kept card: Keep is ticked', $('.fr-looking .fr-chosen').dataset.decision === 'keep' && $('.fr-look [data-fr="undo"]').dataset.id === looking, `${$('.fr-look [data-fr="undo"]').dataset.id} ${$('.fr-looking .fr-chosen').dataset.decision}`);
+  $('.fr-looking [data-decision="done"]').click();
+  await until(() => item(looking).decision === 'done' && !$('.fr-look') && has('#toast', 'changed'));
+  const lt = t.tasks.find((x) => x.id === item(looking).task_id);
+  check('a click on Done changes it: completed, decided Done, back on the card you were on', item(looking).status === 'reviewed' && item(looking).decision === 'done' && !!lt.completed_at && t.review_sessions.find((x) => x.id === 'sU').current_item === onBefore && !$('.fr-look') && has('#toast', 'changed', 'keep → done'), text('#toast'));
+  key('ArrowLeft'); await until(() => !!$('.fr-look') && !!$('.fr-looking .fr-chosen'));
+  $('.fr-looking .fr-chosen').click(); await wait(200);
+  check('the ticked choice only says so', $('.fr-looking .fr-chosen').dataset.decision === 'done' && item(looking).decision === 'done' && !!$('.fr-look') && has('#toast', 'already done'), text('#toast'));
+  key('ArrowRight'); await until(() => !$('.fr-look'));
   app.fr = null;
 }
 

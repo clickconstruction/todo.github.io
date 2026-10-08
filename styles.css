@@ -1560,7 +1560,11 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 /* Full Review: looking back at decided cards (nothing changes), and Undo that names its card */
 .fr-look { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--accent); background: var(--surface-2); font-size: 14px; }
 .fr-look-btns { display: inline-flex; gap: 8px; }
-.fr-looking .fr-btns, .fr-looking .fr-btns2, .fr-looking [data-fr="breakdown"], .fr-looking .sg-bar { display: none; }
+.fr-looking [data-fr="breakdown"], .fr-looking .sg-bar { display: none; }
+/* Looking back: the choices stay, the one you made is ticked, the others change it. */
+.fr-looking .fr-btns kbd, .fr-looking .fr-btns2 kbd { display: none; }
+.fr-looking .fr-btns .btn:not(.fr-chosen), .fr-looking .fr-btns2 .btn:not(.fr-chosen) { opacity: .85; }
+.fr-looking .fr-chosen { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
 .fr-looking .fr-card { opacity: .92; }
 .fr-back-undo { display: inline-flex; gap: 8px; min-width: 0; }
 .fr-back-undo [data-fr="undo"] { max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

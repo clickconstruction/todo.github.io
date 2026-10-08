@@ -265,7 +265,7 @@ function restoredText(it, t) {
   });
   return [...new Set(out)];
 }
-async function undoCard(id) {
+async function undoCard(id, { quiet = false } = {}) {
   const f = F(); const s = f.session;
   const [row] = await run(sb.from('review_items').select('*').eq('id', id));
   if (!row || !isDecided(row)) { if (row && f.byId.get(id)) Object.assign(f.byId.get(id), row); f.peek = null; app.render(); toast('That card is already undecided'); return; }
@@ -287,7 +287,23 @@ async function undoCard(id) {
     if (row.decision === 'slipbox') db.slipbox = await run(sb.from('slipbox_notes').select('*').is('archived_at', null));
     app.render();
   }
-  toast(`Undone “${short(cardTitle(row) || title, 44)}”: ${label.replace(/^→ /, '')} taken back${back.length ? ` · ${back.slice(0, 4).join(', ')}${back.length > 4 ? '…' : ''} restored` : ''}`);
+  if (!quiet) toast(`Undone “${short(cardTitle(row) || title, 44)}”: ${label.replace(/^→ /, '')} taken back${back.length ? ` · ${back.slice(0, 4).join(', ')}${back.length > 4 ? '…' : ''} restored` : ''}`);
+}
+// A card you look back at, decided again: the earlier decision is taken back (as Undo does), the new one
+// made, and the review goes on from the card you were on.
+async function redecide(el) {
+  const f = F();
+  const it = f.peek && f.byId.get(f.peek);
+  const decision = el.dataset.decision;
+  if (!it || !decision || el.disabled) return;
+  const was = (DECISION_LABEL[it.decision] || it.decision || 'decided').replace(/^→ /, '');
+  if (decision === it.decision) { toast(`Already ${was}`); return; }
+  const title = cardTitle(it);
+  await undoCard(it.id, { quiet: true });
+  const row = f.byId.get(it.id);
+  if (!row || row.status !== 'pending') return; // the undo didn't happen (it said why)
+  await decideCard(row, decision);
+  toast(`Changed “${short(title, 44)}”: ${was} → ${(DECISION_LABEL[decision] || decision).replace(/^→ /, '')}`);
 }
 // Back / Forward through the decided cards, newest first; past the newest is the current card again.
 async function look(dir) {
@@ -333,6 +349,19 @@ const fresh = (it, field) => it.changed && it.changed[field] && Date.now() - Dat
 const mark = (it, field, html) => (fresh(it, field) ? `<span class="fr-new">${html}</span>` : html);
 // When it was added (edits during the review don't make it look new).
 const added = (t) => { const ms = Date.parse(t.created_at || 0) || 0; if (!ms) return ''; const d = Math.floor((Date.now() - ms) / 86400000); return d >= 730 ? `added ${Math.round(d / 365)} years ago` : d >= 60 ? `added ${Math.round(d / 30)} months ago` : d >= 1 ? `added ${d} day${d === 1 ? '' : 's'} ago` : 'added today'; };
+
+// The decision buttons. On the current card the first is primary and each shows its key. On a card you look
+// back at, the one you chose is marked and the others change the decision (a group that later cards were
+// decided after can't be changed, as it can't be undone, until those are undone).
+function decideBtns(it, list, cls) {
+  const looking = F().peek === it.id;
+  const stuck = looking && it.kind === 'group' && decidedList().findIndex((x) => x.id === it.id) > 0;
+  return `<div class="${cls} ${!looking && pending(it) ? 'fr-btns-quiet' : ''}">${list.map(([d, l], i) => {
+    const chosen = looking && it.decision === d;
+    const title = !looking ? '' : chosen ? 'What you decided' : stuck ? 'Undo the cards decided after this group first' : `Change it to ${l.replace(/^→ /, '')}`;
+    return `<button class="btn ${chosen || (!looking && i === 0 && cls === 'fr-btns') ? 'primary' : ''} ${chosen ? 'fr-chosen' : ''}" data-fr="decide" data-decision="${d}" ${title ? `title="${esc(title)}"` : ''} ${stuck && !chosen ? 'disabled' : ''}>${chosen ? '✓' : `<kbd>${i + 1}</kbd>`} ${l}</button>`;
+  }).join('')}</div>`;
+}
 
 // Claude's suggestion, waiting for your Submit: every change spelled out, the old value struck through.
 const DECISION_LABEL = { keep: 'Keep', someday: 'Someday', done: 'Done', drop: 'Drop', skip: 'Skip', reading: '→ Reading & watching', slipbox: '→ Slipbox', accept: 'Accept', one_by_one: 'One by one', keep_all: 'Keep all' };
@@ -434,8 +463,9 @@ function taskCard(it) {
     <details class="fr-notes" open><summary>Notes</summary><p class="fr-editable" ${editableAttrs('notes')}>${t.notes ? mark(it, 'notes', esc(t.notes)) : '<span class="hint">none · click to write some</span>'}</p></details>
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
     ${suggestionBar(it, t)}
-    <div class="fr-btns ${pending(it) ? 'fr-btns-quiet' : ''}">${[['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
-    <div class="fr-btns2 ${pending(it) ? 'fr-btns-quiet' : ''}"><button class="btn small" data-fr="decide" data-decision="reading" title="Something to read, watch or listen to: onto Reading &amp; watching (up next)"><kbd>5</kbd> → Reading &amp; watching</button><button class="btn small" data-fr="decide" data-decision="slipbox" title="An idea to think with, not an action: a fleeting note in your slipbox"><kbd>6</kbd> → Slipbox</button></div>
+    ${decideBtns(it, [['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']], 'fr-btns')}
+    ${F().peek === it.id ? decideBtns(it, [['reading', '→ Reading &amp; watching'], ['slipbox', '→ Slipbox']], 'fr-btns2')
+    : `<div class="fr-btns2 ${pending(it) ? 'fr-btns-quiet' : ''}"><button class="btn small" data-fr="decide" data-decision="reading" title="Something to read, watch or listen to: onto Reading &amp; watching (up next)"><kbd>5</kbd> → Reading &amp; watching</button><button class="btn small" data-fr="decide" data-decision="slipbox" title="An idea to think with, not an action: a fleeting note in your slipbox"><kbd>6</kbd> → Slipbox</button></div>`}
     <p class="hint fr-edit"><button class="link-btn" data-fr="breakdown">🪜 Break it down <kbd>B</kbd></button> · <button class="link-btn" data-task="${t.id}">Edit details</button></p>
     ${guide()}
   </div>`;
@@ -528,7 +558,7 @@ function groupCard(it) {
     <div class="fr-field"><b>Proposal</b><span>${mark(it, 'proposal', esc(proposalText(g.proposal, ts.length)))}</span></div>
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
     ${suggestionBar(it, null)}
-    <div class="fr-btns ${pending(it) ? 'fr-btns-quiet' : ''}">${[['accept', 'Accept'], ['one_by_one', 'One by one'], ['keep_all', 'Keep all'], ['skip', 'Skip']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
+    ${decideBtns(it, [['accept', 'Accept'], ['one_by_one', 'One by one'], ['keep_all', 'Keep all'], ['skip', 'Skip']], 'fr-btns')}
   </div>`;
 }
 
@@ -566,12 +596,12 @@ export function viewFullReview(id) {
   if (!cur) {
     return `<div class="fr">${head}<button class="fab fr-fab" data-fr="capture" aria-label="Capture an idea (added to this review)">+</button><div class="cl-done"><div class="cl-big">✓</div><h2>All reviewed</h2>
       <p>${n(done)} decided${skipped ? `, ${n(skipped)} skipped` : ''}.</p>
-      <p>${skipped ? '<button class="btn" data-fr="reopen-skipped">Go through the skipped ones</button> ' : ''}${last && !peek ? `${backBtn} ${undoBtn('btn')}` : ''}</p></div>${peek ? `${lookingBar(peek, decided)}<div class="fr-looking">${peek.kind === 'group' ? groupCard(peek) : taskCard(peek)}</div><div class="cl-bar">${backBtn}<span class="hint cl-keys">← back · → forward · u undo this card</span><button class="btn small" data-fr="look-forward">Forward →</button></div>` : ''}</div>`;
+      <p>${skipped ? '<button class="btn" data-fr="reopen-skipped">Go through the skipped ones</button> ' : ''}${last && !peek ? `${backBtn} ${undoBtn('btn')}` : ''}</p></div>${peek ? `${lookingBar(peek, decided)}<div class="fr-looking">${peek.kind === 'group' ? groupCard(peek) : taskCard(peek)}</div><div class="cl-bar">${backBtn}<span class="hint cl-keys">← back · → forward · click a choice to change it · u undo this card</span><button class="btn small" data-fr="look-forward">Forward →</button></div>` : ''}</div>`;
   }
   if (peek) {
     return `<div class="fr">${head}${lookingBar(peek, decided)}
     <div class="fr-looking">${peek.kind === 'group' ? groupCard(peek) : taskCard(peek)}</div>
-    <div class="cl-bar">${backBtn}<span class="hint cl-keys">← back · → forward · u undo this card · Esc close</span><button class="btn small" data-fr="look-forward">Forward →</button></div></div>`;
+    <div class="cl-bar">${backBtn}<span class="hint cl-keys">← back · → forward · click a choice to change it · u undo this card · Esc close</span><button class="btn small" data-fr="look-forward">Forward →</button></div></div>`;
   }
   return `<div class="fr">${head}
     <button class="fab fr-fab" data-fr="capture" aria-label="Capture an idea (added to this review)" title="Capture an idea: it's added to this review as a later card (N)">+</button>
@@ -648,7 +678,8 @@ export async function fullReviewAction(el) {
   if (a === 'capture') { captureIntoReview(); return; }
   if (a === 'look-back' || a === 'look-forward') { await look(a === 'look-back' ? 'back' : 'forward'); return; }
   if (a === 'look-now') { f.peek = null; app.render(); return; }
-  // Looking back changes nothing: the card's own buttons belong to the current card, so they do nothing here.
+  // Looking back: a choice changes that card's decision; everything else belongs to the current card.
+  if (f.peek && a === 'decide') { if (f.busy) return; f.busy = true; try { await redecide(el); } finally { f.busy = false; } return; }
   if (f.peek && a !== 'undo') return;
   if (a === 'edit-field') { openFieldEditor(el); return; }
   if (a === 'notes-toggle') { // remembered for this card, so a live update doesn't fold it back
@@ -735,21 +766,23 @@ async function act(a, el) {
   if (a === 'decide') {
     const cur = s && f.byId.get(s.current_item);
     if (!cur || el.disabled) return;
-    const decision = el.dataset.decision;
     el.disabled = true;
-    const r = await run(sb.rpc('review_decide', { item: cur.id, decision, by: 'user' }));
-    const bulk = cur.kind === 'group' && decision === 'accept';
-    if (bulk) await loadAll(); else if (cur.kind === 'task') await refreshCard(cur);
-    if (decision === 'slipbox') db.slipbox = await run(sb.from('slipbox_notes').select('*').is('archived_at', null));
-    if (decision === 'one_by_one' || bulk) await loadSession(s.id);
-    else {
-      cur.status = decision === 'skip' ? 'skipped' : 'reviewed'; cur.decision = decision; cur.decided_by = 'user'; cur.reviewed_at = new Date().toISOString();
-      f.session = { ...s, current_item: r.next, status: r.next ? 'active' : 'done' };
-      const nx = r.next && f.byId.get(r.next);
-      if (nx) await arrive(nx);
-      app.render();
-    }
+    await decideCard(cur, el.dataset.decision);
   }
+}
+// Decide a card and move to the next one (the database says which).
+async function decideCard(cur, decision) {
+  const f = F();
+  const r = await run(sb.rpc('review_decide', { item: cur.id, decision, by: 'user' }));
+  const bulk = cur.kind === 'group' && decision === 'accept';
+  if (bulk) await loadAll(); else if (cur.kind === 'task') await refreshCard(cur);
+  if (decision === 'slipbox') db.slipbox = await run(sb.from('slipbox_notes').select('*').is('archived_at', null));
+  if (decision === 'one_by_one' || bulk) { await loadSession(f.session.id); return; }
+  cur.status = decision === 'skip' ? 'skipped' : 'reviewed'; cur.decision = decision; cur.decided_by = 'user'; cur.reviewed_at = new Date().toISOString();
+  f.session = { ...f.session, current_item: r.next, status: r.next ? 'active' : 'done' };
+  const nx = r.next && f.byId.get(r.next);
+  if (nx) await arrive(nx);
+  app.render();
 }
 
 // Keys on the review screen: 1–6 decide, s skip, u undo, ← → look back and forward, b break down, n capture, Esc close.
