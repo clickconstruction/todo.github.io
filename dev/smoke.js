@@ -981,6 +981,25 @@ async function fullReview(check) {
   check('Edit details opens the editor on a wide screen too', $('#sheet').open && $('#sheet input[name=title]').value === 'Update my will' && $('#inspector').hidden !== false);
   if ($('#sheet').open) $('#sheet').close();
   window.__forceWide = false; window.__forceSheet = true; await wait(100);
+  // Rows edit in place: click Gain, type, Save, and only that field changes; a tag ticks in the picker;
+  // Notes opens even when empty; Esc puts a row back; the number keys sleep while a row is open.
+  const fwRow = () => t.tasks.find((x) => x.id === 'fW');
+  $('.fr-card [data-fr="edit-field"][data-field="gain"]').click(); await wait(50);
+  check('edit in place: the Gain row becomes its editor, focused', !!$('.fr-card form.fr-inline[data-field="gain"] textarea[name=gain]') && document.activeElement === $('.fr-inline textarea[name=gain]') && !$('.fr-card .fr-field[data-field="gain"]'));
+  $('.fr-inline textarea[name=gain]').value = 'Nobody is left guessing'; $('.fr-inline').requestSubmit();
+  await until(() => !$('.fr-inline') && has('.fr-card', 'nobody is left guessing'));
+  check('edit in place: Save writes just that field and the card shows it', fwRow().gain === 'Nobody is left guessing' && fwRow().title === 'Update my will' && has('.fr-card', 'nobody is left guessing') && has('#toast', 'gain saved'), `${fwRow().gain} / ${text('#toast')}`);
+  $('.fr-card [data-fr="edit-field"][data-field="tags"]').click(); await wait(50);
+  const chip = $$('.fr-inline .tag-toggle').find((b) => !/someday/i.test(b.textContent));
+  check('edit in place: Tags opens the tag picker', !!$('.fr-inline[data-field="tags"] .tag-picker') && !!chip);
+  chip.click(); chip.focus(); key('1'); await wait(50);
+  check('edit in place: the number keys sleep while a row is open', !!$('.fr-inline') && t.review_items.find((x) => x.task_id === 'fW').status === 'pending');
+  $('.fr-inline').requestSubmit(); await until(() => !$('.fr-inline'));
+  check('edit in place: a tag ticked and saved is on the card', t.task_tags.some((l) => l.task_id === 'fW' && l.tag_id === chip.dataset.tag) && !!$('.fr-card .fr-field[data-field="tags"] .chip'));
+  $('.fr-card [data-fr="edit-field"][data-field="notes"]').click(); await wait(50);
+  check('edit in place: Notes opens even when there are none', !!$('.fr-inline[data-field="notes"] textarea[name=notes]'));
+  key('Escape'); await wait(30);
+  check('edit in place: Esc puts the row back, nothing saved, review still open', !$('.fr-inline') && !!$('.fr-card [data-fr="edit-field"][data-field="notes"]') && location.hash.startsWith('#full/') && fwRow().notes === '');
   check('queue: 1 important, 14 movies as one group, 2 singles', t.review_items.filter((x) => x.session_id === sid && x.kind === 'group').length === 1 && t.review_items.find((x) => x.kind === 'group' && x.session_id === sid).grp.task_ids.length === 14);
   // "Which one?" guide under the buttons: seven lines, hide is remembered, "? Which one" brings it back.
   try { localStorage.removeItem('tt.frGuide'); } catch { /* */ } app.frGuideOff = undefined; app.render(); await wait(30);
@@ -1105,7 +1124,8 @@ async function fullReview(check) {
   await reloadAll(); await go('#inbox'); await go(`#full/${sid}`); await until(() => !!$('.fr-notes'));
   check('long notes are open too', $('.fr-notes').open);
   t.tasks.find((x) => x.id === 'fW').notes = '';
-  await reloadAll(); await go('#inbox'); await go(`#full/${sid}`); await until(() => !$('.fr-notes'));
+  await reloadAll(); await go('#inbox'); await go(`#full/${sid}`); await until(() => has('.fr-notes', 'click to write some'));
+  check('no notes: the Notes block stays, inviting you to write some, and opens its editor', has('.fr-notes', 'none', 'click to write some') && !!$('.fr-notes [data-fr="edit-field"][data-field="notes"]'));
   // A card with steps shows them.
   t.tasks.push({ ...t.tasks.find((x) => x.id === 'fW'), id: 'fWs1', title: 'Find the old will', parent_id: 'fW', sort: 10, completed_at: null, dropped_at: null, steps_in_order: false });
   (await import('/js/state.js')).db.tasks.push({ ...t.tasks.find((x) => x.id === 'fWs1') }); app.render(); await wait(30);

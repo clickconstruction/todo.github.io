@@ -1319,6 +1319,19 @@ body.fr-mode .view { margin-left: auto !important; margin-right: auto !important
 .fr-btns kbd { opacity: .6; font-size: .75rem; margin-right: 2px; }
 @media (max-width: 520px) { .fr-btns { grid-template-columns: repeat(2, 1fr); } .fr-btns kbd { display: none; } }
 .fr-edit { margin: 8px 0 0; }
+/* A card's rows edit in place: a pencil on hover, and the open row is its own small form. */
+.fr-editable { cursor: pointer; border-radius: 8px; }
+.fr-field.fr-editable { position: relative; padding-right: 28px; }
+.fr-field.fr-editable::after { content: '✎'; position: absolute; right: 8px; top: 8px; font-size: 13px; color: var(--muted); opacity: 0; }
+.fr-field.fr-editable:hover, .fr-field.fr-editable:focus-visible, .fr-title .fr-editable:hover, .fr-title .fr-editable:focus-visible, .fr-notes .fr-editable:hover, .fr-notes .fr-editable:focus-visible { background: var(--surface-2); outline: none; }
+.fr-field.fr-editable:hover::after, .fr-field.fr-editable:focus-visible::after { opacity: .8; }
+.fr-title .fr-editable, .fr-notes p.fr-editable { display: block; padding: 2px 6px; margin: 0 -6px; }
+.fr-inline { margin: 6px 0; padding: 12px 14px; border: 1px solid var(--accent); border-radius: 12px; background: var(--surface-2); display: grid; gap: 10px; font-size: 15px; color: var(--text); }
+.fr-inline label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.fr-inline textarea { min-height: 44px; font-size: 15px; }
+.fr-inline .gain-field { margin: 0; }
+.fr-inline-btns { display: flex; gap: 8px; align-items: center; }
+.fr-inline-btns kbd { opacity: .6; font-size: .72rem; margin-left: 2px; }
 .fr-start { display: flex; gap: 12px; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 8px 0 12px; }
 .fr-start p { margin: 2px 0 0; }
 .fr-btns .btn { white-space: nowrap; }

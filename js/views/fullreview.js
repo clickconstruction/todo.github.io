@@ -4,12 +4,17 @@
 // decide, s skips, u undoes. Every decision can be undone; nothing is deleted.
 // "Keep Claude ahead" (review_sessions.draft_ahead): a box in the header. While it is ticked and Claude is
 // running, Claude keeps a suggestion waiting on each of the next cards, so a card has one when you reach it.
+// The card's rows (title, Gain, Project, When, Tags, Notes) edit in place: click one and it becomes that
+// field's own editor, Save writes just that field, Esc puts it back.
 import { describeDaily, isDaily, isWeekly, summary as dailySummary, dailyPreview } from '../dailies.js';
 import { describe } from '../repeat.js';
 import { treeChangeHtml, treeWithout } from './tree.js';
 import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen, openSheet, $ } from '../state.js';
-import { loadAll, refreshTasks } from '../data.js';
-import { fmtDate } from '../dates.js';
+import { loadAll, refreshTasks, saveTask } from '../data.js';
+import { fmtDate, fromDateInput, HOURS } from '../dates.js';
+import { dateField, wireQuickButtons } from '../components.js';
+import { tagPickerHtml, wireTagPicker } from '../editors/tagPicker.js';
+import { gainFieldHtml, wireGainField } from '../editors/gainField.js';
 import { buildQueue, priorityReason, proposalText } from '../review.js';
 import { folderButton, shortPath } from '../folders.js';
 
@@ -204,6 +209,7 @@ async function refreshCard(it) {
 }
 // Re-render unless you're typing somewhere (a field left focused in a sheet that has closed isn't typing).
 function redraw() {
+  if (editing()) return; // a row open for editing holds its text until Save or Esc
   const el = document.activeElement || {};
   const sheet = el.closest && el.closest('dialog');
   if (!/INPUT|TEXTAREA|SELECT/.test(el.tagName || '') || (sheet && !sheet.open)) app.render();
@@ -411,19 +417,21 @@ function taskCard(it) {
   const p = t.project_id && byId(db.projects, t.project_id);
   const why = it.priority ? priorityReason(t, p) : '';
   const tags = tagsFor(t.id).filter((g) => !/^someday/i.test(g.name));
-  const row = (label, field, html) => `<div class="fr-field"><b>${label}</b><span>${mark(it, field, html)}</span></div>`;
+  // A row you can edit in place (a step's project follows its parent, so that one stays as it is).
+  const edit = (field) => (field === 'project' && t.parent_id ? '' : ` ${editableAttrs(field)}`);
+  const row = (label, field, html, editable = false) => `<div class="fr-field${editable && edit(field) ? ' fr-editable' : ''}"${editable ? edit(field) : ''}><b>${label}</b><span>${mark(it, field, html)}</span></div>`;
   return `<div class="fr-card">
     <div class="fr-meta">${why ? `<span class="chip fr-why">★ ${esc(why)}</span>` : ''}<span>${esc(added(t))}</span>${t.in_inbox ? '<span>Inbox</span>' : ''}${isOpen(t) ? '' : '<span class="chip">closed</span>'}</div>
-    <h2 class="fr-title">${mark(it, 'title', esc(t.title))}</h2>
-    ${row('Gain', 'gain', t.gain ? `<span class="gain-text">${esc(t.gain)}</span>${t.gain_by === 'agent' ? ' <span class="chip sug">Claude suggested</span>' : ''}` : '<span class="hint">not written yet</span>')}
-    ${row('Project', 'project', p ? esc(p.name) : '<span class="hint">none</span>')}
-    ${row('When', 'dates', [t.planned_at && `planned ${esc(fmtDate(t.planned_at))}`, t.due_at && `due ${esc(fmtDate(t.due_at))}`, t.defer_at && `from ${esc(fmtDate(t.defer_at))}`].filter(Boolean).join(' · ') || '<span class="hint">no dates</span>')}
-    ${row('Tags', 'tags', tags.length ? tags.map((g) => `<span class="chip">${esc(tagLabel(g))}</span>`).join(' ') : '<span class="hint">none</span>')}
+    <h2 class="fr-title"><span class="fr-editable" ${editableAttrs('title')}>${mark(it, 'title', esc(t.title))}</span></h2>
+    ${row('Gain', 'gain', t.gain ? `<span class="gain-text">${esc(t.gain)}</span>${t.gain_by === 'agent' ? ' <span class="chip sug">Claude suggested</span>' : ''}` : '<span class="hint">not written yet</span>', true)}
+    ${row('Project', 'project', p ? esc(p.name) : '<span class="hint">none</span>', true)}
+    ${row('When', 'dates', [t.planned_at && `planned ${esc(fmtDate(t.planned_at))}`, t.due_at && `due ${esc(fmtDate(t.due_at))}`, t.defer_at && `from ${esc(fmtDate(t.defer_at))}`].filter(Boolean).join(' · ') || '<span class="hint">no dates</span>', true)}
+    ${row('Tags', 'tags', tags.length ? tags.map((g) => `<span class="chip">${esc(tagLabel(g))}</span>`).join(' ') : '<span class="hint">none</span>', true)}
     ${isDaily(t) ? row(isWeekly(t) ? 'Every week' : 'Every day', 'daily', `${esc(describeDaily(t.daily))}${dailySummary(t) ? ` <span class="hint">${esc(dailySummary(t))}</span>` : ''}`) : t.repeat_rule ? row('Repeats', 'repeat', esc(describe(t.repeat_rule))) : ''}
     ${t.flagged ? row('Flag', 'flagged', '<span class="chip flagged-chip">⚑ Flagged</span>') : ''}
     ${t.folder_path ? row('Folder', 'folder', `<span class="fr-folder">${esc(shortPath(t.folder_path))}</span>${folderButton(t.folder_path)}`) : ''}
     ${stepsRow(t, row)}
-    ${t.notes ? `<details class="fr-notes" open><summary>Notes</summary><p>${mark(it, 'notes', esc(t.notes))}</p></details>` : ''}
+    <details class="fr-notes" open><summary>Notes</summary><p class="fr-editable" ${editableAttrs('notes')}>${t.notes ? mark(it, 'notes', esc(t.notes)) : '<span class="hint">none · click to write some</span>'}</p></details>
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
     ${suggestionBar(it, t)}
     <div class="fr-btns ${pending(it) ? 'fr-btns-quiet' : ''}">${[['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']].map(([d, l], i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-fr="decide" data-decision="${d}"><kbd>${i + 1}</kbd> ${l}</button>`).join('')}</div>
@@ -432,6 +440,82 @@ function taskCard(it) {
     ${guide()}
   </div>`;
 }
+// ---------- editing a field in place ----------
+// Click the title, Gain, Project, When, Tags or Notes on the card and that row becomes its own small form,
+// right there: Save writes just that field (through saveTask, as the editor does) and the card redraws;
+// Esc or Cancel puts the row back. Live redraws wait, and the decision keys sleep, while a row is open.
+const EDITABLE = { title: 'Title', gain: 'Gain', project: 'Project', dates: 'When', tags: 'Tags', notes: 'Notes' };
+const editableAttrs = (field) => `data-fr="edit-field" data-field="${field}" role="button" tabindex="0" title="Edit"`;
+// The row being edited, if its form is still on the page (a redraw from a decision takes it away).
+function editing() { const f = F(); if (f.editing && !f.editing.form.isConnected) f.editing = null; return f.editing; }
+function fieldEditorHtml(field, t) {
+  const projects = db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold' || p.id === t.project_id).sort((a, b) => a.name.localeCompare(b.name));
+  const lines = (t.notes || '').split('\n').length;
+  const body = {
+    title: () => `<label>Title<input type="text" name="title" value="${esc(t.title)}" required autocomplete="off"></label>`,
+    gain: () => gainFieldHtml(t),
+    project: () => `<label>Project<select name="project_id"><option value="">${t.in_inbox ? 'None (Inbox)' : 'None'}</option>${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>`,
+    dates: () => dateField('planned_at', 'Planned', t.planned_at) + dateField('due_at', 'Due', t.due_at) + dateField('defer_at', 'Defer until', t.defer_at),
+    tags: () => tagPickerHtml(),
+    notes: () => `<label>Notes<textarea name="notes" rows="${Math.min(16, Math.max(3, lines + 1))}">${esc(t.notes || '')}</textarea></label>`,
+  }[field]();
+  const multiline = field === 'gain' || field === 'notes';
+  return `${body}<div class="fr-inline-btns"><button type="submit" class="btn small primary">Save <kbd>${multiline ? '⌘⏎' : '⏎'}</kbd></button><button type="button" class="btn small" data-cancel>Cancel <kbd>Esc</kbd></button></div>`;
+}
+function openFieldEditor(el) {
+  const f = F();
+  const s = f.session;
+  const cur = s && f.byId.get(s.current_item);
+  const t = cur && cur.kind === 'task' && byId(db.tasks, cur.task_id);
+  const field = el.dataset.field;
+  if (!t || f.peek || !EDITABLE[field]) return;
+  cancelFieldEditor(); // one row at a time
+  const host = el.closest('.fr-title, .fr-notes') || el;
+  const form = document.createElement('form');
+  form.className = 'fr-inline'; form.dataset.field = field; form.noValidate = true;
+  form.innerHTML = fieldEditorHtml(field, t);
+  host.replaceWith(form);
+  const ed = { id: cur.id, field, host, form };
+  f.editing = ed;
+  form.addEventListener('click', (e) => e.stopPropagation()); // the review's own click handling stays out of the form
+  const ids = tagsFor(t.id).map((x) => x.id);
+  const tagIds = field === 'tags' ? wireTagPicker(form, ids) : () => ids;
+  const gain = field === 'gain' ? wireGainField(form, t) : null;
+  if (field === 'dates') wireQuickButtons(form);
+  $('[data-cancel]', form).onclick = cancelFieldEditor;
+  form.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelFieldEditor(); }
+    else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); form.requestSubmit(); }
+  });
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const live = byId(db.tasks, t.id) || t;
+    const fields = { project_id: live.project_id, parent_id: live.parent_id }; // saveTask reads these to decide "Inbox"
+    if (field === 'title') { fields.title = form.elements.title.value.trim(); if (!fields.title) { toast('A title is needed'); form.elements.title.focus(); return; } }
+    if (field === 'gain') Object.assign(fields, gain());
+    if (field === 'project') fields.project_id = form.elements.project_id.value || null;
+    if (field === 'dates') { fields.planned_at = fromDateInput(form.elements.planned_at.value, HOURS.planned_at); fields.due_at = fromDateInput(form.elements.due_at.value, HOURS.due_at); fields.defer_at = fromDateInput(form.elements.defer_at.value, HOURS.defer_at); }
+    if (field === 'notes') fields.notes = form.elements.notes.value;
+    const btns = [...form.querySelectorAll('button')];
+    btns.forEach((b) => { b.disabled = true; });
+    f.editing = null; // the save redraws the card; its row shows the new value
+    try { await saveTask(live, fields, tagIds()); } catch { btns.forEach((b) => { b.disabled = false; }); f.editing = ed; return; }
+    toast(`${EDITABLE[field]} saved`);
+  };
+  const first = form.querySelector('input:not([type=hidden]), textarea, select');
+  if (first && !matchMedia('(pointer: coarse)').matches) { first.focus(); if (first.tagName === 'TEXTAREA' || first.type === 'text') first.setSelectionRange(first.value.length, first.value.length); }
+  else if (first) first.focus();
+}
+function cancelFieldEditor() {
+  const f = F();
+  const ed = f.editing;
+  f.editing = null;
+  if (!ed || !ed.form.isConnected) return;
+  ed.form.replaceWith(ed.host);
+  const back = ed.host.matches('[tabindex]') ? ed.host : ed.host.querySelector('[tabindex]');
+  if (back) back.focus();
+}
+
 function groupCard(it) {
   const g = it.grp || {};
   const ts = (g.task_ids || []).map((x) => byId(db.tasks, x)).filter(Boolean);
@@ -566,6 +650,7 @@ export async function fullReviewAction(el) {
   if (a === 'look-now') { f.peek = null; app.render(); return; }
   // Looking back changes nothing: the card's own buttons belong to the current card, so they do nothing here.
   if (f.peek && a !== 'undo') return;
+  if (a === 'edit-field') { openFieldEditor(el); return; }
   if (a === 'notes-toggle') { // remembered for this card, so a live update doesn't fold it back
     const cur = s && f.byId.get(s.current_item);
     const d = el.closest('details');
@@ -670,7 +755,13 @@ async function act(a, el) {
 // Keys on the review screen: 1–6 decide, s skip, u undo, ← → look back and forward, b break down, n capture, Esc close.
 export function fullReviewKey(e) {
   if (!location.hash.startsWith('#full/') || e.metaKey || e.ctrlKey || e.altKey) return false;
-  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return false;
+  const inField = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+  if (editing()) { // a row is open: Esc puts it back, and no key decides the card
+    if (e.key === 'Escape') { e.preventDefault(); cancelFieldEditor(); return true; }
+    return !inField && !/^(Enter| |Tab)$/.test(e.key);
+  }
+  if (inField) return false;
+  if ((e.key === 'Enter' || e.key === ' ') && document.activeElement.closest && document.activeElement.closest('[data-fr="edit-field"]')) { e.preventDefault(); document.activeElement.closest('[data-fr="edit-field"]').click(); return true; }
   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { const b = document.querySelector(`[data-fr="${e.key === 'ArrowLeft' ? 'look-back' : 'look-forward'}"]`); if (b && !b.disabled) { e.preventDefault(); b.click(); } return true; }
   if (F().peek && e.key !== 'u' && e.key !== 'Escape') return true; // looking back: only Undo, the arrows and Esc (and no other shortcut)
   if (e.key === 'n') { e.preventDefault(); captureIntoReview(); return true; }
