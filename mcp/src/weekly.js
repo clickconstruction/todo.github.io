@@ -2,6 +2,7 @@
 // js/weekly.js). An agent can walk the user through a review in conversation, step by step.
 import { STEPS, STAGES, STALE_DAYS, sweepPrompts, streak } from '../../js/weekly.js';
 import { bigReviewsDue } from '../../js/whatnow.js';
+import { dailiesFor, quarterSince, checkOut } from './dailies.js';
 
 export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
   const isSomedayTag = (tags) => { const root = tags.find((g) => !g.parent_id && /^someday/i.test(g.name)); return root ? new Set([root.id, ...tags.filter((g) => g.parent_id === root.id).map((g) => g.id)]) : new Set(); };
@@ -39,6 +40,13 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
     const dueHz = [...areas, ...goals].filter((x) => !x.last_reviewed_at || Date.parse(x.last_reviewed_at) + (x.review_every_days || 30) * 86400000 <= Date.now());
     const big = bigReviewsDue({ settings: api.settings || {}, goals: goals.map((g) => ({ ...g, status: 'active' })), areas, projects });
     if (big.quarterly) dueHz.push({ big: 'quarterly check-in (list_horizons)' });
+    // Quarterly checks (daily.every = 'quarter') go with the check-in: listed when it is due, ticked since the last one was done.
+    let quarterly;
+    if (big.quarterly && open.some((t) => t.daily && t.daily.every === 'quarter')) {
+      const dl = await dailiesFor(api, localDate(now, api.tz), localDate);
+      const qs = quarterSince(api, localDate(now, api.tz), localDate);
+      quarterly = dl.tasks.filter((t) => t.daily.every === 'quarter').map((t) => { const o = checkOut(t, dl.ticked(t), qs, localDate(now, api.tz)); return { id: o.id, title: o.title, ticked: o.ticked }; });
+    }
     big.yearly.forEach((k) => dueHz.push({ big: `yearly read of the ${k} (list_horizons include_text)` }));
     const [fleetingNotes, toWrite] = await Promise.all([
       api.q(`slipbox_notes?${api.u}&kind=eq.fleeting&archived_at=is.null&limit=200&select=id,title`),
@@ -63,7 +71,7 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
       someday: { count: count.someday, note: 'Use list_someday; activate_someday or drop.' },
       sweep: { note: 'Use mind_sweep_prompts and capture what the user says.' },
       notes: { fleeting: fleetingNotes.slice(0, 20).map((n) => n.title), finished_notes_to_write: toWrite.slice(0, 20).map((t) => t.title), note: 'Help turn each into permanent notes (slipbox update kind permanent; reading take_notes / notes_done).' },
-      horizons: { due: dueHz.map((x) => x.big || (x.name ? `area: ${x.name}` : `goal: ${x.title}`)), note: 'Use list_horizons; save_area / save_goal with reviewed: true.' },
+      horizons: { due: dueHz.map((x) => x.big || (x.name ? `area: ${x.name}` : `goal: ${x.title}`)), quarterly_checks: quarterly, note: `Use list_horizons; save_area / save_goal with reviewed: true.${quarterly ? ' Ask each quarterly check and tick it as they answer (dailies tick with its id); save_horizon kind quarterly read: true when the check-in is done, which starts them fresh.' : ''}` },
     };
     const steps = STEPS.map((s) => {
       const done = !!(r && r.steps && r.steps[s.key]) || !!auto[s.key] || !!worked[s.key];

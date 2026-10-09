@@ -17,7 +17,7 @@ import { somedayListHtml } from './someday.js';
 import { parkCount } from './matrix.js';
 import { horizonsDue, liveAreas, bigDue, quarterlyBody } from './horizons.js';
 import { readingNow, notesToWrite, ensureFinished } from './reading.js';
-import { weeklyChecks, weeklyRow, isTicked } from '../dailies.js';
+import { weeklyChecks, checkRow, isTicked } from '../dailies.js';
 
 // ---------- the review row ----------
 export const openReview = () => (db.weeklyReviews || []).find((r) => !r.completed_at && !r.abandoned_at) || null;
@@ -203,7 +203,7 @@ const STEP_BODY = {
     const list = weeklyChecks();
     if (!list.length) return `<div class="wk-card"><p class="wk-big">☑</p><p>No weekly checks yet.</p></div>
       <p class="hint">A weekly check is a question or routine you tick once a week, here, instead of a repeating action that goes overdue. To make one, open an action → Repeat and alerts → Every day → “Every week, in the Weekly Review”, or ask Claude.</p>`;
-    return `<ul class="list dly-list wk-checks">${list.map((t) => weeklyRow(t)).join('')}</ul>
+    return `<ul class="list dly-list wk-checks">${list.map((t) => checkRow(t)).join('')}</ul>
       <p class="hint">Ticks are for this review only: the next one starts them fresh. Tap a line to open it.</p>`;
   },
   someday: () => { const n = parkCount(); return `${n ? `<p class="wk-park">🔲 ${n.toLocaleString()} action${n === 1 ? ' is' : 's are'} neither urgent nor important. <a href="#matrix/park">Park them?</a></p>` : ''}${somedayListHtml({ embedded: true })}`; },

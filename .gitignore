@@ -3,3 +3,4 @@ config.local.js
 node_modules/
 .dev.vars
 .wrangler/
+.claude/

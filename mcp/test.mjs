@@ -1294,6 +1294,8 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const sgDaily = db.review_items.find((x) => x.suggestion && x.suggestion.daily);
   await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'weekly' });
   assert(db.review_items.find((x) => x.id === s1.id).suggestion.daily.every === 'week' && db.review_items.find((x) => x.id === s1.id).suggestion.daily.tier === 'should', 'full_review suggest: daily "weekly" makes a weekly check');
+  await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'quarterly' });
+  assert(db.review_items.find((x) => x.id === s1.id).suggestion.daily.every === 'quarter' && db.review_items.find((x) => x.id === s1.id).suggestion.daily.tier === 'should', 'full_review suggest: daily "quarterly" makes a quarterly check');
   await tool('full_review', { action: 'suggest', decision: 'keep', daily: { tier: 'should', weekdays: [1, 3, 5] } });
   let badDaily = ''; try { await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'sometimes' }); } catch (e) { badDaily = e.message; }
   assert(sgDaily && sgDaily.suggestion.daily.tier === 'should' && sgDaily.suggestion.daily.weekdays.join() === '1,3,5' && /"must".*"should"/.test(badDaily), 'full_review suggest: a suggestion can make the action daily (tier and days checked)');
@@ -1558,7 +1560,8 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   bad = ''; try { await tool('events', { action: 'add', title: 'X', start: '2026-10-31', end: '2026-10-30' }); } catch (e) { bad = e.message; }
   assert(/before start/.test(bad), 'end before start is refused');
   const listed = await tool('events', { action: 'list', from: '2026-10-01', to: '2026-11-30' });
-  assert(listed.events.map((e) => e.title).join('|') === 'Amigo Airsho|Wings Over Houston|Texas Capital Air Show', `list: a window, in date order (${listed.events.map((e) => e.title).join('|')})`);
+  const fixed = listed.events.map((e) => e.title).filter((t) => !['Gates open', 'Company holiday'].includes(t)); // today's two are in the window once October comes
+  assert(fixed.join('|') === 'Amigo Airsho|Wings Over Houston|Texas Capital Air Show', `list: a window, in date order (${listed.events.map((e) => e.title).join('|')})`);
   const fc = await tool('forecast', { days: 2 });
   const ev = fc.days[today].events || [];
   assert(ev.some((e) => e.id === gate.id && e.own && e.start === db.events.find((x) => x.id === gate.id).starts_at) && ev.some((e) => e.id === allToday.id && e.all_day === true), 'forecast shows your events on their days');
@@ -1805,9 +1808,46 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
     const viaU = await tool('update_task', { id: plain.id, daily: 'weekly' });
     assert(viaU.daily.every === 'week' && viaU.daily.summary === 'Every week, in the Weekly Review', 'update_task daily "weekly" makes a weekly check');
     const backD = await tool('dailies', { action: 'set', id: plain.id, every: 'day', tier: 'must' });
-    assert(backD.daily === 'Have to, every day' && !db.tasks.find((t) => t.id === plain.id).daily.every && await refuse('dailies', { action: 'set', id: plain.id, every: 'month' }, /"day" or "week"/), 'set every day makes it daily again; every is day or week');
+    assert(backD.daily === 'Have to, every day' && !db.tasks.find((t) => t.id === plain.id).daily.every && await refuse('dailies', { action: 'set', id: plain.id, every: 'month' }, /"day", "week" or "quarter"/), 'set every day makes it daily again; every is day, week or quarter');
     await tool('dailies', { action: 'clear', id: plain.id });
     krow.dropped_at = new Date().toISOString();
+  }
+  { // quarterly checks: ticked once per quarterly check-in, never in Today; "Quarterly check-in done" starts them fresh
+    const qk = await tool('capture', { title: 'Am I making businesses?', due: dstr(3), repeat: { every: 3, unit: 'month' } });
+    const setQ = await tool('dailies', { action: 'set', id: qk.id, every: 'quarter' });
+    const qrow = db.tasks.find((t) => t.id === qk.id);
+    assert(setQ.daily === 'Every quarter, in the quarterly check-in' && qrow.daily.every === 'quarter' && qrow.daily.tier === 'should' && qrow.daily.since && qrow.repeat_rule === null && qrow.due_at === null && setQ.ticked === false && /quarterly check-in/.test(setQ.next), 'dailies set every quarter: the action becomes a quarterly check; its repeat and due date are cleared');
+    let st = db.user_settings.find((x) => x.user_id === UID);
+    if (!st) { st = { user_id: UID }; db.user_settings.push(st); }
+    st.horizons_quarter_at = new Date(Date.now() - 5 * 86400000).toISOString(); // the last check-in was done five days ago
+    db.daily_ticks.push({ id: 'tkq0', user_id: UID, task_id: qk.id, day: dstr(10), state: 'done', updated_at: new Date(Date.now() - 10 * 86400000).toISOString() });
+    const l3 = await tool('dailies', {});
+    const td3 = await tool('today', {});
+    assert(l3.quarterly.length === 1 && l3.quarterly[0].id === qk.id && l3.quarterly[0].ticked === false && l3.quarterly[0].last_ticked === dstr(10) && l3.left.quarterly === 1 && !(l3.weekly || []).some((x) => x.id === qk.id) && ![...l3.have_to, ...l3.should].some((x) => x.id === qk.id)
+      && !JSON.stringify(td3.daily || {}).includes(qk.id) && !JSON.stringify(td3.overdue).includes(qk.id) && !(await tool('list_tasks', { available_only: true, limit: 500 })).items.some((t) => t.id === qk.id), 'a quarterly check is listed apart, never among today’s or available; a tick from before the last check-in doesn’t count');
+    db.daily_ticks.push({ id: 'tkq2', user_id: UID, task_id: qk.id, day: dstr(2), state: 'done', updated_at: new Date(Date.now() - 2 * 86400000).toISOString() });
+    const hz = await tool('list_horizons', {});
+    assert(hz.quarterly_checks && hz.quarterly_checks.items.length === 1 && hz.quarterly_checks.items[0].id === qk.id && hz.quarterly_checks.items[0].ticked === true && hz.quarterly_checks.left === 0 && hz.quarterly_checks.last_check_in === dstr(5) && /dailies tick/.test(hz.quarterly_checks.note) && (await tool('dailies', {})).quarterly[0].ticked === true, 'list_horizons lists the quarterly checks; a tick since the last check-in counts');
+    // the Weekly Review's horizons step carries them when the check-in is due
+    st.horizons_quarter_at = new Date(Date.now() - 100 * 86400000).toISOString();
+    const hzStep = (await tool('weekly_review', {})).steps.find((x) => x.key === 'horizons');
+    assert(!hzStep.done && hzStep.data.quarterly_checks && hzStep.data.quarterly_checks.length === 1 && hzStep.data.quarterly_checks[0].ticked === true && /quarterly check/.test(hzStep.data.note), 'weekly_review: the horizons step lists the quarterly checks while the check-in is due');
+    // a tick on the day of the check-in counts only when it came after the click
+    st.horizons_quarter_at = new Date(Date.now() - 60000).toISOString();
+    const tq2 = db.daily_ticks.find((x) => x.id === 'tkq2'); tq2.day = localToday(); tq2.updated_at = new Date(Date.now() - 120000).toISOString();
+    assert((await tool('dailies', {})).quarterly[0].ticked === false, 'ticked before “Quarterly check-in done” that day: fresh');
+    const tkQ = await tool('dailies', { action: 'tick', id: qk.id });
+    assert(tkQ.ticked && /quarter/.test(tkQ.next) && Date.parse(tq2.updated_at) > Date.parse(st.horizons_quarter_at) && (await tool('dailies', {})).quarterly[0].ticked === true && !qrow.completed_at, 'ticked again after it: counts for this quarter; the action stays open');
+    const unQ = await tool('dailies', { action: 'untick', id: qk.id });
+    assert(!unQ.ticked && tq2.state === 'cleared' && db.daily_ticks.find((x) => x.id === 'tkq0').state === 'done' && (await tool('dailies', {})).quarterly[0].ticked === false, 'untick: the tick is cleared, not deleted; earlier ticks stay');
+    await tool('dailies', { action: 'tick', title: 'am i making businesses?' });
+    await tool('save_horizon', { kind: 'quarterly', read: true });
+    assert((await tool('dailies', {})).quarterly[0].ticked === false && (await tool('list_horizons', {})).quarterly_checks.left === 1, '“Quarterly check-in done” (save_horizon quarterly read) starts them fresh');
+    const viaQ = await tool('update_task', { id: plain.id, daily: 'quarterly' });
+    assert(viaQ.daily.every === 'quarter' && viaQ.daily.summary === 'Every quarter, in the quarterly check-in' && db.tasks.find((t) => t.id === plain.id).repeat_rule === null, 'update_task daily "quarterly" makes a quarterly check');
+    await tool('dailies', { action: 'clear', id: plain.id });
+    qrow.dropped_at = new Date().toISOString();
+    st.horizons_quarter_at = null;
   }
   [walk.id, meds.id, plain.id].forEach((x) => { const t = db.tasks.find((y) => y.id === x); t.dropped_at = new Date().toISOString(); });
   db.daily_ticks.length = 0;

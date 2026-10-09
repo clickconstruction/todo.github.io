@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -1622,6 +1622,83 @@ async function horizonReviews(check) {
   check('after both, the step is done on its own', $('a.wk-step[href="#weekly/horizons"]').classList.contains('done'));
   await go('#horizons');
   check('the ladder is clear, with the check-in always reachable', !has(undefined, 'yearly read due') && !has(undefined, 'quarterly check-in due') && !!$('a[href="#horizons/quarterly"]'));
+}
+
+// Quarterly checks: a checkbox ticked once per quarterly check-in (daily.every = 'quarter'). Never in Today; "Quarterly check-in done" starts it fresh.
+async function quarterlyChecks(check) {
+  const { app, db } = await import('/js/state.js');
+  const av = await import('/js/availability.js');
+  const D = await import('/js/dailies.js');
+  const { loadAll } = await import('/js/data.js');
+  const { saveSettings } = await import('/js/prefs.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const day = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - n); return D.dayKey(d); };
+  const iso = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  const t = T();
+  const task = (id) => t.tasks.find((x) => x.id === id);
+  const local = (id) => db.tasks.find((x) => x.id === id);
+  const base = { ...t.tasks[0], notes: '', project_id: null, parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, completed_at: null, dropped_at: null, gain: '', waiting_on: null, agenda_for: null, scheduled_at: null, checklist_id: null, created_at: iso(30), updated_at: iso(30) };
+  const tick = (id, taskId, n, state = 'done') => t.daily_ticks.push({ id, user_id: 'u1', task_id: taskId, day: day(n), state, created_at: iso(n), updated_at: iso(n) });
+  t.tasks.push({ ...base, id: 'qA', title: 'Am I making businesses?', daily: { tier: 'should', every: 'quarter', since: day(20) } });
+  t.tasks.push({ ...base, id: 'qR', title: 'Am I prioritizing and executing?', project_id: 'p1', due_at: iso(2), repeat_rule: { every: 3, unit: 'month', from: 'completion', n: 1 } });
+  tick('tq9', 'qA', 9);
+  await saveSettings({ horizons_quarter_at: iso(5) }, { quiet: true }); // the last check-in was done five days ago
+  await loadAll();
+
+  await go('#forecast');
+  check('a quarterly check is not in Today and not an available action', !$$('#view .row').some((r) => r.dataset.task === 'qA') && !av.isAvailable(local('qA')) && D.isQuarterly(local('qA')) && !D.isWeekly(local('qA')));
+  await go('#weekly/checks');
+  check('it is not a weekly check', !$('.dly-row[data-task="qA"]'));
+  await go('#horizons/quarterly');
+  check('the quarterly check-in lists it with its box and when it was last ticked; a tick from before the last check-in does not count', $$('.hz-checks .dly-row').length === 1 && has('.dly-row[data-task="qA"]', 'am i making businesses?', 'last ticked') && $('.dly-row[data-task="qA"] [data-dly-tick]').getAttribute('aria-pressed') === 'false' && has(undefined, 'quarterly checks', '0 of 1 ticked', 'starts them fresh'));
+  $('.dly-row[data-task="qA"] [data-dly-tick]').click();
+  await until(() => t.daily_ticks.some((x) => x.task_id === 'qA' && x.day === day(0) && x.state === 'done')); await wait(100);
+  check('tick: recorded, the action stays open, the box is on', !task('qA').completed_at && $('.dly-row[data-task="qA"] [data-dly-tick]').getAttribute('aria-pressed') === 'true' && has('#toast', 'this quarter') && has(undefined, '1 of 1 ticked') && has('.dly-row[data-task="qA"]', 'ticked today'));
+  $('.dly-row[data-task="qA"] [data-dly-tick]').click();
+  await until(() => t.daily_ticks.some((x) => x.task_id === 'qA' && x.day === day(0) && x.state === 'cleared')); await wait(100);
+  check('un-tick: the tick is cleared, not deleted', t.daily_ticks.filter((x) => x.task_id === 'qA').length === 2 && $('.dly-row[data-task="qA"] [data-dly-tick]').getAttribute('aria-pressed') === 'false');
+  tick('tq2', 'qA', 2);
+  await loadAll(); app.render(); await wait(50);
+  check('a tick since the last check-in counts', D.isTicked(local('qA')) && $('.dly-row[data-task="qA"] [data-dly-tick]').getAttribute('aria-pressed') === 'true');
+  $('[data-hz="quarter-done"]').click(); await wait(300);
+  check('Quarterly check-in done: it starts fresh', !D.isTicked(local('qA')) && $('.dly-row[data-task="qA"] [data-dly-tick]').getAttribute('aria-pressed') === 'false' && t.daily_ticks.find((x) => x.id === 'tq2').state === 'done');
+  $('.dly-row[data-task="qA"] [data-dly-tick]').click();
+  await until(() => D.isTicked(local('qA'))); await wait(100);
+  check('ticked again after the click that day: counts for the new quarter', D.isTicked(local('qA')) && $('.dly-row[data-task="qA"] [data-dly-tick]').getAttribute('aria-pressed') === 'true');
+
+  // The editor: a quarterly repeating question becomes a quarterly check.
+  await go('#project/p1');
+  $('.row[data-task="qR"] .row-title').click(); await wait(200);
+  const form = $('#sheet form');
+  form.elements.daily_tier.value = 'quarter'; form.elements.daily_tier.dispatchEvent(new Event('change', { bubbles: true }));
+  check('editor: “Every quarter, in the quarterly check-in” hides the days and says where it goes', [...form.elements.daily_tier.options].some((o) => o.value === 'quarter' && /every quarter, in the quarterly check-in/i.test(o.textContent)) && $('.dly-days', form).hidden && /quarterly check-in/i.test($('[data-dly-hint]', form).textContent));
+  form.requestSubmit();
+  await until(() => task('qR').daily); await wait(150);
+  check('saved: a quarterly check, its repeat and due date cleared', task('qR').daily.every === 'quarter' && task('qR').daily.tier === 'should' && !!task('qR').daily.since && task('qR').repeat_rule === null && task('qR').due_at === null, JSON.stringify(task('qR').daily));
+  check('in its project the row has a checkbox, not Complete, and says it is quarterly', !!$('.row[data-task="qR"] [data-dly-tick]') && !$('.row[data-task="qR"] [data-check]') && has('.row[data-task="qR"]', 'every quarter'));
+  $('.row[data-task="qR"] .row-title').click(); await wait(200);
+  check('the editor opens it as quarterly', $('#sheet form').elements.daily_tier.value === 'quarter' && $('.dly-days', $('#sheet form')).hidden);
+  $('#sheet').close(); await wait(50);
+  await go('#horizons/quarterly');
+  check('both checks are on the check-in', $$('.hz-checks .dly-row').length === 2);
+
+  // Full Review: a suggestion makes it a quarterly check on Submit; Undo puts the repeat and due date back.
+  t.tasks.push({ ...base, id: 'qF', title: 'Do I have a successful company or a paying job?', due_at: iso(2), repeat_rule: { every: 3, unit: 'month', from: 'completion', n: 1 }, import_id: 'imQ' });
+  t.review_sessions.push({ id: 'sQ', user_id: 'u1', title: 'Full Review', scope: {}, current_item: 'iQ', status: 'active', agent_seen_at: null, agent_status: '', finished_at: null, created_at: iso(0), updated_at: iso(0) });
+  t.review_items.push({ id: 'iQ', session_id: 'sQ', user_id: 'u1', sort: 1, kind: 'task', task_id: 'qF', grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: { decision: 'keep', daily: { tier: 'should', every: 'quarter' }, at: iso(0) }, created_at: iso(0), updated_at: iso(0) });
+  await loadAll(); app.fr = null;
+  await go('#full/sQ');
+  await until(() => has(undefined, 'successful company') && !!$('.sg-bar'));
+  check('Full Review: the suggestion says it becomes a quarterly check, previews the box and says where it goes', has('.sg-bar', 'make it a quarterly check', 'every quarter, in the quarterly check-in', 'starts fresh each check-in') && !!$('.sg-bar [data-dly-preview="quarterly"] .dly-box') && has('.sg-bar .sg-dly-where', 'horizons', 'quarterly check-in'), text('.sg-bar'));
+  $('[data-fr="submit"]').click();
+  await until(() => task('qF').daily);
+  check('Submit: the action is a quarterly check, its repeat and due date gone', task('qF').daily && task('qF').daily.every === 'quarter' && task('qF').repeat_rule === null && task('qF').due_at === null, JSON.stringify(task('qF').daily));
+  await wait(300);
+  const undo = $('[data-fr="undo"]');
+  if (undo) { undo.click(); await until(() => !task('qF').daily); }
+  check('Undo: an ordinary repeating action again, due date back', !!undo && !task('qF').daily && task('qF').repeat_rule && task('qF').repeat_rule.unit === 'month' && !!task('qF').due_at);
+  app.fr = null;
+  await saveSettings({ horizons_quarter_at: null }, { quiet: true });
 }
 
 // Daily review: start your day (calendar, must-dos, up to 3 focus), then shut down.

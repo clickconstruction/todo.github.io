@@ -9,6 +9,7 @@ import { isAvailable } from '../availability.js';
 import { areaBalance, isDueForReview, bigReviewsDue } from '../whatnow.js';
 import { viewTree, treeSummary } from './tree.js';
 import { parseText, counts, setTick, clearTicks, toggleBoxes, inlineHtml, plain, toggleWrap, cycleHeading, toggleBullets } from '../horizon-text.js';
+import { quarterlyChecks, checkRow, isTicked } from '../dailies.js';
 
 export const liveAreas = () => (db.areas || []).filter((a) => !a.archived_at).sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
 export const activeGoals = () => (db.goals || []).filter((g) => g.status === 'active').sort((a, b) => String(a.target_date || '9').localeCompare(String(b.target_date || '9')) || a.title.localeCompare(b.title));
@@ -130,12 +131,17 @@ export function quarterlyBody() {
   const b = bigDue();
   const goals = activeGoals();
   const s = app.settings || {};
-  return `${goals.length ? `<h2 class="section-title">Goals · ${goals.length}</h2><div class="group-list">${goals.map((g) => { const pr = goalProgress(g); const late = b.lateGoals.includes(g); return `<a class="group-row" href="#goal/${g.id}"><span class="group-main"><span>${esc(g.title)}${late ? ' <span class="chip warn">past its date</span>' : ''}</span>
+  const checks = quarterlyChecks();
+  const ticked = checks.filter((t) => isTicked(t)).length;
+  return `${checks.length ? `<h2 class="section-title">Quarterly checks <span class="hint">${ticked} of ${checks.length} ticked</span></h2>
+    <ul class="list dly-list wk-checks hz-checks">${checks.map((t) => checkRow(t)).join('')}</ul>
+    <p class="hint">The questions you ask yourself once a quarter. Ticks are for this check-in: “Quarterly check-in done” starts them fresh. Tap a line to open it.</p>` : ''}
+    ${goals.length ? `<h2 class="section-title">Goals · ${goals.length}</h2><div class="group-list">${goals.map((g) => { const pr = goalProgress(g); const late = b.lateGoals.includes(g); return `<a class="group-row" href="#goal/${g.id}"><span class="group-main"><span>${esc(g.title)}${late ? ' <span class="chip warn">past its date</span>' : ''}</span>
       <span class="group-sub">${pr.done} of ${pr.total} projects${g.target_date ? ` · by ${esc(fmtDate(`${g.target_date}T12:00:00`))}` : ''}</span></span></a>`; }).join('')}</div>` : '<p class="hint">No active goals. Is there something worth aiming at this year? <button class="link-btn" data-hz="new-goal">+ Goal</button></p>'}
     ${b.lateGoals.length ? `<p class="hint">Past its date: achieve it, give it a new date, or drop it.</p>` : ''}
     ${b.areasNoGoal.length ? `<h2 class="section-title">Areas with no goal · ${b.areasNoGoal.length}</h2><p class="hint">Fine if they’re steady; worth a goal if you want them to change.</p><div class="group-list">${b.areasNoGoal.map((a) => `<a class="group-row" href="#area/${a.id}"><span>${esc(a.name)}</span></a>`).join('')}</div>` : ''}
     ${b.looseProjects.length ? `<h2 class="section-title">Projects serving no area or goal · ${b.looseProjects.length}</h2><p class="hint">Still worth doing? Give each a home, or put it on hold.</p>${b.looseProjects.slice(0, 12).map(projectRow).join('')}${b.looseProjects.length > 12 ? `<p class="hint">${b.looseProjects.length - 12} more in Projects.</p>` : ''}` : ''}
-    <p class="hint">${s.horizons_quarter_at ? `Last check-in ${esc(fmtDate(s.horizons_quarter_at))}.` : 'Your first quarterly check-in.'}</p>
+    <p class="hint">${s.horizons_quarter_at ? `Last check-in ${esc(fmtDate(s.horizons_quarter_at))}.` : 'Your first quarterly check-in.'}${!checks.length ? ' A question or routine for once a quarter can be a quarterly check here: open an action → Repeat and alerts → Every day → “Every quarter, in the quarterly check-in”, or ask Claude.' : ''}</p>
     <div class="wk-finish"><button class="btn ${b.quarterly ? 'primary' : ''}" data-hz="quarter-done">Quarterly check-in done</button></div>`;
 }
 function quarterlyHtml() {

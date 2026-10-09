@@ -1,6 +1,7 @@
 // Horizons of Focus and "What now?" for agents (same rules as the app: js/whatnow.js).
 import { rankNow, areaBalance, isDueForReview, bigReviewsDue } from '../../js/whatnow.js';
 import { parseText, counts, setTick, findTick, plain } from '../../js/horizon-text.js';
+import { dailiesFor, quarterSince, checkOut } from './dailies.js';
 
 export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, calendar }) {
   // Link many projects in two requests (one lookup, one batched update): a per-project loop ran past
@@ -26,10 +27,18 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
       async run(api, { include_text = false }) {
         const [areas, goals, projects, open] = await Promise.all([
           api.q(`areas?${api.u}&archived_at=is.null&order=sort.asc&select=*`), api.q(`goals?${api.u}&order=sort.asc&select=*`),
-          api.q(`projects?${api.u}&select=id,name,status,area_id,goal_id,outcome`), api.q(`tasks?${api.u}&${OPEN}&select=id,project_id,completed_at,dropped_at`),
+          api.q(`projects?${api.u}&select=id,name,status,area_id,goal_id,outcome`), api.q(`tasks?${api.u}&${OPEN}&select=id,project_id,completed_at,dropped_at,daily`),
         ]);
         const s = api.settings || {};
         const big = bigReviewsDue({ settings: s, goals, areas, projects });
+        // Quarterly checks (daily.every = 'quarter'): the questions asked once per check-in, ticked since the last one was done.
+        const today = localDate(new Date().toISOString(), api.tz);
+        let quarterlyChecks;
+        if (open.some((t) => t.daily && t.daily.every === 'quarter')) {
+          const dl = await dailiesFor(api, today, localDate);
+          const qs = quarterSince(api, today, localDate);
+          quarterlyChecks = dl.tasks.filter((t) => t.daily.every === 'quarter').map((t) => { const o = checkOut(t, dl.ticked(t), qs, today); return { id: o.id, title: o.title, ticked: o.ticked, last_ticked: o.last_ticked }; });
+        }
         const text = (v) => (include_text ? v || '' : String(v || '').split('\n')[0].slice(0, 200));
         // Checkboxes in the text (lines that start with [ ]): how many, and which are still to tick.
         const boxes = (v) => { const c = counts(v); return c.total ? { ticked: c.on, of: c.total, left: parseText(v).filter((l) => l.kind === 'check' && !l.on).map((l) => plain(l.text)).slice(0, 30) } : undefined; };
@@ -47,6 +56,7 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
           }),
           projects_without_outcome: projects.filter((p) => p.status === 'active' && !String(p.outcome || '').trim()).map((p) => p.name),
           projects_without_area: areas.length ? projects.filter((p) => p.status === 'active' && !p.area_id).map((p) => p.name) : undefined,
+          quarterly_checks: quarterlyChecks ? { items: quarterlyChecks, left: quarterlyChecks.filter((x) => !x.ticked).length, last_check_in: localDate(s.horizons_quarter_at, api.tz), note: 'The questions asked once a quarter, on the quarterly check-in. Tick each as the user answers (dailies tick with its id); save_horizon kind quarterly read: true when the check-in is done starts them fresh. An action becomes one with dailies set every: "quarter".' } : undefined,
           reviews_due: {
             yearly_read: big.yearly.length ? big.yearly : undefined,
             quarterly_check_in: big.quarterly ? { goals_past_their_date: big.lateGoals.map((g) => g.title), areas_with_no_goal: big.areasNoGoal.map((a) => a.name), projects_serving_no_area_or_goal: big.looseProjects.map((p) => p.name), last: localDate(s.horizons_quarter_at, api.tz), note: 'Go through these with the user, then save_horizon kind quarterly with read: true.' } : undefined,

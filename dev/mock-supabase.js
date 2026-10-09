@@ -211,7 +211,7 @@
   }
   function taskRules(t, before) {
     if (t.daily) {
-      if (!['must', 'should'].includes(t.daily.tier) || (t.daily.every && t.daily.every !== 'week')) { t.daily = before ? before.daily || null : null; } // every: 20261107000001
+      if (!['must', 'should'].includes(t.daily.tier) || (t.daily.every && !['week', 'quarter'].includes(t.daily.every))) { t.daily = before ? before.daily || null : null; } // every: 20261107000001, quarter: 20261108000001
       else { t.repeat_rule = null; t.due_at = null; t.planned_at = null; t.defer_at = null; if (!t.daily.since) t.daily = { ...t.daily, since: (before && before.daily && before.daily.since) || dayStr(new Date()) }; }
     }
     // tasks_people_guard: delegated_at when waiting_on changes; no follow-up without a person.

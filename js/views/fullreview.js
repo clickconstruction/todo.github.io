@@ -6,7 +6,7 @@
 // running, Claude keeps a suggestion waiting on each of the next cards, so a card has one when you reach it.
 // The card's rows (title, Gain, Project, When, Tags, Notes) edit in place: click one and it becomes that
 // field's own editor, Save writes just that field, Esc puts it back.
-import { describeDaily, isDaily, isWeekly, summary as dailySummary, dailyPreview } from '../dailies.js';
+import { describeDaily, isDaily, isWeekly, isQuarterly, summary as dailySummary, dailyPreview } from '../dailies.js';
 import { describe } from '../repeat.js';
 import { treeChangeHtml, treeWithout } from './tree.js';
 import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen, openSheet, $ } from '../state.js';
@@ -393,7 +393,7 @@ function suggestionBar(it, t) {
       const n = countSteps(s.steps);
       row('🪜', `Break it down: ${n} step${n === 1 ? '' : 's'}${s.steps_in_order ? ', in order' : ''}${n > s.steps.length ? ' <span class="hint">(nested)</span>' : ''}${stepsOf(t).length ? ` <span class="hint">(after the ${stepsOf(t).length} it has)</span>` : ''}${stepsHtml(s.steps)}`);
     }
-    if (s.daily && s.decision === 'keep') row('🔂', `${s.daily.every === 'week' ? 'Make it a weekly check' : 'Make it daily'}: <b>${esc(describeDaily(s.daily))}</b> <span class="hint">a checkbox that starts fresh each ${s.daily.every === 'week' ? 'review' : 'day'}</span>${t.repeat_rule || t.due_at || t.planned_at ? ` <span class="sg-old">${esc([t.repeat_rule && describe(t.repeat_rule), t.due_at && `due ${when(t.due_at)}`, t.planned_at && `planned ${when(t.planned_at)}`].filter(Boolean).join(' · '))}</span>` : ''}${dailyPreview(s.title || t.title, s.daily)}`);
+    if (s.daily && s.decision === 'keep') row('🔂', `${s.daily.every === 'week' ? 'Make it a weekly check' : s.daily.every === 'quarter' ? 'Make it a quarterly check' : 'Make it daily'}: <b>${esc(describeDaily(s.daily))}</b> <span class="hint">a checkbox that starts fresh each ${s.daily.every === 'week' ? 'review' : s.daily.every === 'quarter' ? 'check-in' : 'day'}</span>${t.repeat_rule || t.due_at || t.planned_at ? ` <span class="sg-old">${esc([t.repeat_rule && describe(t.repeat_rule), t.due_at && `due ${when(t.due_at)}`, t.planned_at && `planned ${when(t.planned_at)}`].filter(Boolean).join(' · '))}</span>` : ''}${dailyPreview(s.title || t.title, s.daily)}`);
     if (s.tree && Array.isArray(s.tree.items) && s.tree.items.length && ['keep', 'someday'].includes(s.decision)) row('🌳', treeChangeHtml(s.tree));
     if (s.checklist && ['keep', 'someday'].includes(s.decision)) {
       const ck = s.checklist;
@@ -456,7 +456,7 @@ function taskCard(it) {
     ${row('Project', 'project', p ? esc(p.name) : '<span class="hint">none</span>', true)}
     ${row('When', 'dates', [t.planned_at && `planned ${esc(fmtDate(t.planned_at))}`, t.due_at && `due ${esc(fmtDate(t.due_at))}`, t.defer_at && `from ${esc(fmtDate(t.defer_at))}`].filter(Boolean).join(' · ') || '<span class="hint">no dates</span>', true)}
     ${row('Tags', 'tags', tags.length ? tags.map((g) => `<span class="chip">${esc(tagLabel(g))}</span>`).join(' ') : '<span class="hint">none</span>', true)}
-    ${isDaily(t) ? row(isWeekly(t) ? 'Every week' : 'Every day', 'daily', `${esc(describeDaily(t.daily))}${dailySummary(t) ? ` <span class="hint">${esc(dailySummary(t))}</span>` : ''}`) : t.repeat_rule ? row('Repeats', 'repeat', esc(describe(t.repeat_rule))) : ''}
+    ${isDaily(t) ? row(isWeekly(t) ? 'Every week' : isQuarterly(t) ? 'Every quarter' : 'Every day', 'daily', `${esc(describeDaily(t.daily))}${dailySummary(t) ? ` <span class="hint">${esc(dailySummary(t))}</span>` : ''}`) : t.repeat_rule ? row('Repeats', 'repeat', esc(describe(t.repeat_rule))) : ''}
     ${t.flagged ? row('Flag', 'flagged', '<span class="chip flagged-chip">⚑ Flagged</span>') : ''}
     ${t.folder_path ? row('Folder', 'folder', `<span class="fr-folder">${esc(shortPath(t.folder_path))}</span>${folderButton(t.folder_path)}`) : ''}
     ${stepsRow(t, row)}
