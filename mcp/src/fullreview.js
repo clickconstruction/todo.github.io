@@ -7,7 +7,7 @@ import { buildQueue, priorityReason, proposalText } from '../../js/review.js';
 import { parseItemLines } from './checklists.js';
 
 const MAX_NOTES = 6000; // as everywhere notes are taken
-const AHEAD = 10; // "Keep Claude ahead": how many cards past the current one get a suggestion drafted (as js/views/fullreview.js)
+const AHEAD = 20; // "Keep Claude ahead": how many cards past the current one get a suggestion drafted (as js/views/fullreview.js)
 // New notes for a card's action: plain text with its line breaks; blank means "leave the notes alone".
 const taskNotes = (v) => (v === undefined || v === null ? '' : String(v).replace(/\r\n?/g, '\n').replace(/^\s*\n/, '').trimEnd().slice(0, MAX_NOTES));
 
@@ -241,7 +241,7 @@ actions:
   status {session_id?} (default) → progress, the current card (with any pending suggestion), the next few titles
   suggest {decision, title?, tree? ({add: [{title, kind: destination | milestone | goal | card, project? (a card's project)}], links: [{node, requires}]}: additions to the tech tree, shown on the card as a preview and made on Submit with keep; names in links are items in add or goals / projects already there, which are reused, never duplicated; a destination you add with no link has "no path yet", which is honest when the first step isn't known), daily? ("must" = have to, every day | "should" = should, most days, or {tier, weekdays: [0-6]}: with keep, the action becomes a daily checkbox that starts fresh each day and its repeat and dates are cleared; for habits and daily obligations that came in as repeating actions. "weekly": a weekly check instead, ticked once per Weekly Review and never in Today; for questions and routines that came in as weekly repeating actions. "quarterly": a quarterly check, ticked once per quarterly check-in in Horizons; for the questions of a quarterly review), task_notes? (the action's new notes, replacing the old; ≤6000 characters; omitted or null = unchanged), gain?, gain_suggested?, project?, planned?|due?|defer? (YYYY-MM-DD or null), flagged?, add_tags?, remove_tags?, steps? (titles, first to last: break it down; a step can be {title, steps: [...], in_order?} to nest), steps_in_order?, checklist? ({name, items: [lines; "# Section" starts a section], reflect?, complete_action?} to make one, or an existing checklist's name: attached on Submit; use it for routines the card repeats), mac_folder? (a folder on their Mac for its files; the card gets a 📂 button), proposal? (group), note?, item_id? (default current)} or {items: [{item_id, …}]}
   submit {item_id? (default current)} → apply the pending suggestion as the app's Submit does (only when the user says "submit"), then the next card
-  upcoming {count? ≤10} → the next cards in full, for drafting ahead
+  upcoming {count? ≤20} → the next cards in full, for drafting ahead
   ahead {on: true | false} → tick or untick "Keep Claude ahead" for this review (only when the user asks), then the status
   add {title, gain?, notes?} → a new idea the user has mid-review: captured to the Inbox and added as the last card
   annotate {…same fields…} / decide {decision, note?} → apply now (only when asked to just do it)
@@ -255,7 +255,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
         notes: { type: 'string', description: 'add: notes for the new idea' },
         items: { type: 'array', description: 'suggest: several cards at once, each {item_id, decision, title?, task_notes?, gain?, project?, planned?, due?, defer?, flagged?, add_tags?, remove_tags?, steps?, steps_in_order?, proposal?, note?}', items: { type: 'object' } },
         ahead: { type: 'boolean', description: 'suggest: drafted before talking it through (shown as “drafted ahead”)' },
-        count: { type: 'integer', description: 'upcoming: how many cards (max 10)' },
+        count: { type: 'integer', description: 'upcoming: how many cards (max 20)' },
         session_id: { type: 'string' },
         import_id: { type: 'string' }, project: { type: 'string', description: 'Project name or id (start: review that project; annotate: move the action there)' },
         all: { type: 'boolean' }, min_age_days: { type: 'integer' }, title: { type: 'string' },
@@ -356,7 +356,7 @@ Decisions: action cards keep|someday|done|drop|skip|reading (→ reading list, u
       }
       if (action === 'upcoming') {
         // The next few cards in one go (for drafting suggestions ahead): 4–5 queries, whatever the count.
-        const n = Math.min(10, Math.max(1, a.count || 5));
+        const n = Math.min(AHEAD, Math.max(1, a.count || 5));
         const next = list.filter((x) => x.status === 'pending' && (!cur || x.sort > cur.sort)).slice(0, n);
         if (!next.length) return { cards: [] };
         const full = await api.q(`review_items?${api.u}&id=in.(${next.map((x) => `"${x.id}"`).join(',')})&select=*`);

@@ -39,7 +39,7 @@ const guide = () => (guideHidden()
 const n = (x) => Number(x || 0).toLocaleString();
 const RECENT = 2 * 60000; // a field Claude changed in the last two minutes is highlighted
 const PAGE = 1000;
-const AHEAD = 10; // Keep Claude ahead: how many cards past the current one (as mcp/src/fullreview.js)
+const AHEAD = 20; // Keep Claude ahead: how many cards past the current one (as mcp/src/fullreview.js)
 // The live connection and the poll live here, not in app.fr, so they're always stopped (even if app.fr is reset).
 const L = { channel: null, poll: null };
 
