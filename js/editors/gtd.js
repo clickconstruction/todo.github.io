@@ -155,7 +155,7 @@ export function openReferenceEditor(r, { defaults = {}, onDone = () => {} } = {}
     <label>Title<input type="text" name="title" value="${esc(v.title)}" required maxlength="300" autocomplete="off" placeholder="Gate code, warranty, permit #…"></label>
     <div class="grid2"><label>Topic<input type="text" name="topic" value="${esc(v.topic || '')}" list="topic-list" maxlength="200" autocomplete="off" placeholder="Home, Smith job…">
       <datalist id="topic-list">${topics().map((x) => `<option value="${esc(x)}">`).join('')}</datalist></label>
-      <label>Support material for<select name="project_id"><option value="">No project</option>${projects.map((p) => `<option value="${p.id}" ${p.id === v.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label></div>
+      <label>Support material for<select name="project_id" data-create="project"><option value="">No project</option>${projects.map((p) => `<option value="${p.id}" ${p.id === v.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label></div>
     <label>Hidden value <span class="hint">a code or number, shown only when you tap Show</span>
       <span class="secret-edit"><input type="password" name="secret_value" value="${esc(v.secret_value || '')}" maxlength="2000" autocomplete="off"><button type="button" class="btn small" data-peek>Show</button></span></label>
     <label>Notes<textarea name="body" rows="6" placeholder="Anything worth keeping">${esc(v.body || '')}</textarea></label>

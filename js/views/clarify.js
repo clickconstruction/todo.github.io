@@ -102,7 +102,7 @@ function nextForm(t) {
   const projects = db.projects.filter((p) => ['active', 'on_hold'].includes(p.status)).sort((a, b) => a.name.localeCompare(b.name));
   const when = WHEN();
   return `<form class="cl-form" data-clarify-form="next">
-    <label class="field"><span class="field-label">Where does it go?</span><select name="project_id"><option value="">No project (single action)</option>
+    <label class="field"><span class="field-label">Where does it go?</span><select name="project_id" data-create="project"><option value="">No project (single action)</option>
       ${projects.map((p) => `<option value="${p.id}" ${p.id === projectId ? 'selected' : ''}>${esc(p.name)}${sug && sug.project.id === p.id ? ' · suggested' : ''}</option>`).join('')}</select></label>
     <div class="field cl-tags">${tagPickerHtml('where can you do it?')}</div>
     <div class="field"><span class="field-label">When?</span><div class="segmented" role="radiogroup" aria-label="When">

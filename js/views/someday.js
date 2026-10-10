@@ -57,7 +57,7 @@ export function viewSomeday() {
 function openActivate(t) {
   const projects = db.projects.filter((p) => ['active', 'on_hold'].includes(p.status)).sort((a, b) => a.name.localeCompare(b.name));
   const sheet = openSheet(`<form method="dialog" class="gtd-sheet activate-form"><h2>Activate</h2><p class="gtd-item">${esc(t.title)}</p>
-    <label>Project<select name="project_id"><option value="">No project</option>${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+    <label>Project<select name="project_id" data-create="project"><option value="">No project</option>${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
     ${tagPickerHtml('where can you do it?')}
     <p class="form-error" hidden data-err>Pick a project or a tag, or send it to the Inbox.</p>
     <div class="actions"><button type="button" class="btn" data-inbox>To the Inbox</button><div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Activate</button></div></div></form>`);

@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -1699,6 +1699,45 @@ async function quarterlyChecks(check) {
   check('Undo: an ordinary repeating action again, due date back', !!undo && !task('qF').daily && task('qF').repeat_rule && task('qF').repeat_rule.unit === 'month' && !!task('qF').due_at);
   app.fr = null;
   await saveSettings({ horizons_quarter_at: null }, { quiet: true });
+}
+
+// A project picker makes the project typed into it: "+ New project “…”" at the end of the list when no
+// project has that name (the editor, the Full Review card's Project row, Clarify, Someday, events).
+async function newProjectFromPicker(check) {
+  const { db } = await import('/js/state.js');
+  const { openEditor } = await import('/js/editors/task.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const t = T();
+  const openPicker = (sel) => sel.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+  const type = (q) => { const inp = $('.ss-pop input'); inp.value = q; inp.dispatchEvent(new Event('input', { bubbles: true })); };
+  await go('#inbox');
+  openEditor(db.tasks.find((x) => x.id === 't1')); await wait(80);
+  const sel = $('#sheet select[name=project_id]');
+  openPicker(sel); await wait(50);
+  check('the project picker opens as a search (it can make projects, however few there are)', sel.dataset.create === 'project' && !!$('.ss-pop'));
+  type('driveway'); await wait(30);
+  check('a part of a name: the matches, and "+ New project" after them (only an exact name hides it)', $$('.ss-pop .ss-opt:not(.ss-new)').length >= 1 && !!$('.ss-pop .ss-new') && $$('.ss-pop .ss-opt')[0].classList.contains('ss-active'));
+  type('Driveway Trailer'); await wait(30);
+  check('the exact name of a project: no "new" row', !$('.ss-pop .ss-new') && $$('.ss-pop .ss-opt').length === 1);
+  type('Gun bench'); await wait(30);
+  const row = $('.ss-pop .ss-new');
+  check('no match: the list ends with "+ New project" instead of "No matches"', !!row && /new project “gun bench”/i.test(row.textContent) && !$('.ss-pop .ss-empty') && row.classList.contains('ss-active'));
+  row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+  await until(() => t.projects.some((p) => p.name === 'Gun bench'));
+  await wait(80);
+  const made = t.projects.find((p) => p.name === 'Gun bench');
+  check('picked: the project is made (active, parallel), added to the list and selected; a toast says so', !!made && made.status === 'active' && made.kind === 'parallel' && sel.value === made.id && db.projects.some((p) => p.id === made.id) && !$('.ss-pop') && has('#toast', 'gun bench'));
+  $('#sheet form').requestSubmit(); await until(() => t.tasks.find((x) => x.id === 't1').project_id === made.id);
+  check('saved: the card is in the new project', t.tasks.find((x) => x.id === 't1').project_id === made.id);
+  if ($('#sheet').open) $('#sheet').close();
+  // Return on the row works too, and the same name again reuses the project.
+  openEditor(db.tasks.find((x) => x.id === 't2')); await wait(80);
+  const sel2 = $('#sheet select[name=project_id]');
+  openPicker(sel2); await wait(50); type('gun bench'); await wait(30);
+  check('the name now matches the project, so there is no "new" row', !$('.ss-pop .ss-new') && $$('.ss-pop .ss-opt').length === 1 && /gun bench/i.test($('.ss-pop .ss-opt').textContent));
+  $('.ss-pop input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); await wait(50);
+  check('Return picks it', sel2.value === made.id && t.projects.filter((p) => p.name === 'Gun bench').length === 1);
+  if ($('#sheet').open) $('#sheet').close();
 }
 
 // Daily review: start your day (calendar, must-dos, up to 3 focus), then shut down.

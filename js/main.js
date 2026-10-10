@@ -15,11 +15,13 @@ import { isWide, select, clearSelection, moveSelection } from './inspector.js';
 import { onSearchInput } from './views/search.js';
 import { onDoneFilterChange } from './views/done.js';
 import { setFilter } from './filter.js';
-import { setTagStatus } from './data.js';
+import { setTagStatus, insertProject } from './data.js';
+// A project picker can make the project typed into it ("+ New project").
+registerCreator('project', async (name) => { const p = await insertProject(name); return p ? { value: p.id, label: p.name } : null; });
 import { openNewProject, openNewTemplate, openSaveAsTemplate } from './views/templates.js';
 import { openFocusPicker, unfocus, focusOn } from './editors/focus.js';
 import { handleKey, H } from './shortcuts.js';
-import './select-search.js';
+import { registerCreator } from './select-search.js';
 import { openSheet, esc } from './state.js';
 import { openNewPerspective, openPerspectiveEditor, openPerspectiveMenu, saveCurrentViewAsPerspective } from './editors/perspective.js';
 import { livePerspectives, movePerspective, archivePerspective, badgeCount } from './perspectives.js';

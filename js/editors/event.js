@@ -28,7 +28,7 @@ export function openEventEditor(event = null, { day = null } = {}) {
     </div>
     <input type="text" name="location" value="${esc(e ? e.location : '')}" placeholder="Where (optional)" autocomplete="off" aria-label="Location">
     <p class="hint ev-geo" data-geo ${e && e.location ? '' : 'hidden'}>${e && e.lat != null ? `📍 ${esc(distanceText(e) || 'On the map')} · <a href="${esc(directionsUrl(e))}" target="_blank" rel="noopener">Directions</a>` : e && e.location ? 'Not found on the map yet' : ''}</p>
-    <label>Project<select name="project_id"><option value="">None</option>${projects.map((p) => `<option value="${p.id}" ${e && e.project_id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+    <label>Project<select name="project_id" data-create="project"><option value="">None</option>${projects.map((p) => `<option value="${p.id}" ${e && e.project_id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
     <input type="url" name="url" value="${esc(e ? e.url : '')}" placeholder="Link (optional)" autocomplete="off" spellcheck="false" aria-label="Link">
     <label>Notes<textarea name="notes" placeholder="Tickets, gate times, who’s going…">${esc(e ? e.notes : '')}</textarea></label>
     ${e && cardOf(e.task_id) ? `<p class="ev-card">↩ From the card <b>${esc(cardOf(e.task_id).title)}</b> <label class="hint"><input type="checkbox" name="unlink"> Unlink</label></p>` : ''}

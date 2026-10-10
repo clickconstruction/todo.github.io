@@ -431,6 +431,19 @@ export async function insertFolder(name) {
   return row;
 }
 
+// A project by name, for the "+ New project" row of a project picker: the active one of that name if
+// there is one, else a plain active parallel project.
+export async function insertProject(name) {
+  name = (name || '').trim();
+  if (!name) return null;
+  const existing = db.projects.find((p) => p.status !== 'dropped' && p.name.toLowerCase() === name.toLowerCase());
+  if (existing) return existing;
+  const [row] = await run(sb.from('projects').insert({ name: name.slice(0, 200), status: 'active', kind: 'parallel', sort: db.projects.length }).select());
+  db.projects.push(row);
+  toast(`Project “${row.name}” added`);
+  return row;
+}
+
 export async function updateProject(project, fields) {
   const since = new Date(Date.now() - 2000).toISOString();
   const repeating = project.repeat_rule && fields.status === 'completed' && project.status !== 'completed';

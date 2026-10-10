@@ -484,7 +484,7 @@ function fieldEditorHtml(field, t) {
   const body = {
     title: () => `<label>Title<input type="text" name="title" value="${esc(t.title)}" required autocomplete="off"></label>`,
     gain: () => gainFieldHtml(t),
-    project: () => `<label>Project<select name="project_id"><option value="">${t.in_inbox ? 'None (Inbox)' : 'None'}</option>${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>`,
+    project: () => `<label>Project<select name="project_id" data-create="project"><option value="">${t.in_inbox ? 'None (Inbox)' : 'None'}</option>${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>`,
     dates: () => dateField('planned_at', 'Planned', t.planned_at) + dateField('due_at', 'Due', t.due_at) + dateField('defer_at', 'Defer until', t.defer_at),
     tags: () => tagPickerHtml(),
     notes: () => `<label>Notes<textarea name="notes" rows="${Math.min(16, Math.max(3, lines + 1))}">${esc(t.notes || '')}</textarea></label>`,

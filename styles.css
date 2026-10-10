@@ -1490,6 +1490,7 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .ss-opt.ss-cur::before { content: '✓ '; color: var(--accent); }
 .ss-group { padding: 8px 10px 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .ss-empty { padding: 10px; color: var(--muted); font-size: 14px; }
+.ss-new { color: var(--accent); border-top: 1px solid var(--line); border-radius: 0; margin-top: 4px; padding-top: 9px; }
 
 /* Steps type (parallel / in order / single actions) and "Waits for" */
 .steps-type { margin: 8px 0 4px; }

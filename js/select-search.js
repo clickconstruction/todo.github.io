@@ -3,11 +3,17 @@
 // ("orb" finds "Space Feeder (Orbital Foundries)"); ↑/↓ move, Return picks, Esc closes. The <select> stays
 // the source of truth: picking sets its value and fires input + change, so every existing handler works.
 // Opt out with data-no-search.
+// A select with data-create="project" can also make what is typed: when the query matches no option by
+// name, the list ends with "+ New project “…”", and picking it calls the creator registered for that kind
+// (registerCreator), which returns { value, label }; the new option is added and picked.
 const MIN_OPTIONS = 12;
 let pop = null, current = null, items = [], active = -1;
+const creators = {};
+export const registerCreator = (kind, fn) => { creators[kind] = fn; };
+const creatorOf = (sel) => (sel && sel.dataset.create && creators[sel.dataset.create]) || null;
 
 const qualifies = (el) => el && el.tagName === 'SELECT' && !el.multiple && !el.disabled && !el.hasAttribute('data-no-search')
-  && (el.hasAttribute('data-searchable') || el.options.length > MIN_OPTIONS);
+  && (el.hasAttribute('data-searchable') || el.hasAttribute('data-create') || el.options.length > MIN_OPTIONS);
 const norm = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -40,13 +46,18 @@ function draw(q) {
       .filter((e) => e.s >= 0).sort((a, b) => a.s - b.s);
   }
   items = rows.filter((e) => e.o);
+  // Nothing of that name yet: offer to make it (a creator for this select's kind, and a non-blank query).
+  const name = q.trim();
+  const make = creatorOf(current) && name && !entries(current).some((e) => e.o && e.o.textContent.trim().toLowerCase() === name.toLowerCase()) ? { make: name } : null;
+  if (make) items.push(make);
   const val = current.value;
-  active = Math.max(0, items.findIndex((e) => e.o.value === val && words.length === 0));
+  active = Math.max(0, items.findIndex((e) => e.o && e.o.value === val && words.length === 0));
   if (words.length) active = items.length ? 0 : -1;
-  list.innerHTML = rows.length ? rows.map((e) => e.group
+  list.innerHTML = (rows.length ? rows.map((e) => e.group
     ? `<li class="ss-group" role="presentation">${escHtml(e.group)}</li>`
     : `<li class="ss-opt${e.o.value === val ? ' ss-cur' : ''}" role="option" id="ss-o${items.indexOf(e)}" data-i="${items.indexOf(e)}" aria-selected="${e.o.value === val}">${escHtml(e.o.textContent.trim() || '—')}${words.length && e.groupLabel ? `<small>${escHtml(e.groupLabel)}</small>` : ''}</li>`).join('')
-    : '<li class="ss-empty">No matches</li>';
+    : make ? '' : '<li class="ss-empty">No matches</li>')
+    + (make ? `<li class="ss-opt ss-new" role="option" id="ss-o${items.indexOf(make)}" data-i="${items.indexOf(make)}" aria-selected="false">+ New ${escHtml(current.dataset.create)} “${escHtml(name)}”</li>` : '');
   mark();
 }
 
@@ -86,14 +97,27 @@ function open(sel, seed = '') {
   q.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); if (items.length) { active = (active + 1) % items.length; mark(); } }
     else if (e.key === 'ArrowUp') { e.preventDefault(); if (items.length) { active = (active - 1 + items.length) % items.length; mark(); } }
-    else if (e.key === 'Enter') { e.preventDefault(); if (items[active]) pick(items[active].o); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (items[active]) choose(items[active]); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); }
     else if (e.key === 'Tab') close(false);
   });
-  pop.addEventListener('pointerdown', (e) => { const li = e.target.closest('.ss-opt'); if (li) { e.preventDefault(); pick(items[Number(li.dataset.i)].o); } });
+  pop.addEventListener('pointerdown', (e) => { const li = e.target.closest('.ss-opt'); if (li) { e.preventDefault(); choose(items[Number(li.dataset.i)]); } });
   pop.addEventListener('pointermove', (e) => { const li = e.target.closest('.ss-opt'); if (li && Number(li.dataset.i) !== active) { active = Number(li.dataset.i); mark(); } });
 }
 
+// An option is picked; "+ New …" makes it first, then adds the option to the select and picks it.
+async function choose(item) {
+  if (item.o) return pick(item.o);
+  const sel = current;
+  const creator = creatorOf(sel);
+  close(false);
+  const made = await creator(item.make);
+  if (!made) { sel.focus({ preventScroll: true }); return; }
+  let o = [...sel.options].find((x) => x.value === String(made.value));
+  if (!o) { o = new Option(made.label, made.value); sel.appendChild(o); }
+  current = sel;
+  pick(o);
+}
 function pick(o) {
   const sel = current;
   close(false);
