@@ -1569,6 +1569,10 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .dly-box.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .dly-row.dly-on .row-title { color: var(--muted); }
 .dly-title .hint { font-weight: 500; margin-left: 6px; }
+.dly-could > summary { cursor: pointer; list-style: none; }
+.dly-could > summary::-webkit-details-marker { display: none; }
+.dly-could > summary::before { content: '▸ '; color: var(--muted); }
+.dly-could[open] > summary::before { content: '▾ '; }
 .dly-meta { align-items: center; }
 .dly-dots { display: inline-flex; gap: 3px; margin-right: 6px; vertical-align: middle; }
 .dly-dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); box-sizing: border-box; opacity: .55; }

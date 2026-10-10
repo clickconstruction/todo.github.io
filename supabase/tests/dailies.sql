@@ -1,4 +1,4 @@
--- Dailies (migration 20261101000001), weekly checks (20261107000001), quarterly checks (20261108000001) and yearly checks (20261109000001). One rolled-back transaction; every row ok = true.
+-- Dailies (20261101000001), weekly checks (20261107000001), quarterly checks (20261108000001), yearly checks (20261109000001), the could tier (20261110000001) and since in the user's zone (20261110000002). One rolled-back transaction; every row ok = true.
 begin;
 insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000d0001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','dy1@test.invalid'),('00000000-0000-0000-0000-0000000d0002','00000000-0000-0000-0000-000000000000','authenticated','authenticated','dy2@test.invalid');
 create temp table r (n int generated always as identity, test text, ok boolean, detail text); grant all on r to authenticated;
@@ -18,8 +18,17 @@ update public.tasks set due_at = now() where id = '00000000-0000-0000-0000-00000
 update public.tasks set daily = '{"tier":"must"}' where id = '00000000-0000-0000-0000-0000000d0011';
 insert into r (test, ok, detail) select 'since is set once and kept when the tier changes', daily->>'tier' = 'must' and daily->>'since' = to_char(now(), 'YYYY-MM-DD'), daily::text from public.tasks where id = '00000000-0000-0000-0000-0000000d0011';
 insert into r (test, ok, detail) select 'a daily action takes no due date', due_at is null, '' from public.tasks where id = '00000000-0000-0000-0000-0000000d0011';
-do $$ begin update public.tasks set daily = '{"tier":"sometimes"}' where id = '00000000-0000-0000-0000-0000000d0012'; insert into r (test, ok, detail) values ('the tier is must or should', false, '');
-exception when check_violation then insert into r (test, ok, detail) values ('the tier is must or should', true, sqlerrm); end $$;
+do $$ begin update public.tasks set daily = '{"tier":"sometimes"}' where id = '00000000-0000-0000-0000-0000000d0012'; insert into r (test, ok, detail) values ('the tier is must, should or could', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('the tier is must, should or could', true, sqlerrm); end $$;
+update public.tasks set daily = '{"tier":"could"}' where id = '00000000-0000-0000-0000-0000000d0012';
+insert into r (test, ok, detail) select 'could is a tier (20261110000001), with since like the others', daily->>'tier' = 'could' and daily ? 'since', daily::text from public.tasks where id = '00000000-0000-0000-0000-0000000d0012';
+update public.tasks set daily = null where id = '00000000-0000-0000-0000-0000000d0012';
+-- since is the user's day (20261110000002): with a zone far ahead of UTC, a daily made now is dated there, not in UTC.
+insert into public.user_settings (user_id, timezone) values ('00000000-0000-0000-0000-0000000d0001', 'Pacific/Kiritimati') on conflict (user_id) do update set timezone = excluded.timezone;
+update public.tasks set daily = '{"tier":"should"}' where id = '00000000-0000-0000-0000-0000000d0012';
+insert into r (test, ok, detail) select 'since is stamped in the user''s time zone', daily->>'since' = to_char(now() at time zone 'Pacific/Kiritimati', 'YYYY-MM-DD'), daily->>'since' || ' vs UTC ' || to_char(now(), 'YYYY-MM-DD') from public.tasks where id = '00000000-0000-0000-0000-0000000d0012';
+update public.tasks set daily = null where id = '00000000-0000-0000-0000-0000000d0012';
+update public.user_settings set timezone = null where user_id = '00000000-0000-0000-0000-0000000d0001';
 
 insert into public.daily_ticks (task_id, day) values ('00000000-0000-0000-0000-0000000d0011', current_date);
 insert into public.daily_ticks (task_id, day) values ('00000000-0000-0000-0000-0000000d0011', current_date - 1);

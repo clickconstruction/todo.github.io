@@ -903,6 +903,8 @@ async function dailies(check) {
   t.tasks.push({ ...base, id: 'dS', title: 'Stretch for ten minutes', daily: { tier: 'should', since: day(20) } });
   t.tasks.push({ ...base, id: 'dW', title: 'Water the orchard', daily: { tier: 'should', weekdays: notToday, since: day(20) } });
   t.tasks.push({ ...base, id: 'dR', title: 'Walk for 30min to relax my mind', project_id: 'p1', due_at: iso(3), repeat_rule: { every: 1, unit: 'day', from: 'assigned', n: 1 } });
+  t.tasks.push({ ...base, id: 'dC', title: 'Sing or accent training (5 min)', daily: { tier: 'could', since: day(20) } });
+  [3, 9].forEach((n) => t.daily_ticks.push({ id: `tc${n}`, user_id: 'u1', task_id: 'dC', day: day(n), state: 'done', created_at: iso(n), updated_at: iso(n) }));
   [2, 3, 4].forEach((n) => t.daily_ticks.push({ id: `tk${n}`, user_id: 'u1', task_id: 'dM', day: day(n), state: 'done', created_at: iso(n), updated_at: iso(n) }));
   [1, 3].forEach((n) => t.daily_ticks.push({ id: `ts${n}`, user_id: 'u1', task_id: 'dS', day: day(n), state: 'done', created_at: iso(n), updated_at: iso(n) }));
   const { loadAll } = await import('/js/data.js'); await loadAll();
@@ -916,6 +918,14 @@ async function dailies(check) {
   check('Today: Have to and Should, each with its count, above Due', at('have to, every day') >= 0 && at('should, most days') > at('have to, every day') && at('due') > at('should, most days') && has('[data-dly-tier="must"]', '0 of 1') && has('[data-dly-tier="should"]', '0 of 1'), titles.join(' | '));
   check('a have-to names its missed day; a should counts its week', has('.dly-row[data-task="dM"]', 'missed yesterday') && has('.dly-row[data-task="dS"]', '2 of 7 this week') && !!$('.dly-row[data-task="dM"] .dly-dot.red') && !$('.dly-row[data-task="dS"] .dly-dot.red'));
   check('a daily for other weekdays isn’t asked for today', !$('.dly-row[data-task="dW"]'));
+  const could = $('#view details[data-dly-could]');
+  check('Could: a folded menu at the bottom of Today with its count, below Should', !!could && !could.open && at('could, if i feel like it') > at('should, most days') && has('[data-dly-tier="could"]', '1') && !!$('.dly-row[data-task="dC"]'));
+  could.querySelector('summary').click(); await wait(80);
+  check('opened: no dots, no misses, just days this month', $('#view details[data-dly-could]').open && !$('.dly-row[data-task="dC"] .dly-dot') && has('.dly-row[data-task="dC"]', '2 days this month') && !has('.dly-row[data-task="dC"]', 'missed'));
+  $('.dly-row[data-task="dC"] [data-dly-tick]').click();
+  await until(() => t.daily_ticks.some((x) => x.task_id === 'dC' && x.day === day(0) && x.state === 'done')); await wait(100);
+  check('tick a could: recorded for today, counted in the menu, the action stays open', !task('dC').completed_at && has('[data-dly-tier="could"]', '1 of 1') && has('.dly-row[data-task="dC"]', '3 days this month') && $('#view details[data-dly-could]').open);
+  check('a could is not an available action, and not a must-do', !av.isAvailable(local('dC')) && !D.mustLeft().some((x) => x.id === 'dC'));
   check('the repeating walk is overdue, a deadline it never was (before)', (await import('/js/views/forecast.js')).forecastData().overdue.some((x) => x.id === 'dR') && !$('.dly-row[data-task="dR"]'));
   check('a daily checkbox is not an available action', !av.isAvailable(local('dM')) && !av.isAvailable(local('dS')));
 

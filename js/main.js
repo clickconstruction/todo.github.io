@@ -131,6 +131,7 @@ const CLICKS = [
     setCompleted(t, !t.completed_at);
   }],
   ['[data-dly-tick]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.dlyTick); if (t) tickDaily(t); }],
+  ['[data-dly-could] > summary', (el) => { setTimeout(() => { app.couldOpen = el.parentElement.open; }, 0); }], // the Could menu stays open across redraws while it is open
   ['[data-flag]', (el, e) => { e.stopPropagation(); const t = byId(db.tasks, el.dataset.flag); if (t) updateTask(t, { flagged: !t.flagged }); }],
   ['[data-flag-project]', (el, e) => { e.stopPropagation(); const p = byId(db.projects, el.dataset.flagProject); if (p) updateProject(p, { flagged: !p.flagged }); }],
   ['[data-triage]', (el) => {

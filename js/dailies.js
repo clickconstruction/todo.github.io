@@ -43,10 +43,10 @@ export const week = (t, today = dayKey()) => R.week(t.daily, tickedOf(t), today)
 export const running = (t, today = dayKey()) => R.running(t.daily, tickedOf(t), today);
 export const summary = (t, today = dayKey()) => (R.isCheck(t.daily) ? R.checkLine(t.daily, ticksOf(t), sinceAtOf(t)) : R.summary(t.daily, tickedOf(t), today));
 
-// Today's dailies by tier: open, asked for today, not parked by an on-hold tag.
+// Today's dailies by tier: open, asked for today, not parked by an on-hold tag. Could = a menu of options.
 export function todaysDailies(today = dayKey()) {
   const list = db.tasks.filter((t) => isDaily(t) && visible(t) && onDay(t, today) && !onHoldTagFor(t)).sort(taskSort);
-  return { must: list.filter((t) => t.daily.tier === 'must'), should: list.filter((t) => t.daily.tier !== 'must') };
+  return { must: list.filter((t) => t.daily.tier === 'must'), should: list.filter((t) => t.daily.tier !== 'must' && t.daily.tier !== 'could'), could: list.filter((t) => t.daily.tier === 'could') };
 }
 // Have-to dailies not ticked yet today: the Daily review's must-dos and the Forecast badge count them.
 export const mustLeft = (today = dayKey()) => todaysDailies(today).must.filter((t) => !isTicked(t, today));
@@ -94,7 +94,7 @@ export function dailyRow(t, today = dayKey()) {
   return `<li class="row dly-row ${on ? 'dly-on' : ''}" data-task="${t.id}">
     <button class="dly-box ${on ? 'on' : ''}" data-dly-tick="${t.id}" aria-pressed="${on}" aria-label="${on ? 'Un-tick' : 'Tick'} “${esc(t.title)}” for today">✓</button>
     <div class="row-main"><div class="row-title">${esc(t.title)}</div>
-      <div class="row-meta dly-meta">${dots(t, today)}${line ? `<span class="${/^missed/.test(line) ? 'dly-missed' : ''}">${esc(line)}</span>` : ''}</div></div>
+      <div class="row-meta dly-meta">${t.daily.tier === 'could' ? '' : dots(t, today)}${line ? `<span class="${/^missed/.test(line) ? 'dly-missed' : ''}">${esc(line)}</span>` : ''}</div></div>
   </li>`;
 }
 // How an action would look as a daily one, before it is one (a Full Review suggestion): the row as Today
@@ -112,21 +112,24 @@ export function dailyPreview(title, daily, today = dayKey()) {
   const d = { ...daily, since: today };
   const asked = R.onDay(d, today);
   const next = asked ? null : Array.from({ length: 7 }, (_, i) => { const x = new Date(`${today}T12:00`); x.setDate(x.getDate() + i + 1); return x; }).find((x) => R.onDay(d, dayKey(x)));
-  const line = asked ? 'starts today' : `first on ${next ? WD[next.getDay()] : 'its next day'}`;
+  const line = d.tier === 'could' ? 'any day you like; never a miss' : asked ? 'starts today' : `first on ${next ? WD[next.getDay()] : 'its next day'}`;
   return `<div class="sg-dly" data-dly-preview="${esc(d.tier)}" role="img" aria-label="How it will look in Today: a checkbox, ${esc(title)}, ${esc(line)}">
     <span class="dly-box" aria-hidden="true">✓</span>
     <span class="sg-dly-main"><span class="row-title">${esc(title)}</span>
-      <span class="row-meta dly-meta"><span class="dly-dots" aria-hidden="true">${R.week(d, () => false, today).map((x) => `<i class="dly-dot ${x.state}"></i>`).join('')}</span><span>${esc(line)}</span></span></span>
+      <span class="row-meta dly-meta">${d.tier === 'could' ? '' : `<span class="dly-dots" aria-hidden="true">${R.week(d, () => false, today).map((x) => `<i class="dly-dot ${x.state}"></i>`).join('')}</span>`}<span>${esc(line)}</span></span></span>
   </div>
-  <span class="hint sg-dly-where">→ Forecast → Today, under “${esc(tierLabel(d.tier))}”${d.tier === 'must' ? ', and the Daily review’s must-dos' : ''}</span>`;
+  <span class="hint sg-dly-where">→ Forecast → Today, under “${esc(tierLabel(d.tier))}”${d.tier === 'must' ? ', and the Daily review’s must-dos' : d.tier === 'could' ? ' (folded away until you open it)' : ''}</span>`;
 }
 
 // Forecast → Today: the two tiers, above Due.
 export function dailyBlock(today = dayKey()) {
-  const { must, should } = todaysDailies(today);
+  const { must, should, could } = todaysDailies(today);
   const sec = (tier, list) => (list.length ? `<h2 class="section-title dly-title" data-dly-tier="${tier}">${esc(tierLabel(tier))} <span class="hint">${list.filter((t) => isTicked(t, today)).length} of ${list.length}</span></h2>
     <ul class="list dly-list">${list.map((t) => dailyRow(t, today)).join('')}</ul>` : '');
-  return sec('must', must) + sec('should', should);
+  // Could: a menu of options, folded away; what you ticked today shows in its count.
+  const menu = could.length ? `<details class="dly-could" ${app.couldOpen ? 'open' : ''} data-dly-could><summary class="section-title dly-title" data-dly-tier="could">${esc(tierLabel('could'))} <span class="hint">${could.filter((t) => isTicked(t, today)).length ? `${could.filter((t) => isTicked(t, today)).length} of ` : ''}${could.length}</span></summary>
+    <ul class="list dly-list">${could.map((t) => dailyRow(t, today)).join('')}</ul></details>` : '';
+  return sec('must', must) + sec('should', should) + menu;
 }
 
 // Editor field (Repeat and alerts → Every day). collect() → daily (object) or null.
@@ -165,6 +168,7 @@ export function wireDailyField(form, row) {
       : sel.value === 'quarter' ? 'A checkbox in the quarterly check-in (Horizons), under Quarterly checks. “Quarterly check-in done” starts it fresh, and a tick lapses after 45 days anyway; it never shows in Today. Its dates and repeat are cleared.'
       : sel.value === 'year' ? 'A checkbox in the yearly review (Horizons), under Yearly checks. “Yearly review done” starts it fresh, and a tick lapses after six months anyway; it never shows in Today. Its dates and repeat are cleared.'
       : sel.value === 'must' ? 'A checkbox in Today and the Daily review’s must-dos. A missed day shows; nothing piles up. Its dates and repeat are cleared.'
+      : sel.value === 'could' ? 'One of a menu of options, folded away at the bottom of Today. Tick it on the days you pick it; there is no such thing as missing it. Its dates and repeat are cleared.'
         : 'A checkbox in Today. A missed day is just an empty dot. Its dates and repeat are cleared.';
   };
   form.addEventListener('change', (e) => { if (/^daily_/.test(e.target.name || '')) sync(); });

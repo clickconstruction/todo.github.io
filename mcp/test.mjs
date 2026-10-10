@@ -172,7 +172,7 @@ globalThis.fetch = async (url, init = {}) => {
   };
   const follow = (r) => db.tasks.filter((x) => x.parent_id === r.id && x.project_id !== r.project_id).forEach((x) => { x.project_id = r.project_id; follow(x); });
   // Mirror of tasks_daily_guard / daily_ticks_guard (migration 20261101000001).
-  const dayStr = (d) => d.toISOString().slice(0, 10);
+  const dayStr = (d) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; }; // the user's day, as the database stamps it
   const dailyGuard = (r, was) => { if (r.daily) { r.repeat_rule = null; r.due_at = null; r.planned_at = null; r.defer_at = null; if (!r.daily.since) r.daily = { ...r.daily, since: (was && was.since) || dayStr(new Date()) }; } };
   if (table === 'daily_ticks' && (m === 'POST' || m === 'PATCH')) for (const b of (m === 'POST' ? [].concat(body) : rows.filter(match).map((r) => ({ ...r, ...body, was: r.state })))) {
     const t = db.tasks.find((x) => x.id === b.task_id && x.user_id === b.user_id);
@@ -1746,6 +1746,20 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const set = await tool('dailies', { action: 'set', id: walk.id, tier: 'should' });
   const wrow = db.tasks.find((t) => t.id === walk.id);
   assert(set.daily === 'Should, most days' && wrow.daily.tier === 'should' && wrow.daily.since && wrow.repeat_rule === null && wrow.due_at === null && /repeat and dates were cleared/.test(set.next), 'dailies set: the action becomes a daily checkbox; its repeat and due date are cleared');
+  { // could: a menu of options, never a miss
+    const opt = await tool('capture', { title: 'Sing or accent training (5 min)', repeat: { every: 2, unit: 'day' } });
+    const setC = await tool('dailies', { action: 'set', id: opt.id, tier: 'could' });
+    const crow = db.tasks.find((t) => t.id === opt.id);
+    assert(setC.daily === 'Could, if I feel like it' && crow.daily.tier === 'could' && crow.repeat_rule === null, 'dailies set tier could: the action becomes a could');
+    db.daily_ticks.push({ id: 'tkc3', user_id: UID, task_id: opt.id, day: dstr(3), state: 'done' });
+    db.daily_ticks.push({ id: 'tkc9', user_id: UID, task_id: opt.id, day: dstr(9), state: 'done' });
+    const lc = await tool('dailies', {});
+    const tdc = await tool('today', {});
+    assert(lc.could && lc.could.length === 1 && lc.could[0].id === opt.id && lc.could[0].summary === '2 days this month' && !lc.should.some((x) => x.id === opt.id) && lc.left.could === undefined && /ever missed/.test(lc.could_note)
+      && tdc.daily.could && tdc.daily.could[0].id === opt.id && !tdc.daily.should.some((x) => x.id === opt.id), 'list and today: a could is listed apart, counting its days this month, with nothing left to do');
+    assert(!(await tool('daily_review', {})).must_dos.daily || !JSON.stringify((await tool('daily_review', {})).must_dos).includes(opt.id), 'a could is never a must-do');
+    crow.dropped_at = new Date().toISOString();
+  }
   const viaUpdate = await tool('update_task', { id: meds.id, daily: { tier: 'must', weekdays: [1, 2, 3, 4, 5, 6, 0] } });
   const mrow = db.tasks.find((t) => t.id === meds.id);
   assert(viaUpdate.daily.tier === 'must' && viaUpdate.daily.summary === 'Have to, every day' && !mrow.daily.weekdays, 'update_task daily: must; all seven days is every day');

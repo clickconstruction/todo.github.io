@@ -5,7 +5,9 @@
 // holds for half the cycle and then lapses, so the next review finds it fresh without a click; finishing
 // the review (the Weekly Review, "Quarterly check-in done", "Yearly review done") starts it fresh at once.
 // Days are local day keys (YYYY-MM-DD); ticked(key) says whether that day was ticked.
-export const TIERS = [['must', 'Have to', 'every day'], ['should', 'Should', 'most days']];
+// Three tiers: must (a miss shows), should (a miss is an empty dot), could (a menu of options: no dots, no misses, just a count).
+export const TIERS = [['must', 'Have to', 'every day'], ['should', 'Should', 'most days'], ['could', 'Could', 'if I feel like it']];
+export const isCould = (daily) => !!daily && daily.tier === 'could';
 export const tierLabel = (tier) => { const t = TIERS.find(([k]) => k === tier) || TIERS[1]; return `${t[1]}, ${t[2]}`; };
 export const WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -93,6 +95,10 @@ export function summary(daily, ticked, today) {
     const last = lastTicked(ticked, today);
     return !last ? '' : last === today ? 'ticked today' : `last ticked ${dateOf(last).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
   }
+  if (daily.tier === 'could') { // a menu, not an obligation: how often it was picked lately
+    let n = 0; for (let i = 0; i < 30; i++) if (ticked(back(today, i))) n += 1;
+    return n ? `${n} day${n === 1 ? '' : 's'} this month` : '';
+  }
   const w = week(daily, ticked, today);
   if (daily.tier === 'must') {
     const miss = [...w].reverse().find((d) => d.state === 'miss');
@@ -116,7 +122,7 @@ export function readDaily(v) {
   if (every === 'quarterly' || every === 'quarter') return { tier: 'should', every: 'quarter' };
   if (every === 'yearly' || every === 'year') return { tier: 'should', every: 'year' };
   const o = typeof v === 'string' ? { tier: v } : v || {};
-  if (!['must', 'should'].includes(o.tier) || (o.every && o.every !== 'day')) throw new Error('daily is "must" (have to, every day), "should" (should, most days), "weekly" (once a week, in the Weekly Review), "quarterly" (once a quarter, in the quarterly check-in) or "yearly" (once a year, in the yearly review)');
+  if (!['must', 'should', 'could'].includes(o.tier) || (o.every && o.every !== 'day')) throw new Error('daily is "must" (have to, every day), "should" (should, most days), "could" (could, if I feel like it: a menu of options, never a miss), "weekly" (once a week, in the Weekly Review), "quarterly" (once a quarter, in the quarterly check-in) or "yearly" (once a year, in the yearly review)');
   const wd = Array.isArray(o.weekdays) ? [...new Set(o.weekdays.map(Number))].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort() : [];
   if (Array.isArray(o.weekdays) && o.weekdays.length && wd.length !== new Set(o.weekdays.map(Number)).size) throw new Error('weekdays are numbers 0 (Sunday) to 6 (Saturday)');
   return { tier: o.tier, ...(wd.length && wd.length < 7 ? { weekdays: wd } : {}) };

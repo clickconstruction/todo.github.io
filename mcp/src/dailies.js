@@ -56,7 +56,7 @@ export function dailiesTools({ localDate }) {
   return [{
     name: 'dailies',
     description: `Daily checkboxes: actions the user does every day (or on chosen weekdays). Each day starts fresh: a tick records that day only, a missed day is recorded and never carried forward, and the action itself stays open. Two tiers:
-must = "${tierLabel('must')}" (medication, logging hours): a missed day shows, and it is one of the Daily review's must-dos. should = "${tierLabel('should')}" (a walk, reading): a missed day is just an empty dot; never nag about these.
+must = "${tierLabel('must')}" (medication, logging hours): a missed day shows, and it is one of the Daily review's must-dos. should = "${tierLabel('should')}" (a walk, reading): a missed day is just an empty dot; never nag about these. could = "${tierLabel('could')}": a menu of options folded away at the bottom of Today (a workout to pick, singing practice); ticked on the days the user picks it, never a miss, never asked about; list returns them under could with how many days this month.
 Checks: a question or routine for once a week, quarter or year is set with every: "week" | "quarter" | "year". It is never in Today. A weekly check is one of the Weekly Review's "Weekly checks" (weekly_review, step checks); a quarterly one is listed on the quarterly check-in and a yearly one on the yearly review (list_horizons quarterly_checks / yearly_checks; the Weekly Review's horizons step while they are due). A tick holds for half the cycle (3½ days, 45 days, six months) and then lapses, and finishing the review (the Weekly Review; save_horizon kind quarterly / yearly with read: true) starts them fresh at once. A lapsed tick is not a miss: never nag. list returns them under weekly, quarterly and yearly, each with fresh_from while ticked.
 actions: list {day?} (today's, by tier, each with its week and a summary; plus the checks) · tick {id or title, day?} · untick {id or title, day?} · set {id, tier: must|should, weekdays?: [0-6, 0 = Sunday]} or set {id, every: "week" | "quarter" | "year"} (makes an action daily or a check, or changes it; its repeat and dates are cleared) · clear {id} (an ordinary action again).
 Use this instead of a repeating action with a due date when the user describes a habit, a daily obligation, or a question they ask themselves every week, quarter or year. Ask which tier when it isn't plain from what they said. day is YYYY-MM-DD in their time zone (default today); a day that hasn't come can't be ticked.`,
@@ -65,7 +65,7 @@ Use this instead of a repeating action with a due date when the user describes a
       id: { type: 'string' }, title: { type: 'string', description: 'tick/untick: the daily action\'s exact title, instead of id' },
       day: { type: 'string', description: 'YYYY-MM-DD (default today)' },
       every: { type: 'string', enum: ['day', 'week', 'quarter', 'year'], description: 'set: "week" makes it a weekly check (the Weekly Review), "quarter" a quarterly check (the quarterly check-in), "year" a yearly check (the yearly review); "day" makes a check daily again' },
-      tier: { type: 'string', enum: ['must', 'should'] }, weekdays: { type: 'array', items: { type: 'integer' }, description: 'set: only on these days (0 = Sunday); leave out for every day' },
+      tier: { type: 'string', enum: ['must', 'should', 'could'] }, weekdays: { type: 'array', items: { type: 'integer' }, description: 'set: only on these days (0 = Sunday); leave out for every day' },
     } },
     async run(api, a) {
       const action = a.action || 'list';
@@ -121,8 +121,8 @@ Use this instead of a repeating action with a due date when the user describes a
       }
 
       const asked = tasks.filter((t) => onDay(t.daily, day));
-      const out = (tier) => asked.filter((t) => (t.daily.tier === 'must') === (tier === 'must')).map((t) => ({ ...dailyOut(t, ticked(t), day), asked_today: undefined }));
-      const must = out('must'); const should = out('should');
+      const out = (tier) => asked.filter((t) => (t.daily.tier || 'should') === tier).map((t) => ({ ...dailyOut(t, ticked(t), day), asked_today: undefined }));
+      const must = out('must'); const should = out('should'); const could = out('could');
       const now = Date.now();
       const weeklies = tasks.filter((t) => isWeekly(t.daily));
       const wsince = weeklies.length ? await reviewSinceAt(api) : null;
@@ -130,7 +130,7 @@ Use this instead of a repeating action with a due date when the user describes a
       const quarterly = tasks.filter((t) => isQuarterly(t.daily)).map((t) => checkOut(t, rows(t), quarterSinceAt(api), now, today));
       const yearly = tasks.filter((t) => isYearly(t.daily)).map((t) => checkOut(t, rows(t), yearSinceAt(api), now, today));
       const left = (list) => (list.length ? list.filter((x) => !x.ticked).length : undefined);
-      return { day, have_to: must, should, left: { have_to: must.filter((x) => !x.ticked).length, should: should.filter((x) => !x.ticked).length, weekly: left(weekly), quarterly: left(quarterly), yearly: left(yearly) },
+      return { day, have_to: must, should, could: could.length ? could : undefined, could_note: could.length ? 'A menu, not obligations: nothing here is ever missed or asked about.' : undefined, left: { have_to: must.filter((x) => !x.ticked).length, should: should.filter((x) => !x.ticked).length, weekly: left(weekly), quarterly: left(quarterly), yearly: left(yearly) },
         weekly: weekly.length ? weekly : undefined, weekly_note: weekly.length ? 'Weekly checks belong to the Weekly Review (step checks), not to today: ask them there.' : undefined,
         quarterly: quarterly.length ? quarterly : undefined, quarterly_note: quarterly.length ? 'Quarterly checks belong to the quarterly check-in (list_horizons), not to today: ask them there.' : undefined,
         yearly: yearly.length ? yearly : undefined, yearly_note: yearly.length ? 'Yearly checks belong to the yearly review (list_horizons), not to today: ask them there.' : undefined,
