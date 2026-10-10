@@ -11,6 +11,13 @@ import { waitingPerson, agendaPerson, followUpDue, ENERGY_ICON, returnedFromTick
 import { progress, nextStep, ancestors, rootOf, depthOf, heightOf, MAX_DEPTH } from './tree.js';
 import { folderButton } from './folders.js';
 import { isDaily, isTicked, describeDaily, summary } from './dailies.js';
+import { firstUrl } from './slipbox.js';
+
+// The link a card carries: the first URL in its title, else in its notes, else what it is reading. Shown as a
+// small ↗ beside the title that opens it, so the title itself still opens the card.
+export const taskLink = (t) => firstUrl(t.title) || firstUrl(t.notes) || t.reading_url || null;
+export const linkHost = (url) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'link'; } };
+export const linkHtml = (url, cls) => (url ? `<a class="${cls}" href="${esc(url)}" target="_blank" rel="noopener" title="Open ${esc(linkHost(url))}" aria-label="Open ${esc(linkHost(url))}">↗</a>` : '');
 
 // Meta icons are small and monochrome: the words carry the meaning, the icon only helps scanning.
 const ic = (e, sp = ' ') => `<i class="mi" aria-hidden="true">${e}</i>${sp}`;
@@ -91,7 +98,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   return `<li class="row ${cls} ${kids.length ? 'group' : ''}" data-task="${t.id}" style="--depth:${hierarchy ? depth : 0}">
     ${toggle}${dly ? `<button class="dly-box ${isTicked(t) ? 'on' : ''}" data-dly-tick="${t.id}" aria-pressed="${isTicked(t)}" aria-label="${isTicked(t) ? 'Un-tick' : 'Tick'} for today">✓</button>` : `<button class="${checkCls}" data-check="${t.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>`}
     <div class="row-main"><div class="row-title">${esc(t.title)}</div>${t.gain && !done ? `<div class="row-gain">→ ${esc(t.gain)}${t.gain_by === 'agent' ? ' <span class="chip sug">Claude suggested</span>' : ''}</div>` : ''}${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}${prog}</div>
-    <span class="row-signals">${t.notes ? '<span class="sig-note" title="Has notes" aria-label="Has notes">📝</span>' : ''}
+    <span class="row-signals">${linkHtml(taskLink(t), 'sig-link')}${t.notes ? '<span class="sig-note" title="Has notes" aria-label="Has notes">📝</span>' : ''}
       ${isOpen(t) ? `<button class="flag-btn ${t.flagged ? 'on' : ''}" data-flag="${t.id}" aria-pressed="${!!t.flagged}" aria-label="${t.flagged ? 'Unflag' : 'Flag'}" title="${t.flagged ? 'Unflag' : 'Flag'}">⚑</button>` : ''}</span>
     ${handles}${reorder ? '' : addSub}${extra}
   </li>`;

@@ -1008,6 +1008,13 @@ async function fullReview(check) {
   await until(() => !$('.fr-inline') && /dead man/i.test(fwRow().title));
   check('Return saves the title (no line breaks in it)', !fwRow().title.includes('\n') && fwRow().title.startsWith('Update my will, the trust') && has('.fr-card', 'dead man'));
   $('.fr-card [data-fr="edit-field"][data-field="title"]').click(); await wait(80);
+  const taL = $('.fr-card form.fr-inline[data-field="title"] textarea[name=title]');
+  taL.value = 'Update my will: https://example.com/wills/mine'; taL.dispatchEvent(new Event('input', { bubbles: true }));
+  taL.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await until(() => !$('.fr-inline') && /example\.com/.test(fwRow().title));
+  const frLink = $('.fr-card .fr-title a.fr-link');
+  check('a URL in the title: a ↗ link beside the title opens it in a new tab, and the title still edits', !!frLink && frLink.getAttribute('href') === 'https://example.com/wills/mine' && frLink.target === '_blank' && /example\.com/.test(frLink.textContent) && !!$('.fr-card .fr-title [data-fr="edit-field"]'));
+  $('.fr-card [data-fr="edit-field"][data-field="title"]').click(); await wait(80);
   const ta2 = $('.fr-card form.fr-inline[data-field="title"] textarea[name=title]');
   ta2.value = 'Update\nmy will'; ta2.dispatchEvent(new Event('input', { bubbles: true }));
   ta2.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
@@ -1810,8 +1817,9 @@ async function yearlyChecks(check) {
 
   // The editor and a Full Review suggestion make yearly checks.
   await go('#project/p1');
-  t.tasks.push({ ...base, id: 'yR', title: 'Review the AI roadmap', project_id: 'p1', due_at: iso(2), repeat_rule: { every: 1, unit: 'year', from: 'completion', n: 1 } });
+  t.tasks.push({ ...base, id: 'yR', title: 'Review the AI roadmap: https://maraoz.com/2022/10/31/agi-roadmap/', project_id: 'p1', due_at: iso(2), repeat_rule: { every: 1, unit: 'year', from: 'completion', n: 1 } });
   await loadAll(); app.render(); await wait(50);
+  check('a row whose title holds a URL shows a ↗ that opens it', !!$('.row[data-task="yR"] a.sig-link[href="https://maraoz.com/2022/10/31/agi-roadmap/"][target="_blank"]'));
   $('.row[data-task="yR"] .row-title').click(); await wait(200);
   const form = $('#sheet form');
   form.elements.daily_tier.value = 'year'; form.elements.daily_tier.dispatchEvent(new Event('change', { bubbles: true }));

@@ -8,6 +8,7 @@
 // field's own editor, Save writes just that field, Esc puts it back.
 import { describeDaily, isDaily, isWeekly, isQuarterly, isYearly, summary as dailySummary, dailyPreview } from '../dailies.js';
 import { describe } from '../repeat.js';
+import { taskLink, linkHost } from '../rows.js';
 import { treeChangeHtml, treeWithout } from './tree.js';
 import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen, openSheet, $ } from '../state.js';
 import { loadAll, refreshTasks, saveTask } from '../data.js';
@@ -451,7 +452,7 @@ function taskCard(it) {
   const row = (label, field, html, editable = false) => `<div class="fr-field${editable && edit(field) ? ' fr-editable' : ''}"${editable ? edit(field) : ''}><b>${label}</b><span>${mark(it, field, html)}</span></div>`;
   return `<div class="fr-card">
     <div class="fr-meta">${why ? `<span class="chip fr-why">★ ${esc(why)}</span>` : ''}<span>${esc(added(t))}</span>${t.in_inbox ? '<span>Inbox</span>' : ''}${isOpen(t) ? '' : '<span class="chip">closed</span>'}</div>
-    <h2 class="fr-title"><span class="fr-editable" ${editableAttrs('title')}>${mark(it, 'title', esc(t.title))}</span></h2>
+    <h2 class="fr-title"><span class="fr-editable" ${editableAttrs('title')}>${mark(it, 'title', esc(t.title))}</span>${taskLink(t) ? `<a class="fr-link" href="${esc(taskLink(t))}" target="_blank" rel="noopener" title="Open ${esc(linkHost(taskLink(t)))}">↗ ${esc(linkHost(taskLink(t)))}</a>` : ''}</h2>
     ${row('Gain', 'gain', t.gain ? `<span class="gain-text">${esc(t.gain)}</span>${t.gain_by === 'agent' ? ' <span class="chip sug">Claude suggested</span>' : ''}` : '<span class="hint">not written yet</span>', true)}
     ${row('Project', 'project', p ? esc(p.name) : '<span class="hint">none</span>', true)}
     ${row('When', 'dates', [t.planned_at && `planned ${esc(fmtDate(t.planned_at))}`, t.due_at && `due ${esc(fmtDate(t.due_at))}`, t.defer_at && `from ${esc(fmtDate(t.defer_at))}`].filter(Boolean).join(' · ') || '<span class="hint">no dates</span>', true)}
