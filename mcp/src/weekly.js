@@ -2,7 +2,7 @@
 // js/weekly.js). An agent can walk the user through a review in conversation, step by step.
 import { STEPS, STAGES, STALE_DAYS, sweepPrompts, streak } from '../../js/weekly.js';
 import { bigReviewsDue } from '../../js/whatnow.js';
-import { dailiesFor, quarterSinceAt, yearSinceAt, reviewSinceAt, checkOut } from './dailies.js';
+import { dailiesFor, quarterSinceAt, yearSinceAt, monthSinceAt, reviewSinceAt, checkOut } from './dailies.js';
 
 export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
   const isSomedayTag = (tags) => { const root = tags.find((g) => !g.parent_id && /^someday/i.test(g.name)); return root ? new Set([root.id, ...tags.filter((g) => g.parent_id === root.id).map((g) => g.id)]) : new Set(); };
@@ -45,10 +45,11 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
     // yearly ones go with their review in the horizons step while it is due. One dailies read serves all three.
     const today = localDate(now, api.tz);
     const hasCheck = (k) => open.some((t) => t.daily && t.daily.every === k);
-    const dl = hasCheck('week') || (big.quarterly && hasCheck('quarter')) || (big.yearlyReview && hasCheck('year')) ? await dailiesFor(api, today) : null;
+    const dl = hasCheck('week') || (big.quarterly && hasCheck('quarter')) || (big.yearlyReview && hasCheck('year')) || (big.monthlyReview && hasCheck('month')) ? await dailiesFor(api, today) : null;
     const brief = (o) => ({ id: o.id, title: o.title, ticked: o.ticked, fresh_from: o.fresh_from });
-    let quarterly, yearly;
+    let quarterly, yearly, monthly;
     if (dl && big.quarterly && hasCheck('quarter')) quarterly = dl.tasks.filter((t) => t.daily.every === 'quarter').map((t) => brief(checkOut(t, dl.rows(t), quarterSinceAt(api), Date.now(), today)));
+    if (dl && big.monthlyReview && hasCheck('month')) { monthly = dl.tasks.filter((t) => t.daily.every === 'month').map((t) => brief(checkOut(t, dl.rows(t), monthSinceAt(api), Date.now(), today))); dueHz.push({ big: 'monthly review (list_horizons monthly_checks)' }); }
     if (dl && big.yearlyReview && hasCheck('year')) { yearly = dl.tasks.filter((t) => t.daily.every === 'year').map((t) => brief(checkOut(t, dl.rows(t), yearSinceAt(api), Date.now(), today))); dueHz.push({ big: 'yearly review (list_horizons yearly_checks)' }); }
     const [fleetingNotes, toWrite] = await Promise.all([
       api.q(`slipbox_notes?${api.u}&kind=eq.fleeting&archived_at=is.null&limit=200&select=id,title`),
@@ -69,7 +70,7 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
       someday: { count: count.someday, note: 'Use list_someday; activate_someday or drop.' },
       sweep: { note: 'Use mind_sweep_prompts and capture what the user says.' },
       notes: { fleeting: fleetingNotes.slice(0, 20).map((n) => n.title), finished_notes_to_write: toWrite.slice(0, 20).map((t) => t.title), note: 'Help turn each into permanent notes (slipbox update kind permanent; reading take_notes / notes_done).' },
-      horizons: { due: dueHz.map((x) => x.big || (x.name ? `area: ${x.name}` : `goal: ${x.title}`)), quarterly_checks: quarterly, yearly_checks: yearly, note: `Use list_horizons; save_area / save_goal with reviewed: true.${quarterly ? ' Ask each quarterly check and tick it as they answer (dailies tick with its id); save_horizon kind quarterly read: true when the check-in is done, which starts them fresh.' : ''}${yearly ? ' Ask each yearly check the same way; save_horizon kind yearly read: true when the yearly review is done.' : ''}` },
+      horizons: { due: dueHz.map((x) => x.big || (x.name ? `area: ${x.name}` : `goal: ${x.title}`)), quarterly_checks: quarterly, yearly_checks: yearly, monthly_checks: monthly, note: `Use list_horizons; save_area / save_goal with reviewed: true.${quarterly ? ' Ask each quarterly check and tick it as they answer (dailies tick with its id); save_horizon kind quarterly read: true when the check-in is done, which starts them fresh.' : ''}${yearly ? ' Ask each yearly check the same way; save_horizon kind yearly read: true when the yearly review is done.' : ''}${monthly ? ' Ask each monthly check the same way; save_horizon kind monthly read: true when the monthly review is done.' : ''}` },
     };
     const steps = STEPS.map((s) => {
       const done = !!(r && r.steps && r.steps[s.key]) || !!auto[s.key] || !!worked[s.key];

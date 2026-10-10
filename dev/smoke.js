@@ -1778,6 +1778,7 @@ async function newProjectFromPicker(check) {
 }
 
 // Yearly checks: a checkbox ticked once per yearly review (daily.every = 'year'). A tick holds six months, then lapses; "Yearly review done" starts it fresh.
+// Monthly checks are tested here too: the same shape on the monthly review, a tick holding 15 days.
 async function yearlyChecks(check) {
   const { app, db } = await import('/js/state.js');
   const av = await import('/js/availability.js');
@@ -1819,6 +1820,21 @@ async function yearlyChecks(check) {
   await saveSettings({ horizons_year_at: iso(400) }, { quiet: true }); await loadAll(); app.render(); await wait(50);
   await go('#weekly/horizons');
   check('a year on: the step carries the yearly review with its checks', has(undefined, 'yearly review', 'yearly checks') && !!$('.dly-row[data-task="yA"]'));
+
+  // Monthly checks: the same shape, on the monthly review; a tick holds 15 days.
+  t.tasks.push({ ...base, id: 'mA', title: 'Clean up my voice memos', daily: { tier: 'should', every: 'month', since: day(60) } });
+  tick('tm20', 'mA', 20);
+  await saveSettings({ horizons_month_at: null }, { quiet: true }); await loadAll();
+  await go('#horizons');
+  check('Horizons: the monthly review is in the footer, due while never done', !!$('a[href="#horizons/monthly"]') && has(undefined, 'the monthly review'));
+  await go('#horizons/monthly');
+  check('the monthly review lists the check; a tick 20 days old has lapsed', has(undefined, 'monthly checks', '0 of 1 ticked') && $('.dly-row[data-task="mA"] [data-dly-tick]').getAttribute('aria-pressed') === 'false' && has('.dly-row[data-task="mA"]', 'last ticked'));
+  tick('tm10', 'mA', 10);
+  await loadAll(); app.render(); await wait(50);
+  check('a tick 10 days old holds, and says when it lapses', D.isTicked(local('mA')) && has('.dly-row[data-task="mA"]', 'fresh from'));
+  $('[data-hz="month-done"]').click(); await wait(300);
+  check('Monthly review done: recorded, the check starts fresh', !!T().user_settings[0].horizons_month_at && !D.isTicked(local('mA')) && has('#toast', 'monthly review done'));
+  await saveSettings({ horizons_month_at: null }, { quiet: true });
 
   // Weekly checks lapse after 3½ days too, even with no review in between.
   t.tasks.push({ ...base, id: 'yW', title: 'Am I reviewing?', daily: { tier: 'should', every: 'week', since: day(20) } });

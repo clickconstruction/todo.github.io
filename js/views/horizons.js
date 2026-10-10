@@ -9,7 +9,7 @@ import { isAvailable } from '../availability.js';
 import { areaBalance, isDueForReview, bigReviewsDue } from '../whatnow.js';
 import { viewTree, treeSummary } from './tree.js';
 import { parseText, counts, setTick, clearTicks, toggleBoxes, inlineHtml, plain, toggleWrap, cycleHeading, toggleBullets } from '../horizon-text.js';
-import { quarterlyChecks, yearlyChecks, checkRow, isTicked } from '../dailies.js';
+import { quarterlyChecks, yearlyChecks, monthlyChecks, checkRow, isTicked } from '../dailies.js';
 
 export const liveAreas = () => (db.areas || []).filter((a) => !a.archived_at).sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
 export const activeGoals = () => (db.goals || []).filter((g) => g.status === 'active').sort((a, b) => String(a.target_date || '9').localeCompare(String(b.target_date || '9')) || a.title.localeCompare(b.title));
@@ -22,6 +22,7 @@ export function goalProgress(g) {
 export const bigDue = () => bigReviewsDue({ settings: app.settings || {}, goals: db.goals || [], areas: db.areas || [], projects: db.projects });
 // The yearly review is a thing once there are yearly checks; due when never done or a year ago.
 export const yearlyReviewDue = () => yearlyChecks().length > 0 && bigDue().yearlyReview;
+export const monthlyReviewDue = () => monthlyChecks().length > 0 && bigDue().monthlyReview;
 // Areas and goals due for their review (monthly by default); for the Weekly Review.
 export const horizonsDue = () => [...liveAreas().filter((a) => isDueForReview(a)), ...activeGoals().filter((g) => isDueForReview(g))];
 
@@ -50,6 +51,7 @@ export function viewHorizons(sub, id) {
   if (sub === 'goals') return goalsList();
   if (sub === 'quarterly') return quarterlyHtml();
   if (sub === 'yearly') return yearlyHtml();
+  if (sub === 'monthly') return monthlyHtml();
   if (sub === 'tree') return viewTree(id);
   const s = app.settings || {};
   const areas = liveAreas();
@@ -80,7 +82,7 @@ export function viewHorizons(sub, id) {
     <h2 class="section-title hz-across-h">Across the levels</h2>
     <div class="hz-ladder hz-across">${(() => { const t = treeSummary(); return row('#horizons/tree', '<span aria-hidden="true">🌳</span>', t.title, t.sub, { chips: t.chips, cls: 'hz-level-like hz-tree-row' }); })()}</div>
     ${due ? `<p class="view-sub">${due} area${due === 1 ? '' : 's'} or goal${due === 1 ? '' : 's'} due for review. They’re a step in the <a href="#weekly/horizons">Weekly Review</a>.</p>` : ''}
-    <p class="view-sub">Every quarter: <a href="#horizons/quarterly">the quarterly check-in</a>${s.horizons_quarter_at ? ` (last ${esc(fmtDate(s.horizons_quarter_at))})` : ''}. Every year: <a href="#horizons/yearly">the yearly review</a>${s.horizons_year_at ? ` (last ${esc(fmtDate(s.horizons_year_at))})` : ''}${yearlyReviewDue() ? ' <span class="chip warn">due</span>' : ''}, and read your purpose and vision.</p>`;
+    <p class="view-sub">Every month: <a href="#horizons/monthly">the monthly review</a>${s.horizons_month_at ? ` (last ${esc(fmtDate(s.horizons_month_at))})` : ''}${monthlyReviewDue() ? ' <span class="chip warn">due</span>' : ''}. Every quarter: <a href="#horizons/quarterly">the quarterly check-in</a>${s.horizons_quarter_at ? ` (last ${esc(fmtDate(s.horizons_quarter_at))})` : ''}. Every year: <a href="#horizons/yearly">the yearly review</a>${s.horizons_year_at ? ` (last ${esc(fmtDate(s.horizons_year_at))})` : ''}${yearlyReviewDue() ? ' <span class="chip warn">due</span>' : ''}, and read your purpose and vision.</p>`;
 }
 
 // Purpose and vision: a page to read and tick, and the same text to edit, written plainly (js/horizon-text.js):
@@ -146,6 +148,24 @@ export function quarterlyBody() {
     ${b.looseProjects.length ? `<h2 class="section-title">Projects serving no area or goal · ${b.looseProjects.length}</h2><p class="hint">Still worth doing? Give each a home, or put it on hold.</p>${b.looseProjects.slice(0, 12).map(projectRow).join('')}${b.looseProjects.length > 12 ? `<p class="hint">${b.looseProjects.length - 12} more in Projects.</p>` : ''}` : ''}
     <p class="hint">${s.horizons_quarter_at ? `Last check-in ${esc(fmtDate(s.horizons_quarter_at))}.` : 'Your first quarterly check-in.'}${!checks.length ? ' A question or routine for once a quarter can be a quarterly check here: open an action → Repeat and alerts → Every day → “Every quarter, in the quarterly check-in”, or ask Claude.' : ''}</p>
     <div class="wk-finish"><button class="btn ${b.quarterly ? 'primary' : ''}" data-hz="quarter-done">Quarterly check-in done</button></div>`;
+}
+// The monthly review: the monthly checks (the areas and goals due for their monthly look are the Weekly Review's horizons step).
+export function monthlyBody() {
+  const b = bigDue();
+  const s = app.settings || {};
+  const checks = monthlyChecks();
+  const ticked = checks.filter((t) => isTicked(t)).length;
+  return `${checks.length ? `<h2 class="section-title">Monthly checks <span class="hint">${ticked} of ${checks.length} ticked</span></h2>
+    <ul class="list dly-list wk-checks hz-checks">${checks.map((t) => checkRow(t)).join('')}</ul>
+    <p class="hint">The questions and routines you tick once a month. Ticks are for this review: “Monthly review done” starts them fresh, and a tick lapses after 15 days anyway. Tap a line to open it.</p>` : ''}
+    <p class="hint">${s.horizons_month_at ? `Last monthly review ${esc(fmtDate(s.horizons_month_at))}.` : 'Your first monthly review.'}${!checks.length ? ' A question or routine for once a month can be a monthly check here: open an action → Repeat and alerts → Every day → “Every month, in the monthly review”, or ask Claude.' : ''}</p>
+    <div class="wk-finish"><button class="btn ${b.monthlyReview ? 'primary' : ''}" data-hz="month-done">Monthly review done</button></div>`;
+}
+function monthlyHtml() {
+  return `<a class="back" href="#horizons">‹ Horizons</a>
+    <div class="view-head"><h1 class="horizons">Monthly review</h1></div>
+    <p class="view-sub">Once a month: the questions you ask yourself and the routines you run monthly.</p>
+    ${monthlyBody()}`;
 }
 // The yearly review: the yearly read of purpose and vision, and the yearly checks.
 export function yearlyBody() {
@@ -345,6 +365,7 @@ export async function horizonsAction(el) {
   else if (a === 'add-check' || /^fmt-/.test(a)) { format($(`textarea[data-hz-field="${el.dataset.kind}"]`), a === 'add-check' ? 'check' : a.slice(4)); return; }
   else if (a === 'quarter-done') { await saveSettings({ horizons_quarter_at: now }); toast('Quarterly check-in done · next in three months'); }
   else if (a === 'year-done') { await saveSettings({ horizons_year_at: now }); toast('Yearly review done · next in a year'); }
+  else if (a === 'month-done') { await saveSettings({ horizons_month_at: now }); toast('Monthly review done · next in a month'); }
   app.render();
 }
 

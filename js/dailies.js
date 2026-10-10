@@ -4,7 +4,7 @@
 //   should "Should"   a missed day is an empty dot; progress reads "4 of 7 this week"
 // tasks.daily = { tier, weekdays?, since }; daily_ticks holds one row per action per ticked day
 // (un-ticking keeps the row, state "cleared"). The database keeps the rules (migration 20261101000001).
-// Checks (daily.every = 'week' | 'quarter' | 'year'): asked for once per review instead of on a day, never
+// Checks (daily.every = 'week' | 'month' | 'quarter' | 'year'): asked for once per review instead of on a day, never
 // in Today. A tick holds for half the cycle, then lapses; finishing the review (the Weekly Review, "Quarterly
 // check-in done", "Yearly review done") starts them fresh at once. The rules are in js/daily-rules.js.
 import { db, app, sb, run, esc, isOpen, visible, onHoldTagFor, taskSort, toast } from './state.js';
@@ -21,6 +21,7 @@ const dayTicked = (t, key) => { const r = tickRow(t.id, key); return !!r && r.st
 const tickedOf = (t) => (key) => dayTicked(t, key);
 export const isWeekly = (t) => isDaily(t) && R.isWeekly(t.daily);
 export const isQuarterly = (t) => isDaily(t) && R.isQuarterly(t.daily);
+export const isMonthly = (t) => isDaily(t) && R.isMonthly(t.daily);
 export const isYearly = (t) => isDaily(t) && R.isYearly(t.daily);
 export const isCheck = (t) => isDaily(t) && R.isCheck(t.daily);
 // A check's tick rows (any state; the rules pick the done ones).
@@ -31,6 +32,7 @@ const ms = (iso) => (iso ? Date.parse(iso) || null : null);
 export function sinceAtOf(t) {
   const s = app.settings || {};
   if (R.isQuarterly(t.daily)) return ms(s.horizons_quarter_at);
+  if (R.isMonthly(t.daily)) return ms(s.horizons_month_at);
   if (R.isYearly(t.daily)) return ms(s.horizons_year_at);
   const rs = db.weeklyReviews || [];
   const open = rs.find((x) => !x.completed_at && !x.abandoned_at);
@@ -56,6 +58,7 @@ export const weeklyChecks = () => db.tasks.filter((t) => isWeekly(t) && visible(
 // The quarterly check-in's "Quarterly checks" and the yearly review's "Yearly checks", the same way.
 export const quarterlyChecks = () => db.tasks.filter((t) => isQuarterly(t) && visible(t) && !onHoldTagFor(t)).sort(taskSort);
 export const yearlyChecks = () => db.tasks.filter((t) => isYearly(t) && visible(t) && !onHoldTagFor(t)).sort(taskSort);
+export const monthlyChecks = () => db.tasks.filter((t) => isMonthly(t) && visible(t) && !onHoldTagFor(t)).sort(taskSort);
 
 export async function tickDaily(t, on = !isTicked(t), key = dayKey()) {
   const check = R.isCheck(t.daily);
@@ -74,7 +77,7 @@ export async function tickDaily(t, on = !isTicked(t), key = dayKey()) {
     (db.dailyTicks = db.dailyTicks || []).push(row);
   }
   app.render();
-  if (on) toast(R.isYearly(t.daily) ? 'Ticked for this year' : R.isQuarterly(t.daily) ? 'Ticked for this quarter' : check ? 'Ticked for this week’s review' : 'Done for today', [{ label: 'Undo', run: () => tickDaily(t, false, key) }]);
+  if (on) toast(R.isYearly(t.daily) ? 'Ticked for this year' : R.isQuarterly(t.daily) ? 'Ticked for this quarter' : R.isMonthly(t.daily) ? 'Ticked for this month' : check ? 'Ticked for this week’s review' : 'Done for today', [{ label: 'Undo', run: () => tickDaily(t, false, key) }]);
 }
 
 // A check as its review shows it: the box, the title, and when it was last ticked.
@@ -82,7 +85,7 @@ export function checkRow(t, today = dayKey()) {
   const on = isTicked(t, today);
   const line = summary(t, today);
   return `<li class="row dly-row ${on ? 'dly-on' : ''}" data-task="${t.id}">
-    <button class="dly-box ${on ? 'on' : ''}" data-dly-tick="${t.id}" aria-pressed="${on}" aria-label="${on ? 'Un-tick' : 'Tick'} “${esc(t.title)}” for this ${R.isYearly(t.daily) ? 'year' : R.isQuarterly(t.daily) ? 'quarter' : 'review'}">✓</button>
+    <button class="dly-box ${on ? 'on' : ''}" data-dly-tick="${t.id}" aria-pressed="${on}" aria-label="${on ? 'Un-tick' : 'Tick'} “${esc(t.title)}” for this ${R.isYearly(t.daily) ? 'year' : R.isQuarterly(t.daily) ? 'quarter' : R.isMonthly(t.daily) ? 'month' : 'review'}">✓</button>
     <div class="row-main"><div class="row-title">${esc(t.title)}</div>${line ? `<div class="row-meta dly-meta"><span>${esc(line)}</span></div>` : ''}</div>
   </li>`;
 }
@@ -101,11 +104,11 @@ export function dailyRow(t, today = dayKey()) {
 // will show it, not clickable, starting today, and where it goes. Days before today are off: nothing to miss yet.
 export function dailyPreview(title, daily, today = dayKey()) {
   if (R.isCheck(daily)) {
-    const kind = { week: 'weekly', quarter: 'quarterly', year: 'yearly' }[daily.every];
-    const where = { week: '→ Weekly Review → Get current → Weekly checks', quarter: '→ Horizons → Quarterly check-in → Quarterly checks', year: '→ Horizons → Yearly review → Yearly checks' }[daily.every];
+    const kind = { week: 'weekly', month: 'monthly', quarter: 'quarterly', year: 'yearly' }[daily.every];
+    const where = { week: '→ Weekly Review → Get current → Weekly checks', month: '→ Horizons → Monthly review → Monthly checks', quarter: '→ Horizons → Quarterly check-in → Quarterly checks', year: '→ Horizons → Yearly review → Yearly checks' }[daily.every];
     return `<div class="sg-dly" data-dly-preview="${kind}" role="img" aria-label="How it will look in ${esc(R.CHECKS[daily.every].where)}: a checkbox, ${esc(title)}">
     <span class="dly-box" aria-hidden="true">✓</span>
-    <span class="sg-dly-main"><span class="row-title">${esc(title)}</span><span class="row-meta dly-meta"><span>starts fresh each ${daily.every === 'week' ? 'review' : daily.every === 'quarter' ? 'check-in' : 'year'}</span></span></span>
+    <span class="sg-dly-main"><span class="row-title">${esc(title)}</span><span class="row-meta dly-meta"><span>starts fresh each ${daily.every === 'week' ? 'review' : daily.every === 'month' ? 'month' : daily.every === 'quarter' ? 'check-in' : 'year'}</span></span></span>
   </div>
   <span class="hint sg-dly-where">${where}</span>`;
   }
@@ -143,6 +146,7 @@ export function dailyFieldHtml(row) {
       <option value="">Not a daily one</option>
       ${TIERS.map(([k, l, s]) => `<option value="${k}" ${d && !wk && d.tier === k ? 'selected' : ''}>${l}, ${s}</option>`).join('')}
       <option value="week" ${R.isWeekly(d) ? 'selected' : ''}>${R.WEEKLY_LABEL}</option>
+      <option value="month" ${R.isMonthly(d) ? 'selected' : ''}>${R.MONTHLY_LABEL}</option>
       <option value="quarter" ${R.isQuarterly(d) ? 'selected' : ''}>${R.QUARTERLY_LABEL}</option>
       <option value="year" ${R.isYearly(d) ? 'selected' : ''}>${R.YEARLY_LABEL}</option></select>
     <div class="weekday-picker dly-days" ${d && !wk ? '' : 'hidden'} role="group" aria-label="On these days (none ticked = every day)">
@@ -165,6 +169,7 @@ export function wireDailyField(form, row) {
     form.querySelector('.dly-days').hidden = !sel.value || !!R.CHECKS[sel.value];
     hint.textContent = !sel.value ? 'A checkbox that starts fresh each day, instead of a repeating action.'
       : sel.value === 'week' ? 'A checkbox in the Weekly Review, under Weekly checks. Each review starts it fresh, and a tick lapses after 3½ days anyway; it never shows in Today. Its dates and repeat are cleared.'
+      : sel.value === 'month' ? 'A checkbox in the monthly review (Horizons), under Monthly checks. “Monthly review done” starts it fresh, and a tick lapses after 15 days anyway; it never shows in Today. Its dates and repeat are cleared.'
       : sel.value === 'quarter' ? 'A checkbox in the quarterly check-in (Horizons), under Quarterly checks. “Quarterly check-in done” starts it fresh, and a tick lapses after 45 days anyway; it never shows in Today. Its dates and repeat are cleared.'
       : sel.value === 'year' ? 'A checkbox in the yearly review (Horizons), under Yearly checks. “Yearly review done” starts it fresh, and a tick lapses after six months anyway; it never shows in Today. Its dates and repeat are cleared.'
       : sel.value === 'must' ? 'A checkbox in Today and the Daily review’s must-dos. A missed day shows; nothing piles up. Its dates and repeat are cleared.'

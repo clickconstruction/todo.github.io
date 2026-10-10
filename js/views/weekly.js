@@ -15,7 +15,7 @@ import { waitingRow } from './gtd.js';
 import { sweepHtml } from './sweep.js';
 import { somedayListHtml } from './someday.js';
 import { parkCount } from './matrix.js';
-import { horizonsDue, liveAreas, bigDue, quarterlyBody, yearlyBody, yearlyReviewDue } from './horizons.js';
+import { horizonsDue, liveAreas, bigDue, quarterlyBody, yearlyBody, yearlyReviewDue, monthlyBody, monthlyReviewDue } from './horizons.js';
 import { readingNow, notesToWrite, ensureFinished } from './reading.js';
 import { weeklyChecks, checkRow, isTicked } from '../dailies.js';
 
@@ -65,7 +65,7 @@ function ctx() {
   const stuck = stuckProjects().length;
   const some = somedayItems();
   const big = bigDue();
-  const hz = horizonsDue().length + big.yearly.length + (big.quarterly ? 1 : 0) + (yearlyReviewDue() ? 1 : 0);
+  const hz = horizonsDue().length + big.yearly.length + (big.quarterly ? 1 : 0) + (yearlyReviewDue() ? 1 : 0) + (monthlyReviewDue() ? 1 : 0);
   ensureFinished();
   const fleeting = (db.slipbox || []).filter((n) => n.kind === 'fleeting' && !n.archived_at).length;
   const toWrite = notesToWrite().length;
@@ -220,7 +220,8 @@ const STEP_BODY = {
     const big = bigDue();
     const extra = `${big.yearly.length ? `<h2 class="section-title">Yearly · read your ${big.yearly.join(' and ')}</h2><div class="group-list">${big.yearly.map((k) => `<a class="group-row" href="#horizons/${k}"><span>${k === 'purpose' ? '🧭 Purpose and principles' : '🔭 Vision'}</span><span class="hint">read it, then “Mark as read”</span></a>`).join('')}</div>` : ''}
       ${big.quarterly ? `<h2 class="section-title">Quarterly check-in</h2>${quarterlyBody()}` : ''}
-      ${yearlyReviewDue() ? `<h2 class="section-title">Yearly review</h2>${yearlyBody()}` : ''}`;
+      ${yearlyReviewDue() ? `<h2 class="section-title">Yearly review</h2>${yearlyBody()}` : ''}
+      ${monthlyReviewDue() ? `<h2 class="section-title">Monthly review</h2>${monthlyBody()}` : ''}`;
     if (!due.length && extra.trim()) return extra;
     if (!due.length) return `<div class="wk-card"><p class="wk-big">✓</p><p>${liveAreas().length ? 'No areas or goals due for review.' : 'You haven’t set up areas or goals. <a href="#horizons">Horizons</a> when you’re ready.'}</p></div>`;
     return `${extra}<p class="hint">Open each one, check it, and mark it reviewed.</p><div class="group-list">${due.map((x) => (x.name ? `<a class="group-row" href="#area/${x.id}"><span>⛰ ${esc(x.name)}</span><span class="hint">area</span></a>` : `<a class="group-row" href="#goal/${x.id}"><span>🎯 ${esc(x.title)}</span><span class="hint">goal</span></a>`)).join('')}</div>`;

@@ -1298,6 +1298,8 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(db.review_items.find((x) => x.id === s1.id).suggestion.daily.every === 'quarter' && db.review_items.find((x) => x.id === s1.id).suggestion.daily.tier === 'should', 'full_review suggest: daily "quarterly" makes a quarterly check');
   await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'yearly' });
   assert(db.review_items.find((x) => x.id === s1.id).suggestion.daily.every === 'year', 'full_review suggest: daily "yearly" makes a yearly check');
+  await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'monthly' });
+  assert(db.review_items.find((x) => x.id === s1.id).suggestion.daily.every === 'month', 'full_review suggest: daily "monthly" makes a monthly check');
   await tool('full_review', { action: 'suggest', decision: 'keep', daily: { tier: 'should', weekdays: [1, 3, 5] } });
   let badDaily = ''; try { await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'sometimes' }); } catch (e) { badDaily = e.message; }
   assert(sgDaily && sgDaily.suggestion.daily.tier === 'should' && sgDaily.suggestion.daily.weekdays.join() === '1,3,5' && /"must".*"should"/.test(badDaily), 'full_review suggest: a suggestion can make the action daily (tier and days checked)');
@@ -1826,7 +1828,7 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
     const viaU = await tool('update_task', { id: plain.id, daily: 'weekly' });
     assert(viaU.daily.every === 'week' && viaU.daily.summary === 'Every week, in the Weekly Review', 'update_task daily "weekly" makes a weekly check');
     const backD = await tool('dailies', { action: 'set', id: plain.id, every: 'day', tier: 'must' });
-    assert(backD.daily === 'Have to, every day' && !db.tasks.find((t) => t.id === plain.id).daily.every && await refuse('dailies', { action: 'set', id: plain.id, every: 'month' }, /"day", "week", "quarter" or "year"/), 'set every day makes it daily again; every is day, week, quarter or year');
+    assert(backD.daily === 'Have to, every day' && !db.tasks.find((t) => t.id === plain.id).daily.every && await refuse('dailies', { action: 'set', id: plain.id, every: 'fortnight' }, /"day", "week", "month", "quarter" or "year"/), 'set every day makes it daily again; every is day, week, month, quarter or year');
     await tool('dailies', { action: 'clear', id: plain.id });
     krow.dropped_at = new Date().toISOString();
   }
@@ -1893,6 +1895,27 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
     assert(sy.saved.includes('horizons_year_at') && afterY.yearly[0].ticked === false && !(await tool('list_horizons', {})).yearly_checks.due, '“Yearly review done” (save_horizon yearly read) starts them fresh, and the review is not due for a year');
     const tkY = await tool('dailies', { action: 'tick', id: yk.id });
     assert(tkY.ticked && /this year/.test(tkY.next) && tkY.fresh_from.slice(0, 10) === new Date(Date.now() + 182 * 86400000).toISOString().slice(0, 10), 'ticked again: holds six months');
+    { // monthly checks: the same, on the monthly review; a tick holds 15 days
+      const mk = await tool('capture', { title: 'Clean up my voice memos', due: dstr(3), repeat: { every: 1, unit: 'month' } });
+      const setM = await tool('dailies', { action: 'set', id: mk.id, every: 'month' });
+      const mrow = db.tasks.find((t) => t.id === mk.id);
+      assert(setM.daily === 'Every month, in the monthly review' && mrow.daily.every === 'month' && mrow.repeat_rule === null && /monthly review/.test(setM.next), 'dailies set every month: the action becomes a monthly check');
+      st.horizons_month_at = null;
+      db.daily_ticks.push({ id: 'tkm16', user_id: UID, task_id: mk.id, day: dstr(16), state: 'done', updated_at: new Date(Date.now() - 16 * 86400000).toISOString() });
+      db.daily_ticks.push({ id: 'tkm10', user_id: UID, task_id: mk.id, day: dstr(10), state: 'done', updated_at: new Date(Date.now() - 10 * 86400000).toISOString() });
+      const lm = await tool('dailies', {});
+      const hzM = await tool('list_horizons', {});
+      assert(lm.monthly.length === 1 && lm.monthly[0].ticked === true && lm.monthly[0].fresh_from.slice(0, 10) === new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10) && hzM.monthly_checks.items[0].id === mk.id && hzM.monthly_checks.due === true, 'a monthly check: a tick 10 days old holds (lapses at 15), listed on the monthly review, due while never done');
+      const hzStepM = (await tool('weekly_review', {})).steps.find((x) => x.key === 'horizons');
+      assert(hzStepM.data.monthly_checks && hzStepM.data.monthly_checks[0].ticked === true && hzStepM.data.due.some((d) => /monthly review/.test(d)), 'weekly_review: the horizons step carries the monthly checks while the monthly review is due');
+      await tool('save_horizon', { kind: 'monthly', read: true });
+      assert((await tool('dailies', {})).monthly[0].ticked === false && !(await tool('list_horizons', {})).monthly_checks.due, '“Monthly review done” starts them fresh and the review is not due for a month');
+      const viaM = await tool('update_task', { id: plain.id, daily: 'monthly' });
+      assert(viaM.daily.every === 'month' && viaM.daily.summary === 'Every month, in the monthly review', 'update_task daily "monthly" makes a monthly check');
+      await tool('dailies', { action: 'clear', id: plain.id });
+      mrow.dropped_at = new Date().toISOString();
+      st.horizons_month_at = null;
+    }
     const viaY = await tool('update_task', { id: plain.id, daily: 'yearly' });
     assert(viaY.daily.every === 'year' && viaY.daily.summary === 'Every year, in the yearly review', 'update_task daily "yearly" makes a yearly check');
     await tool('dailies', { action: 'clear', id: plain.id });

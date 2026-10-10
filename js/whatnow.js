@@ -84,10 +84,13 @@ export function bigReviewsDue({ settings = {}, goals = [], areas = [], projects 
   const quarterly = !!since && Date.parse(since) + QUARTER <= t;
   // The yearly review (the yearly checks): due when never done, or done a year or more ago. Only shown when there are yearly checks.
   const yearlyReview = !settings.horizons_year_at || Date.parse(settings.horizons_year_at) + YEAR <= t;
+  // The monthly review (the monthly checks): due when never done, or done 30 days or more ago. Only shown when there are monthly checks.
+  const monthlyReview = !settings.horizons_month_at || Date.parse(settings.horizons_month_at) + 30 * DAY <= t;
   const today = new Date(t).toISOString().slice(0, 10);
   return {
     yearly,
     yearlyReview,
+    monthlyReview,
     quarterly,
     lateGoals: active.filter((g) => g.target_date && g.target_date < today),
     areasNoGoal: liveAreas.filter((a) => !active.some((g) => g.area_id === a.id)),

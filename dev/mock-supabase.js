@@ -211,7 +211,7 @@
   }
   function taskRules(t, before) {
     if (t.daily) {
-      if (!['must', 'should', 'could'].includes(t.daily.tier) || (t.daily.every && !['week', 'quarter', 'year'].includes(t.daily.every))) { t.daily = before ? before.daily || null : null; } // every: 20261107000001, quarter: 20261108000001, year: 20261109000001
+      if (!['must', 'should', 'could'].includes(t.daily.tier) || (t.daily.every && !['week', 'month', 'quarter', 'year'].includes(t.daily.every))) { t.daily = before ? before.daily || null : null; } // every: 20261107000001, quarter: 20261108000001, year: 20261109000001
       else { t.repeat_rule = null; t.due_at = null; t.planned_at = null; t.defer_at = null; if (!t.daily.since) t.daily = { ...t.daily, since: (before && before.daily && before.daily.since) || dayStr(new Date()) }; }
     }
     // tasks_people_guard: delegated_at when waiting_on changes; no follow-up without a person.
@@ -290,7 +290,7 @@
     places: () => ({ address: '', google_place_id: null, radius_m: 402, notes: '', archived_at: null }),
     events: () => ({ notes: '', location: '', url: '', all_day: false, project_id: null, place_id: null, task_id: null, lat: null, lng: null, drive_minutes: null, drive_from: null, source: 'app', archived_at: null }),
     calendars: () => ({ color: '#1D9E75', enabled: true, sort: 0, last_ok_at: null, last_error: null, event_count: null, archived_at: null }),
-    user_settings: () => ({ due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, distance_place_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, review_notified_at: null, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true, daily_notified_at: null, horizons_quarter_at: null, horizons_year_at: null, sidebar: {}, matrix_urgent_days: 7, todo_folder: null, folder_shortcut: 'Open in Finder' }),
+    user_settings: () => ({ due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, distance_place_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, review_notified_at: null, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true, daily_notified_at: null, horizons_quarter_at: null, horizons_year_at: null, horizons_month_at: null, sidebar: {}, matrix_urgent_days: 7, todo_folder: null, folder_shortcut: 'Open in Finder' }),
     daily_reviews: () => ({ started_at: null, shutdown_at: null, focus: [] }),
     slipbox_notes: () => ({ body: '', source: '', source_url: null, kind: 'fleeting', from_task_id: null, reading_task_id: null, processed_at: null, archived_at: null }),
     review_sessions: () => ({ title: 'Full Review', scope: {}, current_item: null, status: 'active', agent_seen_at: null, agent_status: '', finished_at: null }),

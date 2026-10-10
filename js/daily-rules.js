@@ -1,7 +1,7 @@
 // Dailies, the rules (no imports: the app and the MCP Worker both use them; see js/dailies.js).
 // A daily is an action with daily = { tier: must | should, weekdays?: [0-6], since: YYYY-MM-DD }.
-// A check adds every: 'week' | 'quarter' | 'year': it is not asked for on any day but once per review
-// (the Weekly Review's "Weekly checks", the quarterly check-in, the yearly review in Horizons). A tick
+// A check adds every: 'week' | 'month' | 'quarter' | 'year': it is not asked for on any day but once per review
+// (the Weekly Review's "Weekly checks"; the monthly review, quarterly check-in and yearly review in Horizons). A tick
 // holds for half the cycle and then lapses, so the next review finds it fresh without a click; finishing
 // the review (the Weekly Review, "Quarterly check-in done", "Yearly review done") starts it fresh at once.
 // Days are local day keys (YYYY-MM-DD); ticked(key) says whether that day was ticked.
@@ -19,16 +19,19 @@ export const back = (key, n) => { const d = dateOf(key); d.setDate(d.getDate() -
 // (half the cycle, in days) before it lapses.
 export const CHECKS = {
   week: { label: 'Every week, in the Weekly Review', where: 'the Weekly Review', half: 3.5 },
+  month: { label: 'Every month, in the monthly review', where: 'the monthly review', half: 15 },
   quarter: { label: 'Every quarter, in the quarterly check-in', where: 'the quarterly check-in', half: 45 },
   year: { label: 'Every year, in the yearly review', where: 'the yearly review', half: 182 },
 };
 export const isWeekly = (daily) => !!daily && daily.every === 'week';
 export const isQuarterly = (daily) => !!daily && daily.every === 'quarter';
+export const isMonthly = (daily) => !!daily && daily.every === 'month';
 export const isYearly = (daily) => !!daily && daily.every === 'year';
 // A check: ticked once per review, never on a day.
 export const isCheck = (daily) => !!daily && !!CHECKS[daily.every];
 export const WEEKLY_LABEL = CHECKS.week.label;
 export const QUARTERLY_LABEL = CHECKS.quarter.label;
+export const MONTHLY_LABEL = CHECKS.month.label;
 export const YEARLY_LABEL = CHECKS.year.label;
 // How far back a check's ticks are looked at: a year and some.
 export const LOOKBACK = 400;
@@ -114,15 +117,16 @@ export const describeDaily = (daily) => {
   const wd = daily && Array.isArray(daily.weekdays) && daily.weekdays.length && daily.weekdays.length < 7 ? ` (${[...daily.weekdays].sort().map((d) => WD[d].slice(0, 3)).join(', ')})` : '';
   return `${tierLabel(daily && daily.tier)}${wd}`;
 };
-// A daily value from what someone passed: 'must' | 'should' | 'weekly' | 'quarterly' | 'yearly' |
-// { tier, weekdays? } | { every: 'week' | 'quarter' | 'year' }. Throws a plain sentence.
+// A daily value from what someone passed: 'must' | 'should' | 'could' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' |
+// { tier, weekdays? } | { every: 'week' | 'month' | 'quarter' | 'year' }. Throws a plain sentence.
 export function readDaily(v) {
   const every = typeof v === 'string' ? v : v && typeof v === 'object' ? v.every : undefined;
   if (every === 'weekly' || every === 'week') return { tier: 'should', every: 'week' };
   if (every === 'quarterly' || every === 'quarter') return { tier: 'should', every: 'quarter' };
+  if (every === 'monthly' || every === 'month') return { tier: 'should', every: 'month' };
   if (every === 'yearly' || every === 'year') return { tier: 'should', every: 'year' };
   const o = typeof v === 'string' ? { tier: v } : v || {};
-  if (!['must', 'should', 'could'].includes(o.tier) || (o.every && o.every !== 'day')) throw new Error('daily is "must" (have to, every day), "should" (should, most days), "could" (could, if I feel like it: a menu of options, never a miss), "weekly" (once a week, in the Weekly Review), "quarterly" (once a quarter, in the quarterly check-in) or "yearly" (once a year, in the yearly review)');
+  if (!['must', 'should', 'could'].includes(o.tier) || (o.every && o.every !== 'day')) throw new Error('daily is "must" (have to, every day), "should" (should, most days), "could" (could, if I feel like it: a menu of options, never a miss), "weekly" (once a week, in the Weekly Review), "monthly" (once a month, in the monthly review), "quarterly" (once a quarter, in the quarterly check-in) or "yearly" (once a year, in the yearly review)');
   const wd = Array.isArray(o.weekdays) ? [...new Set(o.weekdays.map(Number))].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort() : [];
   if (Array.isArray(o.weekdays) && o.weekdays.length && wd.length !== new Set(o.weekdays.map(Number)).size) throw new Error('weekdays are numbers 0 (Sunday) to 6 (Saturday)');
   return { tier: o.tier, ...(wd.length && wd.length < 7 ? { weekdays: wd } : {}) };
