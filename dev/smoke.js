@@ -1014,10 +1014,10 @@ async function fullReview(check) {
   await until(() => !$('.fr-inline') && /example\.com/.test(fwRow().title));
   const frLink = $('.fr-card .fr-title a.fr-link');
   check('a URL in the title: a ↗ link beside the title opens it in a new tab, and the title still edits', !!frLink && frLink.getAttribute('href') === 'https://example.com/wills/mine' && frLink.target === '_blank' && /example\.com/.test(frLink.textContent) && !!$('.fr-card .fr-title [data-fr="edit-field"]'));
-  check('the URL inside the title is itself a link', !!$('.fr-card .fr-title [data-fr="edit-field"] a.txt-link[href="https://example.com/wills/mine"][target="_blank"]'));
+  check('the URL inside the title shows as a “↗ site” pill in its place, and no second pill beside the title', !!$('.fr-card .fr-title [data-fr="edit-field"] a.fr-link[href="https://example.com/wills/mine"][target="_blank"]') && /example\.com/.test($('.fr-card .fr-title [data-fr="edit-field"] a.fr-link').textContent) && !/https:/.test($('.fr-card .fr-title').textContent) && $$('.fr-card .fr-title a.fr-link').length === 1);
   const noNav = (e) => { if (e.target.closest && e.target.closest('a[target="_blank"]')) e.preventDefault(); }; // keep the test from opening tabs
   document.addEventListener('click', noNav, true);
-  $('.fr-card .fr-title a.txt-link').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); await wait(100);
+  $('.fr-card .fr-title a.fr-link').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); await wait(100);
   document.removeEventListener('click', noNav, true);
   check('clicking the link does not open the title editor', !$('.fr-inline'));
   $('.fr-card [data-fr="edit-field"][data-field="title"]').click(); await wait(80);
@@ -1823,12 +1823,12 @@ async function yearlyChecks(check) {
 
   // The editor and a Full Review suggestion make yearly checks.
   await go('#project/p1');
-  t.tasks.push({ ...base, id: 'yR', title: 'Review the AI roadmap: https://maraoz.com/2022/10/31/agi-roadmap/', project_id: 'p1', due_at: iso(2), repeat_rule: { every: 1, unit: 'year', from: 'completion', n: 1 } });
+  t.tasks.push({ ...base, id: 'yR', title: 'Review the AI roadmap: https://maraoz.com/2022/10/31/agi-roadmap/ and https://google.com', project_id: 'p1', due_at: iso(2), repeat_rule: { every: 1, unit: 'year', from: 'completion', n: 1 } });
   await loadAll(); app.render(); await wait(50);
-  check('a row whose title holds a URL shows a ↗ that opens it, and the URL in the title is a link', !!$('.row[data-task="yR"] a.sig-link[href="https://maraoz.com/2022/10/31/agi-roadmap/"][target="_blank"]') && !!$('.row[data-task="yR"] .row-title a.txt-link[href="https://maraoz.com/2022/10/31/agi-roadmap/"]'));
+  check('a row whose title holds URLs shows each as its own “↗ site” pill in the title, and no extra ↗ among the signals', $$('.row[data-task="yR"] .row-title a.fr-link').length === 2 && !!$('.row[data-task="yR"] .row-title a.fr-link[href="https://maraoz.com/2022/10/31/agi-roadmap/"][target="_blank"]') && !!$('.row[data-task="yR"] .row-title a.fr-link[href="https://google.com"]') && /maraoz\.com.*google\.com/.test($('.row[data-task="yR"] .row-title').textContent) && !/https:/.test($('.row[data-task="yR"] .row-title').textContent) && !$('.row[data-task="yR"] a.sig-link'));
   const noNavY = (e) => { if (e.target.closest && e.target.closest('a[target="_blank"]')) e.preventDefault(); };
   document.addEventListener('click', noNavY, true);
-  $('.row[data-task="yR"] .row-title a.txt-link').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); await wait(150);
+  $('.row[data-task="yR"] .row-title a.fr-link').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); await wait(150);
   document.removeEventListener('click', noNavY, true);
   check('clicking it does not open the card', !$('#sheet').open);
   $('.row[data-task="yR"] .row-title').click(); await wait(200);

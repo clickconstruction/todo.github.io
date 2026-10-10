@@ -8,7 +8,7 @@
 // field's own editor, Save writes just that field, Esc puts it back.
 import { describeDaily, isDaily, isWeekly, isQuarterly, isYearly, summary as dailySummary, dailyPreview } from '../dailies.js';
 import { describe } from '../repeat.js';
-import { taskLink, linkHost, linkify } from '../rows.js';
+import { taskLink, linkHost, linkify, titleHtml } from '../rows.js';
 import { firstUrl } from '../slipbox.js';
 import { treeChangeHtml, treeWithout } from './tree.js';
 import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen, openSheet, $ } from '../state.js';
@@ -382,8 +382,8 @@ function suggestionBar(it, t) {
     row('✓', `<b>${esc(DECISION_LABEL[s.decision] || s.decision)}</b>${s.decision === 'accept' ? ` · ${esc(proposalText(s.proposal || g.proposal, n))}` : ''}`);
   } else if (t) {
     const p = t.project_id && byId(db.projects, t.project_id);
-    const sugLink = firstUrl(s.title || '') || firstUrl(s.task_notes || '') || taskLink(t);
-    if (s.title && s.title !== t.title) row('✎', `Title: “${esc(s.title)}” <span class="sg-old">${esc(t.title)}</span>${sugLink ? ` <a class="fr-link" href="${esc(sugLink)}" target="_blank" rel="noopener" title="Open ${esc(linkHost(sugLink))}">↗ ${esc(linkHost(sugLink))}</a>` : ''}`);
+    const sugLink = firstUrl(s.title || '') ? null : firstUrl(s.task_notes || '') || taskLink(t); // a URL in the new title shows as its own pill
+    if (s.title && s.title !== t.title) row('✎', `Title: “${titleHtml(s.title)}” <span class="sg-old">${esc(t.title)}</span>${sugLink ? ` <a class="fr-link" href="${esc(sugLink)}" target="_blank" rel="noopener" title="Open ${esc(linkHost(sugLink))}">↗ ${esc(linkHost(sugLink))}</a>` : ''}`);
     if (s.task_notes && s.task_notes !== (t.notes || '')) row('📝', notesRow(it, s.task_notes, t.notes || ''));
     if ('gain' in s && s.gain !== (t.gain || '')) row('✦', `Gain: <span class="gain-text">${esc(s.gain || 'none')}</span>${s.gain_suggested ? ' <span class="chip sug">Claude’s words</span>' : ''}`);
     if ('project_id' in s && s.project_id !== t.project_id) row('🗂', `Project: ${esc(s.project_name || 'none')}${p ? ` <span class="sg-old">${esc(p.name)}</span>` : ''}`);
@@ -454,7 +454,7 @@ function taskCard(it) {
   const row = (label, field, html, editable = false) => `<div class="fr-field${editable && edit(field) ? ' fr-editable' : ''}"${editable ? edit(field) : ''}><b>${label}</b><span>${mark(it, field, html)}</span></div>`;
   return `<div class="fr-card">
     <div class="fr-meta">${why ? `<span class="chip fr-why">★ ${esc(why)}</span>` : ''}<span>${esc(added(t))}</span>${t.in_inbox ? '<span>Inbox</span>' : ''}${isOpen(t) ? '' : '<span class="chip">closed</span>'}</div>
-    <h2 class="fr-title"><span class="fr-editable" ${editableAttrs('title')}>${mark(it, 'title', linkify(t.title))}</span>${taskLink(t) ? `<a class="fr-link" href="${esc(taskLink(t))}" target="_blank" rel="noopener" title="Open ${esc(linkHost(taskLink(t)))}">↗ ${esc(linkHost(taskLink(t)))}</a>` : ''}</h2>
+    <h2 class="fr-title"><span class="fr-editable" ${editableAttrs('title')}>${mark(it, 'title', titleHtml(t.title))}</span>${!firstUrl(t.title) && taskLink(t) ? `<a class="fr-link" href="${esc(taskLink(t))}" target="_blank" rel="noopener" title="Open ${esc(linkHost(taskLink(t)))}">↗ ${esc(linkHost(taskLink(t)))}</a>` : ''}</h2>
     ${row('Gain', 'gain', t.gain ? `<span class="gain-text">${esc(t.gain)}</span>${t.gain_by === 'agent' ? ' <span class="chip sug">Claude suggested</span>' : ''}` : '<span class="hint">not written yet</span>', true)}
     ${row('Project', 'project', p ? esc(p.name) : '<span class="hint">none</span>', true)}
     ${row('When', 'dates', [t.planned_at && `planned ${esc(fmtDate(t.planned_at))}`, t.due_at && `due ${esc(fmtDate(t.due_at))}`, t.defer_at && `from ${esc(fmtDate(t.defer_at))}`].filter(Boolean).join(' · ') || '<span class="hint">no dates</span>', true)}

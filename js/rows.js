@@ -19,6 +19,8 @@ export const taskLink = (t) => firstUrl(t.title) || firstUrl(t.notes) || t.readi
 export const linkHost = (url) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'link'; } };
 // Text with its URLs made into links (escaped first, so nothing typed becomes markup).
 export const linkify = (text) => esc(text || '').replace(/https?:\/\/[^\s<"')\]]+/g, (u) => { const m = /[.,;:!?]+$/.exec(u); const url = m ? u.slice(0, -m[0].length) : u; return `<a class="txt-link" href="${url}" target="_blank" rel="noopener">${url}</a>${m ? m[0] : ''}`; });
+// A title with its URLs shown as "↗ site" pills in place of the raw address (the rest stays text).
+export const titleHtml = (text) => esc(text || '').replace(/https?:\/\/[^\s<"')\]]+/g, (u) => { const m = /[.,;:!?]+$/.exec(u); const url = m ? u.slice(0, -m[0].length) : u; return `<a class="fr-link" href="${url}" target="_blank" rel="noopener" title="Open ${url}">↗ ${esc(linkHost(url))}</a>${m ? m[0] : ''}`; });
 export const linkHtml = (url, cls) => (url ? `<a class="${cls}" href="${esc(url)}" target="_blank" rel="noopener" title="Open ${esc(linkHost(url))}" aria-label="Open ${esc(linkHost(url))}">↗</a>` : '');
 
 // Meta icons are small and monochrome: the words carry the meaning, the icon only helps scanning.
@@ -99,8 +101,8 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
   const addSub = kids.length && isOpen(t) ? `<button class="icon-btn add-sub" data-add-sub="${t.id}" aria-label="Add a step to ${esc(t.title)}" title="Add a step">＋</button>` : '';
   return `<li class="row ${cls} ${kids.length ? 'group' : ''}" data-task="${t.id}" style="--depth:${hierarchy ? depth : 0}">
     ${toggle}${dly ? `<button class="dly-box ${isTicked(t) ? 'on' : ''}" data-dly-tick="${t.id}" aria-pressed="${isTicked(t)}" aria-label="${isTicked(t) ? 'Un-tick' : 'Tick'} for today">✓</button>` : `<button class="${checkCls}" data-check="${t.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>`}
-    <div class="row-main"><div class="row-title">${linkify(t.title)}</div>${t.gain && !done ? `<div class="row-gain">→ ${esc(t.gain)}${t.gain_by === 'agent' ? ' <span class="chip sug">Claude suggested</span>' : ''}</div>` : ''}${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}${prog}</div>
-    <span class="row-signals">${linkHtml(taskLink(t), 'sig-link')}${t.notes ? '<span class="sig-note" title="Has notes" aria-label="Has notes">📝</span>' : ''}
+    <div class="row-main"><div class="row-title">${titleHtml(t.title)}</div>${t.gain && !done ? `<div class="row-gain">→ ${esc(t.gain)}${t.gain_by === 'agent' ? ' <span class="chip sug">Claude suggested</span>' : ''}</div>` : ''}${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}${prog}</div>
+    <span class="row-signals">${firstUrl(t.title) ? '' : linkHtml(taskLink(t), 'sig-link')}${t.notes ? '<span class="sig-note" title="Has notes" aria-label="Has notes">📝</span>' : ''}
       ${isOpen(t) ? `<button class="flag-btn ${t.flagged ? 'on' : ''}" data-flag="${t.id}" aria-pressed="${!!t.flagged}" aria-label="${t.flagged ? 'Unflag' : 'Flag'}" title="${t.flagged ? 'Unflag' : 'Flag'}">⚑</button>` : ''}</span>
     ${handles}${reorder ? '' : addSub}${extra}
   </li>`;
