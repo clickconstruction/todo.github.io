@@ -999,6 +999,20 @@ async function fullReview(check) {
   // Rows edit in place: click Gain, type, Save, and only that field changes; a tag ticks in the picker;
   // Notes opens even when empty; Esc puts a row back; the number keys sleep while a row is open.
   const fwRow = () => t.tasks.find((x) => x.id === 'fW');
+  $('.fr-card [data-fr="edit-field"][data-field="title"]').click(); await wait(80);
+  const ta = $('.fr-card form.fr-inline[data-field="title"] textarea[name=title]');
+  const oneLine = ta ? ta.getBoundingClientRect().height : 0;
+  if (ta) { ta.value = 'Update my will, the trust, the beneficiaries on every account, the passwords list and the dead man’s switch, then tell Cassie where it all is'; ta.dispatchEvent(new Event('input', { bubbles: true })); await wait(50); }
+  check('edit in place: the Title row is a box that wraps and grows with a long title', !!ta && ta.tagName === 'TEXTAREA' && ta.getBoundingClientRect().height > oneLine * 1.6, `${oneLine} → ${ta && ta.getBoundingClientRect().height}`);
+  ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await until(() => !$('.fr-inline') && /dead man/i.test(fwRow().title));
+  check('Return saves the title (no line breaks in it)', !fwRow().title.includes('\n') && fwRow().title.startsWith('Update my will, the trust') && has('.fr-card', 'dead man'));
+  $('.fr-card [data-fr="edit-field"][data-field="title"]').click(); await wait(80);
+  const ta2 = $('.fr-card form.fr-inline[data-field="title"] textarea[name=title]');
+  ta2.value = 'Update\nmy will'; ta2.dispatchEvent(new Event('input', { bubbles: true }));
+  ta2.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await until(() => !$('.fr-inline') && fwRow().title === 'Update my will');
+  check('a pasted line break becomes a space', fwRow().title === 'Update my will');
   $('.fr-card [data-fr="edit-field"][data-field="gain"]').click(); await wait(50);
   check('edit in place: the Gain row becomes its editor, focused', !!$('.fr-card form.fr-inline[data-field="gain"] textarea[name=gain]') && document.activeElement === $('.fr-inline textarea[name=gain]') && !$('.fr-card .fr-field[data-field="gain"]'));
   $('.fr-inline textarea[name=gain]').value = 'Nobody is left guessing'; $('.fr-inline').requestSubmit();

@@ -482,7 +482,8 @@ function fieldEditorHtml(field, t) {
   const projects = db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold' || p.id === t.project_id).sort((a, b) => a.name.localeCompare(b.name));
   const lines = (t.notes || '').split('\n').length;
   const body = {
-    title: () => `<label>Title<input type="text" name="title" value="${esc(t.title)}" required autocomplete="off"></label>`,
+    // The title wraps as it is edited (a textarea that grows with it); Return saves, line breaks never get in.
+    title: () => `<label>Title<textarea name="title" class="fr-title-edit" rows="1" required autocomplete="off">${esc(t.title)}</textarea></label>`,
     gain: () => gainFieldHtml(t),
     project: () => `<label>Project<select name="project_id" data-create="project"><option value="">${t.in_inbox ? 'None (Inbox)' : 'None'}</option>${projects.map((p) => `<option value="${p.id}" ${p.id === t.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>`,
     dates: () => dateField('planned_at', 'Planned', t.planned_at) + dateField('due_at', 'Due', t.due_at) + dateField('defer_at', 'Defer until', t.defer_at),
@@ -512,16 +513,22 @@ function openFieldEditor(el) {
   const tagIds = field === 'tags' ? wireTagPicker(form, ids) : () => ids;
   const gain = field === 'gain' ? wireGainField(form, t) : null;
   if (field === 'dates') wireQuickButtons(form);
+  if (field === 'title') { // grow with the text, so a long title wraps instead of scrolling in one line
+    const ta = form.elements.title;
+    const grow = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
+    ta.addEventListener('input', grow);
+    requestAnimationFrame(grow);
+  }
   $('[data-cancel]', form).onclick = cancelFieldEditor;
   form.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelFieldEditor(); }
-    else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); form.requestSubmit(); }
+    else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || (field === 'title' && !e.shiftKey))) { e.preventDefault(); form.requestSubmit(); }
   });
   form.onsubmit = async (e) => {
     e.preventDefault();
     const live = byId(db.tasks, t.id) || t;
     const fields = { project_id: live.project_id, parent_id: live.parent_id }; // saveTask reads these to decide "Inbox"
-    if (field === 'title') { fields.title = form.elements.title.value.trim(); if (!fields.title) { toast('A title is needed'); form.elements.title.focus(); return; } }
+    if (field === 'title') { fields.title = form.elements.title.value.replace(/\s*\n\s*/g, ' ').trim(); if (!fields.title) { toast('A title is needed'); form.elements.title.focus(); return; } }
     if (field === 'gain') Object.assign(fields, gain());
     if (field === 'project') fields.project_id = form.elements.project_id.value || null;
     if (field === 'dates') { fields.planned_at = fromDateInput(form.elements.planned_at.value, HOURS.planned_at); fields.due_at = fromDateInput(form.elements.due_at.value, HOURS.due_at); fields.defer_at = fromDateInput(form.elements.defer_at.value, HOURS.defer_at); }

@@ -1341,6 +1341,7 @@ body.fr-mode .view { margin-left: auto !important; margin-right: auto !important
 .fr-inline { margin: 6px 0; padding: 12px 14px; border: 1px solid var(--accent); border-radius: 12px; background: var(--surface-2); display: grid; gap: 10px; font-size: 15px; color: var(--text); }
 .fr-inline label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
 .fr-inline textarea { min-height: 44px; font-size: 15px; }
+.fr-inline .fr-title-edit { min-height: 0; font-size: 18px; font-weight: 600; line-height: 1.35; resize: none; overflow: hidden; }
 .fr-inline .gain-field { margin: 0; }
 .fr-inline-btns { display: flex; gap: 8px; align-items: center; }
 .fr-inline-btns kbd { opacity: .6; font-size: .72rem; margin-left: 2px; }
