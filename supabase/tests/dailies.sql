@@ -1,4 +1,4 @@
--- Dailies (migration 20261101000001), weekly checks (20261107000001) and quarterly checks (20261108000001). One rolled-back transaction; every row ok = true.
+-- Dailies (migration 20261101000001), weekly checks (20261107000001), quarterly checks (20261108000001) and yearly checks (20261109000001). One rolled-back transaction; every row ok = true.
 begin;
 insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000d0001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','dy1@test.invalid'),('00000000-0000-0000-0000-0000000d0002','00000000-0000-0000-0000-000000000000','authenticated','authenticated','dy2@test.invalid');
 create temp table r (n int generated always as identity, test text, ok boolean, detail text); grant all on r to authenticated;
@@ -56,8 +56,8 @@ insert into r (test, ok, detail) select 'Full Review undo: not daily, its repeat
 insert into public.tasks (id, user_id, title, in_inbox, repeat_rule, due_at) values ('00000000-0000-0000-0000-0000000d0016', '00000000-0000-0000-0000-0000000d0001', 'Am I reviewing?', false, '{"every":1,"unit":"week","from":"completion"}', '2026-10-04 22:00+00');
 update public.tasks set daily = '{"tier":"should","every":"week"}' where id = '00000000-0000-0000-0000-0000000d0016';
 insert into r (test, ok, detail) select 'a weekly check: every = week is kept, its repeat and due date are cleared, since is set', daily->>'every' = 'week' and daily ? 'since' and repeat_rule is null and due_at is null, coalesce(daily::text, 'null') from public.tasks where id = '00000000-0000-0000-0000-0000000d0016';
-do $$ begin update public.tasks set daily = '{"tier":"should","every":"month"}' where id = '00000000-0000-0000-0000-0000000d0016'; insert into r (test, ok, detail) values ('every is week, quarter or nothing', false, '');
-exception when check_violation then insert into r (test, ok, detail) values ('every is week, quarter or nothing', true, sqlerrm); end $$;
+do $$ begin update public.tasks set daily = '{"tier":"should","every":"month"}' where id = '00000000-0000-0000-0000-0000000d0016'; insert into r (test, ok, detail) values ('every is week, quarter, year or nothing', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('every is week, quarter, year or nothing', true, sqlerrm); end $$;
 insert into public.daily_ticks (user_id, task_id, day) values ('00000000-0000-0000-0000-0000000d0001', '00000000-0000-0000-0000-0000000d0016', current_date);
 insert into r (test, ok, detail) select 'a weekly check is ticked like a daily one, and is never available', count(*) = 1 and not (public.available_task_ids('00000000-0000-0000-0000-0000000d0001') && array['00000000-0000-0000-0000-0000000d0016']::uuid[]), count(*)::text from public.daily_ticks where task_id = '00000000-0000-0000-0000-0000000d0016';
 insert into public.tasks (id, user_id, title, in_inbox, repeat_rule, due_at) values ('00000000-0000-0000-0000-0000000d0017', '00000000-0000-0000-0000-0000000d0001', 'Does my routine support good work?', false, '{"every":1,"unit":"week","from":"completion"}', '2026-10-07 22:00+00');
@@ -79,5 +79,14 @@ select public.review_apply('00000000-0000-0000-0000-0000000d00c3', '00000000-000
 insert into r (test, ok, detail) select 'Full Review submit: the action is a quarterly check, its repeat and due date gone', daily->>'every' = 'quarter' and daily->>'tier' = 'should' and repeat_rule is null and due_at is null, coalesce(daily::text, 'null') from public.tasks where id = '00000000-0000-0000-0000-0000000d0019';
 select public.review_undo('00000000-0000-0000-0000-0000000d00c3', '00000000-0000-0000-0000-0000000d0001');
 insert into r (test, ok, detail) select 'Full Review undo: not a quarterly check, its repeat and due date back', daily is null and repeat_rule->>'unit' = 'month' and due_at = '2026-11-01 21:00+00', coalesce(due_at::text, 'no due') from public.tasks where id = '00000000-0000-0000-0000-0000000d0019';
+
+-- Yearly checks (20261109000001): daily with every = 'year'; the yearly review's stamp is user_settings.horizons_year_at.
+insert into public.tasks (id, user_id, title, in_inbox, repeat_rule, due_at) values ('00000000-0000-0000-0000-0000000d001a', '00000000-0000-0000-0000-0000000d0001', 'Check the bucket list', false, '{"every":1,"unit":"year","from":"completion"}', '2027-01-08 21:00+00');
+update public.tasks set daily = '{"tier":"should","every":"year"}' where id = '00000000-0000-0000-0000-0000000d001a';
+insert into r (test, ok, detail) select 'a yearly check: every = year is kept, its repeat and due date are cleared, since is set', daily->>'every' = 'year' and daily ? 'since' and repeat_rule is null and due_at is null, coalesce(daily::text, 'null') from public.tasks where id = '00000000-0000-0000-0000-0000000d001a';
+insert into public.daily_ticks (user_id, task_id, day) values ('00000000-0000-0000-0000-0000000d0001', '00000000-0000-0000-0000-0000000d001a', current_date);
+insert into r (test, ok, detail) select 'a yearly check is ticked like a daily one, and is never available', count(*) = 1 and not (public.available_task_ids('00000000-0000-0000-0000-0000000d0001') && array['00000000-0000-0000-0000-0000000d001a']::uuid[]), count(*)::text from public.daily_ticks where task_id = '00000000-0000-0000-0000-0000000d001a';
+insert into public.user_settings (user_id, horizons_year_at) values ('00000000-0000-0000-0000-0000000d0001', now()) on conflict (user_id) do update set horizons_year_at = excluded.horizons_year_at;
+insert into r (test, ok, detail) select 'user_settings holds the yearly review stamp', horizons_year_at is not null, '' from public.user_settings where user_id = '00000000-0000-0000-0000-0000000d0001';
 select test, ok, detail from r order by n;
 rollback;

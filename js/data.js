@@ -64,7 +64,7 @@ export async function loadAll() {
     run(sb.from('review_sessions').select('id,title,status,current_item,created_at').eq('status', 'active').order('created_at', { ascending: false }).limit(10)),
     every((c) => sb.from('task_waits').select('*', c), 'task_id', 'waits_for'),
     every((c) => sb.from('events').select('*', c).is('archived_at', null), 'id'),
-    run(sb.from('daily_ticks').select('*').gte('day', new Date(Date.now() - 100 * 86400000).toISOString().slice(0, 10))), // a quarter and some: quarterly checks look back that far
+    run(sb.from('daily_ticks').select('*').gte('day', new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10))), // a year and some: yearly checks look back that far
     run(sb.from('tree_links').select('*').is('archived_at', null)),
   ]);
   Object.assign(db, { tasks, projects, folders, tags, taskTags, projectTags, places, notifications, attachments, perspectives, templates, calendars, people, references, weeklyReviews, areas, goals, checklists, checklistRuns, dailyReviews, imports, slipbox, reviewSessions, taskWaits, events, dailyTicks, treeLinks });

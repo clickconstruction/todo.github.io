@@ -1,7 +1,7 @@
 // Horizons of Focus and "What now?" for agents (same rules as the app: js/whatnow.js).
 import { rankNow, areaBalance, isDueForReview, bigReviewsDue } from '../../js/whatnow.js';
 import { parseText, counts, setTick, findTick, plain } from '../../js/horizon-text.js';
-import { dailiesFor, quarterSince, checkOut } from './dailies.js';
+import { dailiesFor, quarterSinceAt, yearSinceAt, checkOut } from './dailies.js';
 
 export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, calendar }) {
   // Link many projects in two requests (one lookup, one batched update): a per-project loop ran past
@@ -31,13 +31,15 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
         ]);
         const s = api.settings || {};
         const big = bigReviewsDue({ settings: s, goals, areas, projects });
-        // Quarterly checks (daily.every = 'quarter'): the questions asked once per check-in, ticked since the last one was done.
+        // Quarterly and yearly checks: the questions asked once per check-in / yearly review, with their ticks.
         const today = localDate(new Date().toISOString(), api.tz);
-        let quarterlyChecks;
-        if (open.some((t) => t.daily && t.daily.every === 'quarter')) {
-          const dl = await dailiesFor(api, today, localDate);
-          const qs = quarterSince(api, today, localDate);
-          quarterlyChecks = dl.tasks.filter((t) => t.daily.every === 'quarter').map((t) => { const o = checkOut(t, dl.ticked(t), qs, today); return { id: o.id, title: o.title, ticked: o.ticked, last_ticked: o.last_ticked }; });
+        let quarterlyChecks, yearlyChecks;
+        if (open.some((t) => t.daily && (t.daily.every === 'quarter' || t.daily.every === 'year'))) {
+          const dl = await dailiesFor(api, today);
+          const out = (t, sinceAt) => { const o = checkOut(t, dl.rows(t), sinceAt, Date.now(), today); return { id: o.id, title: o.title, ticked: o.ticked, fresh_from: o.fresh_from, last_ticked: o.last_ticked }; };
+          const qs = dl.tasks.filter((t) => t.daily.every === 'quarter'); const ys = dl.tasks.filter((t) => t.daily.every === 'year');
+          if (qs.length) quarterlyChecks = qs.map((t) => out(t, quarterSinceAt(api)));
+          if (ys.length) yearlyChecks = ys.map((t) => out(t, yearSinceAt(api)));
         }
         const text = (v) => (include_text ? v || '' : String(v || '').split('\n')[0].slice(0, 200));
         // Checkboxes in the text (lines that start with [ ]): how many, and which are still to tick.
@@ -56,7 +58,8 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
           }),
           projects_without_outcome: projects.filter((p) => p.status === 'active' && !String(p.outcome || '').trim()).map((p) => p.name),
           projects_without_area: areas.length ? projects.filter((p) => p.status === 'active' && !p.area_id).map((p) => p.name) : undefined,
-          quarterly_checks: quarterlyChecks ? { items: quarterlyChecks, left: quarterlyChecks.filter((x) => !x.ticked).length, last_check_in: localDate(s.horizons_quarter_at, api.tz), note: 'The questions asked once a quarter, on the quarterly check-in. Tick each as the user answers (dailies tick with its id); save_horizon kind quarterly read: true when the check-in is done starts them fresh. An action becomes one with dailies set every: "quarter".' } : undefined,
+          quarterly_checks: quarterlyChecks ? { items: quarterlyChecks, left: quarterlyChecks.filter((x) => !x.ticked).length, last_check_in: localDate(s.horizons_quarter_at, api.tz), note: 'The questions asked once a quarter, on the quarterly check-in. Tick each as the user answers (dailies tick with its id); a tick lapses after 45 days, and save_horizon kind quarterly read: true (the check-in done) starts them fresh at once. An action becomes one with dailies set every: "quarter".' } : undefined,
+          yearly_checks: yearlyChecks ? { items: yearlyChecks, left: yearlyChecks.filter((x) => !x.ticked).length, last_review: localDate(s.horizons_year_at, api.tz), due: big.yearlyReview || undefined, note: 'The questions asked once a year, on the yearly review (with the yearly read of purpose and vision). Tick each as the user answers (dailies tick with its id); a tick lapses after six months, and save_horizon kind yearly read: true (the review done) starts them fresh at once. An action becomes one with dailies set every: "year".' } : undefined,
           reviews_due: {
             yearly_read: big.yearly.length ? big.yearly : undefined,
             quarterly_check_in: big.quarterly ? { goals_past_their_date: big.lateGoals.map((g) => g.title), areas_with_no_goal: big.areasNoGoal.map((a) => a.name), projects_serving_no_area_or_goal: big.looseProjects.map((p) => p.name), last: localDate(s.horizons_quarter_at, api.tz), note: 'Go through these with the user, then save_horizon kind quarterly with read: true.' } : undefined,
@@ -119,14 +122,15 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
     },
     {
       name: 'save_horizon',
-      description: 'Write the user\'s purpose and principles or their vision (3-5 years), in their words. The text is plain and reads formatted in the app: # Title, ## Section, **bold**, *italic*, - bullet, one item per line. A line that starts with [ ] is a checkbox the user ticks as they read ([x] = ticked); put one on the lines they want to check themselves against. tick / untick: the text of one checkbox, to tick it for them. read: true records that they read it today (the yearly read) and clears every tick, so the next read starts fresh. kind quarterly with read: true records the quarterly check-in on goals and areas as done.',
-      inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['purpose', 'vision', 'quarterly'] }, text: { type: 'string' }, year: { type: 'integer', description: 'vision: the year it looks ahead to' }, read: { type: 'boolean' }, tick: { type: 'string', description: 'The text of the checkbox to tick' }, untick: { type: 'string', description: 'The text of the checkbox to un-tick' } }, required: ['kind'] },
+      description: 'Write the user\'s purpose and principles or their vision (3-5 years), in their words. The text is plain and reads formatted in the app: # Title, ## Section, **bold**, *italic*, - bullet, one item per line. A line that starts with [ ] is a checkbox the user ticks as they read ([x] = ticked); put one on the lines they want to check themselves against. tick / untick: the text of one checkbox, to tick it for them. read: true records that they read it today (the yearly read) and clears every tick, so the next read starts fresh. kind quarterly with read: true records the quarterly check-in on goals and areas as done; kind yearly with read: true records the yearly review (the yearly checks) as done.',
+      inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['purpose', 'vision', 'quarterly', 'yearly'] }, text: { type: 'string' }, year: { type: 'integer', description: 'vision: the year it looks ahead to' }, read: { type: 'boolean' }, tick: { type: 'string', description: 'The text of the checkbox to tick' }, untick: { type: 'string', description: 'The text of the checkbox to un-tick' } }, required: ['kind'] },
       async run(api, a) {
         const body = {};
         if (a.kind === 'quarterly') { if (!a.read) throw new Error('For the quarterly check-in, pass read: true once it is done'); body.horizons_quarter_at = new Date().toISOString(); }
+        if (a.kind === 'yearly') { if (!a.read) throw new Error('For the yearly review, pass read: true once it is done'); body.horizons_year_at = new Date().toISOString(); }
         else if (a.text !== undefined) body[a.kind] = String(a.text);
         if (a.kind === 'vision' && a.year !== undefined) body.vision_year = a.year;
-        if ((a.tick !== undefined || a.untick !== undefined) && a.kind !== 'quarterly') {
+        if ((a.tick !== undefined || a.untick !== undefined) && !['quarterly', 'yearly'].includes(a.kind)) {
           await api.loadSettings();
           let t = body[a.kind] !== undefined ? body[a.kind] : (api.settings || {})[a.kind] || '';
           for (const [needle, on] of [[a.tick, true], [a.untick, false]]) {
@@ -137,13 +141,13 @@ export function horizonsTools({ OPEN, localDate, zonedToIso, availableTasks, cal
           }
           body[a.kind] = t;
         }
-        if (a.read && a.kind !== 'quarterly') body[`${a.kind}_read_at`] = new Date().toISOString();
+        if (a.read && !['quarterly', 'yearly'].includes(a.kind)) body[`${a.kind}_read_at`] = new Date().toISOString();
         if (!Object.keys(body).length) throw new Error('Pass text, year, tick, untick or read');
         const had = (await api.q(`user_settings?${api.u}&select=user_id`)).length;
         if (had) await api.q(`user_settings?${api.u}`, { method: 'PATCH', body });
         else await api.q('user_settings', { method: 'POST', body: { user_id: api.userId, ...body } });
-        const kept = a.kind !== 'quarterly' && body[a.kind] !== undefined ? counts(a.read ? '' : body[a.kind]) : null;
-        return { saved: Object.keys(body), ...(kept && kept.total ? { checkboxes: { ticked: kept.on, of: kept.total } } : {}), ...(a.read && a.kind !== 'quarterly' ? { ticks: 'cleared' } : {}) };
+        const kept = !['quarterly', 'yearly'].includes(a.kind) && body[a.kind] !== undefined ? counts(a.read ? '' : body[a.kind]) : null;
+        return { saved: Object.keys(body), ...(kept && kept.total ? { checkboxes: { ticked: kept.on, of: kept.total } } : {}), ...(a.read && !['quarterly', 'yearly'].includes(a.kind) ? { ticks: 'cleared' } : {}) };
       },
     },
     {

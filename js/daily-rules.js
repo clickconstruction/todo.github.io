@@ -1,8 +1,9 @@
 // Dailies, the rules (no imports: the app and the MCP Worker both use them; see js/dailies.js).
 // A daily is an action with daily = { tier: must | should, weekdays?: [0-6], since: YYYY-MM-DD }.
-// A weekly one adds every: 'week': it is not asked for on any day but once per Weekly Review, where it is
-// one of the "Weekly checks"; each review starts it fresh. A quarterly one (every: 'quarter') is asked for
-// once per quarterly check-in (Horizons); "Quarterly check-in done" starts it fresh.
+// A check adds every: 'week' | 'quarter' | 'year': it is not asked for on any day but once per review
+// (the Weekly Review's "Weekly checks", the quarterly check-in, the yearly review in Horizons). A tick
+// holds for half the cycle and then lapses, so the next review finds it fresh without a click; finishing
+// the review (the Weekly Review, "Quarterly check-in done", "Yearly review done") starts it fresh at once.
 // Days are local day keys (YYYY-MM-DD); ticked(key) says whether that day was ticked.
 export const TIERS = [['must', 'Have to', 'every day'], ['should', 'Should', 'most days']];
 export const tierLabel = (tier) => { const t = TIERS.find(([k]) => k === tier) || TIERS[1]; return `${t[1]}, ${t[2]}`; };
@@ -12,25 +13,51 @@ export const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMont
 const dateOf = (key) => new Date(`${key}T12:00`);
 export const back = (key, n) => { const d = dateOf(key); d.setDate(d.getDate() - n); return dayKey(d); };
 
+// The checks: what the editor and the cards call them, where they are ticked, and how long a tick holds
+// (half the cycle, in days) before it lapses.
+export const CHECKS = {
+  week: { label: 'Every week, in the Weekly Review', where: 'the Weekly Review', half: 3.5 },
+  quarter: { label: 'Every quarter, in the quarterly check-in', where: 'the quarterly check-in', half: 45 },
+  year: { label: 'Every year, in the yearly review', where: 'the yearly review', half: 182 },
+};
 export const isWeekly = (daily) => !!daily && daily.every === 'week';
 export const isQuarterly = (daily) => !!daily && daily.every === 'quarter';
-// A check: ticked once per period (a weekly check or a quarterly one), never on a day.
-export const isCheck = (daily) => isWeekly(daily) || isQuarterly(daily);
-export const WEEKLY_LABEL = 'Every week, in the Weekly Review';
-export const QUARTERLY_LABEL = 'Every quarter, in the quarterly check-in';
-// How far back a check's ticks are looked at: a quarter and some.
-export const LOOKBACK = 100;
-// A check is ticked for this period when it was ticked on or after the day it started (since). For a
-// weekly check that is the day the open review started (today when none is open); for a quarterly one
-// the day of the last "Quarterly check-in done" (quarterSince). Returns that day, or null.
-export function tickedSince(ticked, since, today) {
-  for (let key = today, i = 0; key >= since && i < LOOKBACK; key = back(key, 1), i++) if (ticked(key)) return key;
-  return null;
+export const isYearly = (daily) => !!daily && daily.every === 'year';
+// A check: ticked once per review, never on a day.
+export const isCheck = (daily) => !!daily && !!CHECKS[daily.every];
+export const WEEKLY_LABEL = CHECKS.week.label;
+export const QUARTERLY_LABEL = CHECKS.quarter.label;
+export const YEARLY_LABEL = CHECKS.year.label;
+// How far back a check's ticks are looked at: a year and some.
+export const LOOKBACK = 400;
+const DAY_MS = 86400000;
+export const halfMs = (daily) => (CHECKS[daily.every] || CHECKS.week).half * DAY_MS;
+// When a tick row was made or last changed (ms); a row without times counts from noon of its day.
+export const tickAt = (row) => Date.parse(row.updated_at || row.created_at || '') || Date.parse(`${row.day}T12:00`);
+// The newest done tick row after the review's "fresh" moment (sinceAt, ms, or null); null when none.
+export function latestRow(rows, sinceAt) {
+  let best = null, bestAt = 0;
+  for (const r of rows) { if (r.state && r.state !== 'done') continue; const at = tickAt(r); if (at > bestAt && (!sinceAt || at > sinceAt)) { best = r; bestAt = at; } }
+  return best;
 }
-// A quarterly check counts from the day the last check-in was done (its ticks that day count only when
-// made after it was done: the caller's ticked() sees to that); never done, every tick in the lookback counts.
-export const quarterSince = (doneDay, today) => doneDay || back(today, LOOKBACK - 1);
-// The last day it was ticked, looking back a quarter and some (null if never in that time).
+// The same, as ms.
+export const latestTick = (rows, sinceAt) => { const r = latestRow(rows, sinceAt); return r ? tickAt(r) : null; };
+// Is a check ticked now: its newest tick came after the review's fresh moment and is younger than half the cycle.
+export const checkTicked = (daily, latestAt, now = Date.now()) => !!latestAt && now - latestAt < halfMs(daily);
+// When a tick lapses (ms).
+export const freshAt = (daily, latestAt) => latestAt + halfMs(daily);
+// The ticks that count now: those a check's box stands for, and what un-ticking clears.
+export const countingTicks = (daily, rows, sinceAt, now = Date.now()) => rows.filter((r) => (!r.state || r.state === 'done') && (!sinceAt || tickAt(r) > sinceAt) && now - tickAt(r) < halfMs(daily));
+const shortDate = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+// One line under a check: "ticked today · fresh from Nov 17", "ticked Oct 3 · fresh from Nov 17", or "last ticked Oct 3" once it lapsed.
+export function checkLine(daily, rows, sinceAt, now = Date.now(), today = dayKey(new Date(now))) {
+  const r = latestRow(rows, sinceAt);
+  const when = (row) => (row.day === today ? 'today' : shortDate(Date.parse(`${row.day}T12:00`)));
+  if (r && checkTicked(daily, tickAt(r), now)) return `ticked ${when(r)} · fresh from ${shortDate(freshAt(daily, tickAt(r)))}`;
+  const any = latestRow(rows, null);
+  return any ? `last ticked ${when(any)}` : '';
+}
+// The last day it was ticked, looking back a year and some (null if never in that time).
 export function lastTicked(ticked, today) {
   for (let i = 0; i < LOOKBACK; i++) { const key = back(today, i); if (ticked(key)) return key; }
   return null;
@@ -77,19 +104,19 @@ export function summary(daily, ticked, today) {
   return asked.length ? `${asked.filter((d) => d.state === 'done').length} of ${asked.length} this week` : '';
 }
 export const describeDaily = (daily) => {
-  if (isWeekly(daily)) return WEEKLY_LABEL;
-  if (isQuarterly(daily)) return QUARTERLY_LABEL;
+  if (isCheck(daily)) return CHECKS[daily.every].label;
   const wd = daily && Array.isArray(daily.weekdays) && daily.weekdays.length && daily.weekdays.length < 7 ? ` (${[...daily.weekdays].sort().map((d) => WD[d].slice(0, 3)).join(', ')})` : '';
   return `${tierLabel(daily && daily.tier)}${wd}`;
 };
-// A daily value from what someone passed: 'must' | 'should' | 'weekly' | 'quarterly' | { tier, weekdays? }
-// | { every: 'week' | 'quarter' }. Throws a plain sentence.
+// A daily value from what someone passed: 'must' | 'should' | 'weekly' | 'quarterly' | 'yearly' |
+// { tier, weekdays? } | { every: 'week' | 'quarter' | 'year' }. Throws a plain sentence.
 export function readDaily(v) {
   const every = typeof v === 'string' ? v : v && typeof v === 'object' ? v.every : undefined;
   if (every === 'weekly' || every === 'week') return { tier: 'should', every: 'week' };
   if (every === 'quarterly' || every === 'quarter') return { tier: 'should', every: 'quarter' };
+  if (every === 'yearly' || every === 'year') return { tier: 'should', every: 'year' };
   const o = typeof v === 'string' ? { tier: v } : v || {};
-  if (!['must', 'should'].includes(o.tier) || (o.every && o.every !== 'day')) throw new Error('daily is "must" (have to, every day), "should" (should, most days), "weekly" (once a week, in the Weekly Review) or "quarterly" (once a quarter, in the quarterly check-in)');
+  if (!['must', 'should'].includes(o.tier) || (o.every && o.every !== 'day')) throw new Error('daily is "must" (have to, every day), "should" (should, most days), "weekly" (once a week, in the Weekly Review), "quarterly" (once a quarter, in the quarterly check-in) or "yearly" (once a year, in the yearly review)');
   const wd = Array.isArray(o.weekdays) ? [...new Set(o.weekdays.map(Number))].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort() : [];
   if (Array.isArray(o.weekdays) && o.weekdays.length && wd.length !== new Set(o.weekdays.map(Number)).size) throw new Error('weekdays are numbers 0 (Sunday) to 6 (Saturday)');
   return { tier: o.tier, ...(wd.length && wd.length < 7 ? { weekdays: wd } : {}) };

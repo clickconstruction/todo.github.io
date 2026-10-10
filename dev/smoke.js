@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -1752,6 +1752,86 @@ async function newProjectFromPicker(check) {
   $('.ss-pop input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); await wait(50);
   check('Return picks it', sel2.value === made.id && t.projects.filter((p) => p.name === 'Gun bench').length === 1);
   if ($('#sheet').open) $('#sheet').close();
+}
+
+// Yearly checks: a checkbox ticked once per yearly review (daily.every = 'year'). A tick holds six months, then lapses; "Yearly review done" starts it fresh.
+async function yearlyChecks(check) {
+  const { app, db } = await import('/js/state.js');
+  const av = await import('/js/availability.js');
+  const D = await import('/js/dailies.js');
+  const { loadAll } = await import('/js/data.js');
+  const { saveSettings } = await import('/js/prefs.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const day = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - n); return D.dayKey(d); };
+  const iso = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  const t = T();
+  const task = (id) => t.tasks.find((x) => x.id === id);
+  const local = (id) => db.tasks.find((x) => x.id === id);
+  const base = { ...t.tasks[0], notes: '', project_id: null, parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, completed_at: null, dropped_at: null, gain: '', waiting_on: null, agenda_for: null, scheduled_at: null, checklist_id: null, created_at: iso(30), updated_at: iso(30) };
+  const tick = (id, taskId, n, state = 'done') => t.daily_ticks.push({ id, user_id: 'u1', task_id: taskId, day: day(n), state, created_at: iso(n), updated_at: iso(n) });
+  t.tasks.push({ ...base, id: 'yA', title: 'Check the bucket list', daily: { tier: 'should', every: 'year', since: day(400) } });
+  tick('ty200', 'yA', 200); // more than six months ago: lapsed
+  await saveSettings({ horizons_year_at: null }, { quiet: true });
+  await loadAll();
+
+  await go('#forecast');
+  check('a yearly check is not in Today and not an available action', !$$('#view .row').some((r) => r.dataset.task === 'yA') && !av.isAvailable(local('yA')) && D.isYearly(local('yA')) && !D.isQuarterly(local('yA')));
+  await go('#horizons');
+  check('Horizons: the yearly review is in the footer, due while it was never done', !!$('a[href="#horizons/yearly"]') && has(undefined, 'the yearly review', 'due'));
+  await go('#horizons/yearly');
+  check('the yearly review lists the read of purpose and vision, and the check with its box; a tick older than six months has lapsed', has(undefined, 'read again', 'purpose and principles', 'vision', 'yearly checks', '0 of 1 ticked') && $$('.hz-checks .dly-row').length === 1 && $('.dly-row[data-task="yA"] [data-dly-tick]').getAttribute('aria-pressed') === 'false' && has('.dly-row[data-task="yA"]', 'last ticked'));
+  tick('ty100', 'yA', 100);
+  await loadAll(); app.render(); await wait(50);
+  check('a tick from 100 days ago still holds, and the row says when it lapses', D.isTicked(local('yA')) && $('.dly-row[data-task="yA"] [data-dly-tick]').getAttribute('aria-pressed') === 'true' && has('.dly-row[data-task="yA"]', 'fresh from') && has(undefined, '1 of 1 ticked'));
+  $('[data-hz="year-done"]').click(); await wait(300);
+  check('Yearly review done: recorded, the check starts fresh, the review is no longer due', !!T().user_settings[0].horizons_year_at && !D.isTicked(local('yA')) && $('.dly-row[data-task="yA"] [data-dly-tick]').getAttribute('aria-pressed') === 'false' && has('#toast', 'yearly review done'));
+  $('.dly-row[data-task="yA"] [data-dly-tick]').click();
+  await until(() => D.isTicked(local('yA'))); await wait(100);
+  check('tick: for this year, the box is on, the action stays open', !task('yA').completed_at && $('.dly-row[data-task="yA"] [data-dly-tick]').getAttribute('aria-pressed') === 'true' && has('#toast', 'this year') && has('.dly-row[data-task="yA"]', 'ticked today', 'fresh from'));
+  $('.dly-row[data-task="yA"] [data-dly-tick]').click();
+  await until(() => !D.isTicked(local('yA'))); await wait(100);
+  check('un-tick: the tick is cleared, not deleted', t.daily_ticks.filter((x) => x.task_id === 'yA' && x.state === 'cleared').length === 1 && t.daily_ticks.filter((x) => x.task_id === 'yA').length === 3);
+  await go('#weekly');
+  check('Weekly Review: the horizons step counts the yearly review only while it is due', !has('a.wk-step[href="#weekly/horizons"]', 'due'));
+  await saveSettings({ horizons_year_at: iso(400) }, { quiet: true }); await loadAll(); app.render(); await wait(50);
+  await go('#weekly/horizons');
+  check('a year on: the step carries the yearly review with its checks', has(undefined, 'yearly review', 'yearly checks') && !!$('.dly-row[data-task="yA"]'));
+
+  // Weekly checks lapse after 3½ days too, even with no review in between.
+  t.tasks.push({ ...base, id: 'yW', title: 'Am I reviewing?', daily: { tier: 'should', every: 'week', since: day(20) } });
+  tick('tyw4', 'yW', 4);
+  t.weekly_reviews.length = 0;
+  await loadAll();
+  await go('#weekly/checks');
+  check('a weekly tick from four days ago has lapsed', !D.isTicked(local('yW')) && has('.dly-row[data-task="yW"]', 'last ticked'));
+  tick('tyw3', 'yW', 3);
+  await loadAll(); app.render(); await wait(50);
+  check('one from three days ago still holds', D.isTicked(local('yW')) && has('.dly-row[data-task="yW"]', 'fresh from'));
+
+  // The editor and a Full Review suggestion make yearly checks.
+  await go('#project/p1');
+  t.tasks.push({ ...base, id: 'yR', title: 'Review the AI roadmap', project_id: 'p1', due_at: iso(2), repeat_rule: { every: 1, unit: 'year', from: 'completion', n: 1 } });
+  await loadAll(); app.render(); await wait(50);
+  $('.row[data-task="yR"] .row-title').click(); await wait(200);
+  const form = $('#sheet form');
+  form.elements.daily_tier.value = 'year'; form.elements.daily_tier.dispatchEvent(new Event('change', { bubbles: true }));
+  check('editor: “Every year, in the yearly review” hides the days and says the tick lapses', [...form.elements.daily_tier.options].some((o) => o.value === 'year' && /every year, in the yearly review/i.test(o.textContent)) && $('.dly-days', form).hidden && /six months/i.test($('[data-dly-hint]', form).textContent));
+  form.requestSubmit();
+  await until(() => task('yR').daily); await wait(150);
+  check('saved: a yearly check, its repeat and due date cleared', task('yR').daily.every === 'year' && task('yR').repeat_rule === null && task('yR').due_at === null && has('.row[data-task="yR"]', 'every year'));
+  if ($('#sheet').open) $('#sheet').close();
+  t.tasks.push({ ...base, id: 'yF', title: 'Check on robertsdouglas.com', due_at: iso(2), repeat_rule: { every: 1, unit: 'year', from: 'assigned', n: 1 }, import_id: 'imY' });
+  t.review_sessions.push({ id: 'sY', user_id: 'u1', title: 'Full Review', scope: {}, current_item: 'iY', status: 'active', agent_seen_at: null, agent_status: '', finished_at: null, created_at: iso(0), updated_at: iso(0) });
+  t.review_items.push({ id: 'iY', session_id: 'sY', user_id: 'u1', sort: 1, kind: 'task', task_id: 'yF', grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: { decision: 'keep', daily: { tier: 'should', every: 'year' }, at: iso(0) }, created_at: iso(0), updated_at: iso(0) });
+  await loadAll(); app.fr = null;
+  await go('#full/sY');
+  await until(() => has(undefined, 'robertsdouglas') && !!$('.sg-bar'));
+  check('Full Review: the suggestion says it becomes a yearly check and where it goes', has('.sg-bar', 'make it a yearly check', 'every year, in the yearly review') && !!$('.sg-bar [data-dly-preview="yearly"] .dly-box') && has('.sg-bar .sg-dly-where', 'yearly review'));
+  $('[data-fr="submit"]').click();
+  await until(() => task('yF').daily);
+  check('Submit: the action is a yearly check', task('yF').daily && task('yF').daily.every === 'year' && task('yF').repeat_rule === null);
+  app.fr = null;
+  await saveSettings({ horizons_year_at: null }, { quiet: true });
 }
 
 // Daily review: start your day (calendar, must-dos, up to 3 focus), then shut down.

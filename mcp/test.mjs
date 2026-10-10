@@ -1296,6 +1296,8 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(db.review_items.find((x) => x.id === s1.id).suggestion.daily.every === 'week' && db.review_items.find((x) => x.id === s1.id).suggestion.daily.tier === 'should', 'full_review suggest: daily "weekly" makes a weekly check');
   await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'quarterly' });
   assert(db.review_items.find((x) => x.id === s1.id).suggestion.daily.every === 'quarter' && db.review_items.find((x) => x.id === s1.id).suggestion.daily.tier === 'should', 'full_review suggest: daily "quarterly" makes a quarterly check');
+  await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'yearly' });
+  assert(db.review_items.find((x) => x.id === s1.id).suggestion.daily.every === 'year', 'full_review suggest: daily "yearly" makes a yearly check');
   await tool('full_review', { action: 'suggest', decision: 'keep', daily: { tier: 'should', weekdays: [1, 3, 5] } });
   let badDaily = ''; try { await tool('full_review', { action: 'suggest', decision: 'keep', daily: 'sometimes' }); } catch (e) { badDaily = e.message; }
   assert(sgDaily && sgDaily.suggestion.daily.tier === 'should' && sgDaily.suggestion.daily.weekdays.join() === '1,3,5' && /"must".*"should"/.test(badDaily), 'full_review suggest: a suggestion can make the action daily (tier and days checked)');
@@ -1783,23 +1785,25 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
     const setW = await tool('dailies', { action: 'set', id: wk.id, every: 'week' });
     const krow = db.tasks.find((t) => t.id === wk.id);
     assert(setW.daily === 'Every week, in the Weekly Review' && krow.daily.every === 'week' && krow.daily.tier === 'should' && krow.daily.since && krow.repeat_rule === null && krow.due_at === null && setW.ticked === false && /Weekly Review/.test(setW.next), 'dailies set every week: the action becomes a weekly check; its repeat and due date are cleared');
-    db.daily_ticks.push({ id: 'tkw', user_id: UID, task_id: wk.id, day: dstr(3), state: 'done' }); // ticked three days ago, no review open
+    db.daily_ticks.push({ id: 'tkw', user_id: UID, task_id: wk.id, day: dstr(5), state: 'done', updated_at: new Date(Date.now() - 5 * 86400000).toISOString() }); // ticked five days ago: lapsed (a tick holds 3½ days)
     const l2 = await tool('dailies', {});
     const td2 = await tool('today', {});
-    assert(l2.weekly.length === 1 && l2.weekly[0].id === wk.id && l2.weekly[0].ticked === false && l2.weekly[0].last_ticked === dstr(3) && l2.left.weekly === 1 && ![...l2.have_to, ...l2.should].some((x) => x.id === wk.id)
-      && !JSON.stringify(td2.daily || {}).includes(wk.id) && !JSON.stringify(td2.overdue).includes(wk.id), 'a weekly check is listed apart, never among today’s; a tick from before this review doesn’t count');
+    assert(l2.weekly.length === 1 && l2.weekly[0].id === wk.id && l2.weekly[0].ticked === false && !l2.weekly[0].fresh_from && l2.weekly[0].last_ticked === dstr(5) && /last ticked/.test(l2.weekly[0].summary) && l2.left.weekly === 1 && ![...l2.have_to, ...l2.should].some((x) => x.id === wk.id)
+      && !JSON.stringify(td2.daily || {}).includes(wk.id) && !JSON.stringify(td2.overdue).includes(wk.id), 'a weekly check is listed apart, never among today’s; a tick older than 3½ days has lapsed');
     assert((await tool('get_task', { id: wk.id })).daily.summary === 'Every week, in the Weekly Review' && !(await tool('list_tasks', { available_only: true, limit: 500 })).items.some((t) => t.id === wk.id), 'get_task says it is weekly; it is never an available action');
     // a review that started four days ago: the tick from three days ago is this review's
     db.weekly_reviews.forEach((r) => { if (!r.completed_at && !r.abandoned_at) r.abandoned_at = new Date().toISOString(); });
     const rev = { id: 'wrW', user_id: UID, started_at: new Date(Date.now() - 4 * 86400000).toISOString(), steps: {}, completed_at: null, abandoned_at: null };
     db.weekly_reviews.push(rev);
+    db.daily_ticks.push({ id: 'tkw2', user_id: UID, task_id: wk.id, day: dstr(2), state: 'done', updated_at: new Date(Date.now() - 2 * 86400000).toISOString() }); // ticked two days ago, after the review started
     const real2 = globalThis.fetch; let calls2 = 0; globalThis.fetch = (u, ...x) => { calls2 += 1; return real2(u, ...x); };
     let wr; try { wr = await tool('weekly_review', {}); } finally { globalThis.fetch = real2; }
     const ck = wr.steps.find((x) => x.key === 'checks');
-    assert(ck.done && !ck.nothing_to_do && ck.stage === 'Get current' && (await tool('dailies', {})).weekly[0].ticked === true && calls2 <= 30, `weekly_review: Weekly checks is a step, done once every check is ticked since the review started (${calls2} requests)`);
+    const l2b = (await tool('dailies', {})).weekly[0];
+    assert(ck.done && !ck.nothing_to_do && ck.stage === 'Get current' && l2b.ticked === true && /^ticked .* · fresh from /.test(l2b.summary) && Date.parse(l2b.fresh_from) > Date.now() && calls2 <= 30, `weekly_review: Weekly checks is a step, done once every check is ticked since the review started (${calls2} requests)`);
     const unW = await tool('dailies', { action: 'untick', id: wk.id });
     const ck2 = (await tool('weekly_review', {})).steps.find((x) => x.key === 'checks');
-    assert(!unW.ticked && db.daily_ticks.find((x) => x.id === 'tkw').state === 'cleared' && !ck2.done && ck2.data.count === 1 && ck2.data.items[0].id === wk.id && ck2.data.items[0].ticked === false && /dailies tick/.test(ck2.data.note), 'untick: the tick from the earlier day is cleared, not deleted, and the step lists what is left');
+    assert(!unW.ticked && db.daily_ticks.find((x) => x.id === 'tkw2').state === 'cleared' && db.daily_ticks.find((x) => x.id === 'tkw').state === 'done' && !ck2.done && ck2.data.count === 1 && ck2.data.items[0].id === wk.id && ck2.data.items[0].ticked === false && /dailies tick/.test(ck2.data.note), 'untick: the tick from the earlier day is cleared, not deleted, and the step lists what is left');
     const tkW = await tool('dailies', { action: 'tick', title: 'am i reviewing?' });
     assert(tkW.ticked && tkW.last_ticked === localToday() && db.daily_ticks.some((x) => x.task_id === wk.id && x.day === localToday() && x.state === 'done') && !krow.completed_at && (await tool('weekly_review', {})).steps.find((x) => x.key === 'checks').done, 'tick: for this review; the action stays open');
     rev.completed_at = new Date().toISOString();
@@ -1808,7 +1812,7 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
     const viaU = await tool('update_task', { id: plain.id, daily: 'weekly' });
     assert(viaU.daily.every === 'week' && viaU.daily.summary === 'Every week, in the Weekly Review', 'update_task daily "weekly" makes a weekly check');
     const backD = await tool('dailies', { action: 'set', id: plain.id, every: 'day', tier: 'must' });
-    assert(backD.daily === 'Have to, every day' && !db.tasks.find((t) => t.id === plain.id).daily.every && await refuse('dailies', { action: 'set', id: plain.id, every: 'month' }, /"day", "week" or "quarter"/), 'set every day makes it daily again; every is day, week or quarter');
+    assert(backD.daily === 'Have to, every day' && !db.tasks.find((t) => t.id === plain.id).daily.every && await refuse('dailies', { action: 'set', id: plain.id, every: 'month' }, /"day", "week", "quarter" or "year"/), 'set every day makes it daily again; every is day, week, quarter or year');
     await tool('dailies', { action: 'clear', id: plain.id });
     krow.dropped_at = new Date().toISOString();
   }
@@ -1846,8 +1850,40 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
     const viaQ = await tool('update_task', { id: plain.id, daily: 'quarterly' });
     assert(viaQ.daily.every === 'quarter' && viaQ.daily.summary === 'Every quarter, in the quarterly check-in' && db.tasks.find((t) => t.id === plain.id).repeat_rule === null, 'update_task daily "quarterly" makes a quarterly check');
     await tool('dailies', { action: 'clear', id: plain.id });
-    qrow.dropped_at = new Date().toISOString();
+    // a tick lapses after 45 days even with no check-in done
+    db.daily_ticks.push({ id: 'tkq46', user_id: UID, task_id: qk.id, day: dstr(46), state: 'done', updated_at: new Date(Date.now() - 46 * 86400000).toISOString() });
     st.horizons_quarter_at = null;
+    db.daily_ticks.filter((x) => x.task_id === qk.id && x.id !== 'tkq46').forEach((x) => { x.state = 'cleared'; });
+    assert((await tool('dailies', {})).quarterly[0].ticked === false, 'a quarterly tick older than 45 days has lapsed');
+    db.daily_ticks.push({ id: 'tkq30', user_id: UID, task_id: qk.id, day: dstr(30), state: 'done', updated_at: new Date(Date.now() - 30 * 86400000).toISOString() });
+    const q30 = (await tool('dailies', {})).quarterly[0];
+    assert(q30.ticked === true && q30.fresh_from.slice(0, 10) === new Date(Date.now() + 15 * 86400000).toISOString().slice(0, 10) && /fresh from/.test(q30.summary), 'one 30 days old still holds, and says when it lapses');
+    qrow.dropped_at = new Date().toISOString();
+  }
+  { // yearly checks: ticked once per yearly review (Horizons); a tick holds six months; "Yearly review done" starts them fresh
+    const yk = await tool('capture', { title: 'Check the bucket list', due: dstr(3), repeat: { every: 1, unit: 'year' } });
+    const setY = await tool('dailies', { action: 'set', id: yk.id, every: 'year' });
+    const yrow = db.tasks.find((t) => t.id === yk.id);
+    assert(setY.daily === 'Every year, in the yearly review' && yrow.daily.every === 'year' && yrow.daily.tier === 'should' && yrow.repeat_rule === null && yrow.due_at === null && setY.ticked === false && /yearly review/.test(setY.next), 'dailies set every year: the action becomes a yearly check; its repeat and due date are cleared');
+    const st = db.user_settings.find((x) => x.user_id === UID); st.horizons_year_at = null;
+    db.daily_ticks.push({ id: 'tky200', user_id: UID, task_id: yk.id, day: dstr(200), state: 'done', updated_at: new Date(Date.now() - 200 * 86400000).toISOString() });
+    const ly = await tool('dailies', {});
+    assert(ly.yearly.length === 1 && ly.yearly[0].ticked === false && ly.yearly[0].last_ticked === dstr(200) && ly.left.yearly === 1 && !(ly.quarterly || []).some((x) => x.id === yk.id), 'a yearly check is listed apart; a tick older than six months has lapsed');
+    db.daily_ticks.push({ id: 'tky100', user_id: UID, task_id: yk.id, day: dstr(100), state: 'done', updated_at: new Date(Date.now() - 100 * 86400000).toISOString() });
+    const hzY = await tool('list_horizons', {});
+    assert(hzY.yearly_checks && hzY.yearly_checks.items[0].id === yk.id && hzY.yearly_checks.items[0].ticked === true && hzY.yearly_checks.left === 0 && hzY.yearly_checks.due === true && /dailies tick/.test(hzY.yearly_checks.note), 'list_horizons lists the yearly checks; the review is due while never done');
+    const hzStepY = (await tool('weekly_review', {})).steps.find((x) => x.key === 'horizons');
+    assert(!hzStepY.done && hzStepY.data.yearly_checks && hzStepY.data.yearly_checks[0].ticked === true && hzStepY.data.due.some((d) => /yearly review/.test(d)) && /yearly check/.test(hzStepY.data.note), 'weekly_review: the horizons step carries the yearly checks while the yearly review is due');
+    const sy = await tool('save_horizon', { kind: 'yearly', read: true });
+    const afterY = await tool('dailies', {});
+    assert(sy.saved.includes('horizons_year_at') && afterY.yearly[0].ticked === false && !(await tool('list_horizons', {})).yearly_checks.due, '“Yearly review done” (save_horizon yearly read) starts them fresh, and the review is not due for a year');
+    const tkY = await tool('dailies', { action: 'tick', id: yk.id });
+    assert(tkY.ticked && /this year/.test(tkY.next) && tkY.fresh_from.slice(0, 10) === new Date(Date.now() + 182 * 86400000).toISOString().slice(0, 10), 'ticked again: holds six months');
+    const viaY = await tool('update_task', { id: plain.id, daily: 'yearly' });
+    assert(viaY.daily.every === 'year' && viaY.daily.summary === 'Every year, in the yearly review', 'update_task daily "yearly" makes a yearly check');
+    await tool('dailies', { action: 'clear', id: plain.id });
+    yrow.dropped_at = new Date().toISOString();
+    st.horizons_year_at = null;
   }
   [walk.id, meds.id, plain.id].forEach((x) => { const t = db.tasks.find((y) => y.id === x); t.dropped_at = new Date().toISOString(); });
   db.daily_ticks.length = 0;

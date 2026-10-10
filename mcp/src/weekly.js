@@ -2,7 +2,7 @@
 // js/weekly.js). An agent can walk the user through a review in conversation, step by step.
 import { STEPS, STAGES, STALE_DAYS, sweepPrompts, streak } from '../../js/weekly.js';
 import { bigReviewsDue } from '../../js/whatnow.js';
-import { dailiesFor, quarterSince, checkOut } from './dailies.js';
+import { dailiesFor, quarterSinceAt, yearSinceAt, reviewSinceAt, checkOut } from './dailies.js';
 
 export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
   const isSomedayTag = (tags) => { const root = tags.find((g) => !g.parent_id && /^someday/i.test(g.name)); return root ? new Set([root.id, ...tags.filter((g) => g.parent_id === root.id).map((g) => g.id)]) : new Set(); };
@@ -40,25 +40,23 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
     const dueHz = [...areas, ...goals].filter((x) => !x.last_reviewed_at || Date.parse(x.last_reviewed_at) + (x.review_every_days || 30) * 86400000 <= Date.now());
     const big = bigReviewsDue({ settings: api.settings || {}, goals: goals.map((g) => ({ ...g, status: 'active' })), areas, projects });
     if (big.quarterly) dueHz.push({ big: 'quarterly check-in (list_horizons)' });
-    // Quarterly checks (daily.every = 'quarter') go with the check-in: listed when it is due, ticked since the last one was done.
-    let quarterly;
-    if (big.quarterly && open.some((t) => t.daily && t.daily.every === 'quarter')) {
-      const dl = await dailiesFor(api, localDate(now, api.tz), localDate);
-      const qs = quarterSince(api, localDate(now, api.tz), localDate);
-      quarterly = dl.tasks.filter((t) => t.daily.every === 'quarter').map((t) => { const o = checkOut(t, dl.ticked(t), qs, localDate(now, api.tz)); return { id: o.id, title: o.title, ticked: o.ticked }; });
-    }
     big.yearly.forEach((k) => dueHz.push({ big: `yearly read of the ${k} (list_horizons include_text)` }));
+    // The checks (daily.every = week | quarter | year), with their ticks: weekly ones are the checks step; quarterly and
+    // yearly ones go with their review in the horizons step while it is due. One dailies read serves all three.
+    const today = localDate(now, api.tz);
+    const hasCheck = (k) => open.some((t) => t.daily && t.daily.every === k);
+    const dl = hasCheck('week') || (big.quarterly && hasCheck('quarter')) || (big.yearlyReview && hasCheck('year')) ? await dailiesFor(api, today) : null;
+    const brief = (o) => ({ id: o.id, title: o.title, ticked: o.ticked, fresh_from: o.fresh_from });
+    let quarterly, yearly;
+    if (dl && big.quarterly && hasCheck('quarter')) quarterly = dl.tasks.filter((t) => t.daily.every === 'quarter').map((t) => brief(checkOut(t, dl.rows(t), quarterSinceAt(api), Date.now(), today)));
+    if (dl && big.yearlyReview && hasCheck('year')) { yearly = dl.tasks.filter((t) => t.daily.every === 'year').map((t) => brief(checkOut(t, dl.rows(t), yearSinceAt(api), Date.now(), today))); dueHz.push({ big: 'yearly review (list_horizons yearly_checks)' }); }
     const [fleetingNotes, toWrite] = await Promise.all([
       api.q(`slipbox_notes?${api.u}&kind=eq.fleeting&archived_at=is.null&limit=200&select=id,title`),
       api.q(`tasks?${api.u}&reading_state=eq.finished&reading_notes_done=is.false&limit=200&select=id,title`),
     ]);
-    // Weekly checks (daily.every = 'week'): ticked since this review started (today when none is open).
-    const weekly = open.filter((t) => t.daily && t.daily.every === 'week').sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || (a.created_at < b.created_at ? -1 : 1));
-    const today = localDate(now, api.tz);
-    const since = r && localDate(r.started_at, api.tz) < today ? localDate(r.started_at, api.tz) : today;
-    const ticks = weekly.length ? await api.q(`daily_ticks?${api.u}&state=eq.done&day=gte.${since}&task_id=in.(${weekly.map((t) => `"${t.id}"`).join(',')})&select=task_id`) : [];
-    const tickedIds = new Set(ticks.map((x) => x.task_id));
-    const checks = weekly.map((t) => ({ id: t.id, title: t.title, ticked: tickedIds.has(t.id) }));
+    // Weekly checks: ticked since this review started (or the last one ended), and within 3½ days.
+    const wsince = dl && hasCheck('week') ? await reviewSinceAt(api) : null;
+    const checks = dl ? dl.tasks.filter((t) => t.daily.every === 'week').map((t) => brief(checkOut(t, dl.rows(t), wsince, Date.now(), today))) : [];
     const worked = { checks: checks.length > 0 && checks.every((c) => c.ticked) }; // done by doing it: every one ticked
     const count = { checks: checks.length, horizons: dueHz.length, inbox: inbox.length, stale: stale.length, waiting: waiting.length, projects: due.length + stuck.length, someday: sd.items.length + sd.onHold.length, notes: fleetingNotes.length + toWrite.length };
     const auto = { checks: !checks.length, horizons: !dueHz.length, inbox: !inbox.length, stale: !stale.length, waiting: !waiting.some((t) => t.follow_up_at && t.follow_up_at < end), projects: !due.length && !stuck.length, notes: !fleetingNotes.length && !toWrite.length };
@@ -67,11 +65,11 @@ export function weeklyTools({ OPEN, localDate, zonedToIso, tool, calendar }) {
       stale: { count: stale.length, items: stale.slice(0, 20).map((t) => ({ id: t.id, title: t.title, project: (projects.find((p) => p.id === t.project_id) || {}).name || null, days_untouched: days(t.updated_at || t.created_at) })), note: 'For each: keep (update_task with no change touches it), complete, move to someday (clarify_item decision someday) or drop.' },
       waiting: { count: waiting.length, follow_ups_due: waiting.filter((t) => t.follow_up_at && t.follow_up_at < end).map((t) => ({ id: t.id, title: t.title, follow_up: localDate(t.follow_up_at, api.tz) })) },
       projects: { due_for_review: due.map((p) => p.name), stuck: stuck.map((p) => p.name), note: 'Use list_review and mark_reviewed; give stuck projects a next action.' },
-      checks: { count: checks.length, items: checks, note: 'Ask each one and tick it as they answer (dailies tick with its id). Each review starts them fresh; an action becomes a weekly check with dailies set every: "week".' },
+      checks: { count: checks.length, items: checks, note: 'Ask each one and tick it as they answer (dailies tick with its id). Each review starts them fresh, and a tick lapses after 3½ days anyway; an action becomes a weekly check with dailies set every: "week".' },
       someday: { count: count.someday, note: 'Use list_someday; activate_someday or drop.' },
       sweep: { note: 'Use mind_sweep_prompts and capture what the user says.' },
       notes: { fleeting: fleetingNotes.slice(0, 20).map((n) => n.title), finished_notes_to_write: toWrite.slice(0, 20).map((t) => t.title), note: 'Help turn each into permanent notes (slipbox update kind permanent; reading take_notes / notes_done).' },
-      horizons: { due: dueHz.map((x) => x.big || (x.name ? `area: ${x.name}` : `goal: ${x.title}`)), quarterly_checks: quarterly, note: `Use list_horizons; save_area / save_goal with reviewed: true.${quarterly ? ' Ask each quarterly check and tick it as they answer (dailies tick with its id); save_horizon kind quarterly read: true when the check-in is done, which starts them fresh.' : ''}` },
+      horizons: { due: dueHz.map((x) => x.big || (x.name ? `area: ${x.name}` : `goal: ${x.title}`)), quarterly_checks: quarterly, yearly_checks: yearly, note: `Use list_horizons; save_area / save_goal with reviewed: true.${quarterly ? ' Ask each quarterly check and tick it as they answer (dailies tick with its id); save_horizon kind quarterly read: true when the check-in is done, which starts them fresh.' : ''}${yearly ? ' Ask each yearly check the same way; save_horizon kind yearly read: true when the yearly review is done.' : ''}` },
     };
     const steps = STEPS.map((s) => {
       const done = !!(r && r.steps && r.steps[s.key]) || !!auto[s.key] || !!worked[s.key];
