@@ -17,6 +17,8 @@ import { firstUrl } from './slipbox.js';
 // small ↗ beside the title that opens it, so the title itself still opens the card.
 export const taskLink = (t) => firstUrl(t.title) || firstUrl(t.notes) || t.reading_url || null;
 export const linkHost = (url) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'link'; } };
+// Text with its URLs made into links (escaped first, so nothing typed becomes markup).
+export const linkify = (text) => esc(text || '').replace(/https?:\/\/[^\s<"')\]]+/g, (u) => { const m = /[.,;:!?]+$/.exec(u); const url = m ? u.slice(0, -m[0].length) : u; return `<a class="txt-link" href="${url}" target="_blank" rel="noopener">${url}</a>${m ? m[0] : ''}`; });
 export const linkHtml = (url, cls) => (url ? `<a class="${cls}" href="${esc(url)}" target="_blank" rel="noopener" title="Open ${esc(linkHost(url))}" aria-label="Open ${esc(linkHost(url))}">↗</a>` : '');
 
 // Meta icons are small and monochrome: the words carry the meaning, the icon only helps scanning.

@@ -8,7 +8,8 @@
 // field's own editor, Save writes just that field, Esc puts it back.
 import { describeDaily, isDaily, isWeekly, isQuarterly, isYearly, summary as dailySummary, dailyPreview } from '../dailies.js';
 import { describe } from '../repeat.js';
-import { taskLink, linkHost } from '../rows.js';
+import { taskLink, linkHost, linkify } from '../rows.js';
+import { firstUrl } from '../slipbox.js';
 import { treeChangeHtml, treeWithout } from './tree.js';
 import { db, app, sb, run, esc, byId, toast, syncRow, tagsFor, tagLabel, isOpen, openSheet, $ } from '../state.js';
 import { loadAll, refreshTasks, saveTask } from '../data.js';
@@ -381,7 +382,8 @@ function suggestionBar(it, t) {
     row('✓', `<b>${esc(DECISION_LABEL[s.decision] || s.decision)}</b>${s.decision === 'accept' ? ` · ${esc(proposalText(s.proposal || g.proposal, n))}` : ''}`);
   } else if (t) {
     const p = t.project_id && byId(db.projects, t.project_id);
-    if (s.title && s.title !== t.title) row('✎', `Title: “${esc(s.title)}” <span class="sg-old">${esc(t.title)}</span>`);
+    const sugLink = firstUrl(s.title || '') || firstUrl(s.task_notes || '') || taskLink(t);
+    if (s.title && s.title !== t.title) row('✎', `Title: “${esc(s.title)}” <span class="sg-old">${esc(t.title)}</span>${sugLink ? ` <a class="fr-link" href="${esc(sugLink)}" target="_blank" rel="noopener" title="Open ${esc(linkHost(sugLink))}">↗ ${esc(linkHost(sugLink))}</a>` : ''}`);
     if (s.task_notes && s.task_notes !== (t.notes || '')) row('📝', notesRow(it, s.task_notes, t.notes || ''));
     if ('gain' in s && s.gain !== (t.gain || '')) row('✦', `Gain: <span class="gain-text">${esc(s.gain || 'none')}</span>${s.gain_suggested ? ' <span class="chip sug">Claude’s words</span>' : ''}`);
     if ('project_id' in s && s.project_id !== t.project_id) row('🗂', `Project: ${esc(s.project_name || 'none')}${p ? ` <span class="sg-old">${esc(p.name)}</span>` : ''}`);
@@ -423,7 +425,7 @@ function notesRow(it, text, old) {
   const open = f.notesOpen && f.notesOpen.id === it.id ? f.notesOpen.open : notesAreShort(text);
   return `Notes: <b>${sizeOf(text)}</b> <span class="hint">→ this card’s Notes</span> <button class="link-btn sg-copy" data-fr="copy-notes">⧉ Copy</button>
     <span class="sg-replaces hint">${old ? `Replaces the notes it has (${sizeOf(old)}): <span class="sg-old">${esc(firstLine(old))}</span>` : 'It has no notes now.'}</span>
-    <details class="sg-notes-d" ${open ? 'open' : ''}><summary data-fr="notes-toggle"><span class="sg-notes-show">Show the text</span><span class="sg-notes-hide">Hide the text</span><span class="sg-prev"> · ${esc(firstLine(text))}</span></summary><span class="sg-notes">${esc(text)}</span></details>`;
+    <details class="sg-notes-d" ${open ? 'open' : ''}><summary data-fr="notes-toggle"><span class="sg-notes-show">Show the text</span><span class="sg-notes-hide">Hide the text</span><span class="sg-prev"> · ${esc(firstLine(text))}</span></summary><span class="sg-notes">${linkify(text)}</span></details>`;
 }
 
 // A suggestion's steps: titles, or {title, steps, in_order} that nest.
@@ -461,7 +463,7 @@ function taskCard(it) {
     ${t.flagged ? row('Flag', 'flagged', '<span class="chip flagged-chip">⚑ Flagged</span>') : ''}
     ${t.folder_path ? row('Folder', 'folder', `<span class="fr-folder">${esc(shortPath(t.folder_path))}</span>${folderButton(t.folder_path)}`) : ''}
     ${stepsRow(t, row)}
-    <details class="fr-notes" open><summary>Notes</summary><p class="fr-editable" ${editableAttrs('notes')}>${t.notes ? mark(it, 'notes', esc(t.notes)) : '<span class="hint">none · click to write some</span>'}</p></details>
+    <details class="fr-notes" open><summary>Notes</summary><p class="fr-editable" ${editableAttrs('notes')}>${t.notes ? mark(it, 'notes', linkify(t.notes)) : '<span class="hint">none · click to write some</span>'}</p></details>
     ${it.note ? `<p class="fr-claude"><b>Claude:</b> ${esc(it.note)}</p>` : ''}
     ${suggestionBar(it, t)}
     ${decideBtns(it, [['keep', 'Keep'], ['someday', 'Someday'], ['done', 'Done'], ['drop', 'Drop']], 'fr-btns')}
@@ -658,9 +660,10 @@ export async function fullReviewChange(e) {
   if (on) toast(`Claude keeps the next ${AHEAD} cards drafted while it’s running. Paste the prompt once to start it.`, { label: 'Copy prompt', run: copyPrompt });
   else toast('Claude stops drafting ahead');
 }
-export async function fullReviewAction(el) {
+export async function fullReviewAction(el, e) {
   const f = F();
   const a = el.dataset.fr;
+  if (e && e.target && e.target.closest && e.target.closest('a[href]')) return; // a link inside a row opens the link, not the editor
   const s = f.session;
   if (a === 'guide-hide' || a === 'guide-show') { app.frGuideOff = a === 'guide-hide'; try { localStorage.setItem('tt.frGuide', a === 'guide-hide' ? 'off' : 'on'); } catch { /* private mode: this screen only */ } app.render(); return; }
   if (a === 'invite') {

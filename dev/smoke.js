@@ -1830,11 +1830,12 @@ async function yearlyChecks(check) {
   if ($('#sheet').open) $('#sheet').close();
   t.tasks.push({ ...base, id: 'yF', title: 'Check on robertsdouglas.com', due_at: iso(2), repeat_rule: { every: 1, unit: 'year', from: 'assigned', n: 1 }, import_id: 'imY' });
   t.review_sessions.push({ id: 'sY', user_id: 'u1', title: 'Full Review', scope: {}, current_item: 'iY', status: 'active', agent_seen_at: null, agent_status: '', finished_at: null, created_at: iso(0), updated_at: iso(0) });
-  t.review_items.push({ id: 'iY', session_id: 'sY', user_id: 'u1', sort: 1, kind: 'task', task_id: 'yF', grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: { decision: 'keep', daily: { tier: 'should', every: 'year' }, at: iso(0) }, created_at: iso(0), updated_at: iso(0) });
+  t.review_items.push({ id: 'iY', session_id: 'sY', user_id: 'u1', sort: 1, kind: 'task', task_id: 'yF', grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: { decision: 'keep', daily: { tier: 'should', every: 'year' }, title: 'Check on robertsdouglas.com and robertdouglas.com', task_notes: 'Both domains: https://robertsdouglas.com/ and https://robertdouglas.com/.', at: iso(0) }, created_at: iso(0), updated_at: iso(0) });
   await loadAll(); app.fr = null;
   await go('#full/sY');
   await until(() => has(undefined, 'robertsdouglas') && !!$('.sg-bar'));
   check('Full Review: the suggestion says it becomes a yearly check and where it goes', has('.sg-bar', 'make it a yearly check', 'every year, in the yearly review') && !!$('.sg-bar [data-dly-preview="yearly"] .dly-box') && has('.sg-bar .sg-dly-where', 'yearly review'));
+  check('the suggested notes show their URLs as links, and the title row carries a ↗ for the first one', $$('.sg-bar .sg-notes a.txt-link').length === 2 && $('.sg-bar .sg-notes a.txt-link').getAttribute('href') === 'https://robertsdouglas.com/' && $('.sg-bar .sg-notes a.txt-link').target === '_blank' && !!$('.sg-bar a.fr-link[href="https://robertsdouglas.com/"]') && /robertsdouglas\.com/.test($('.sg-bar a.fr-link').textContent) && $('.sg-bar .sg-notes').textContent === 'Both domains: https://robertsdouglas.com/ and https://robertdouglas.com/.');
   $('[data-fr="submit"]').click();
   await until(() => task('yF').daily);
   check('Submit: the action is a yearly check', task('yF').daily && task('yF').daily.every === 'year' && task('yF').repeat_rule === null);

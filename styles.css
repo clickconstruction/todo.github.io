@@ -1320,8 +1320,9 @@ body.fr-mode .view { margin-left: auto !important; margin-right: auto !important
 .fr-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
 .fr-why { color: var(--accent); }
 .fr-title { font-size: 22px; margin: 8px 0 10px; overflow-wrap: anywhere; }
-.fr-link { display: inline-block; margin: 4px 0 0; font-size: 14px; font-weight: 500; color: var(--accent); text-decoration: none; }
-.fr-link:hover { text-decoration: underline; }
+.fr-link { display: inline-block; margin: 4px 0 0; padding: 1px 8px; font-size: 14px; font-weight: 500; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; border: 1px solid var(--line); border-radius: 999px; }
+.fr-link:hover { background: var(--accent-soft); }
+.txt-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
 .fr-field { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 15px; }
 .fr-field > b { min-width: 72px; font-size: 13px; color: var(--muted); font-weight: 600; }
 .fr-new { background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 6px; padding: 1px 6px; animation: fr-flash 1.2s ease-out; }
