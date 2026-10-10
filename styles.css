@@ -1326,6 +1326,7 @@ body.fr-mode .view { margin-left: auto !important; margin-right: auto !important
 .fr-title { font-size: 22px; margin: 8px 0 10px; overflow-wrap: anywhere; }
 .fr-link { display: inline-block; margin: 4px 0 0; padding: 1px 8px; font-size: 14px; font-weight: 500; color: var(--link); text-decoration: underline; text-underline-offset: 3px; border: 1px solid var(--link); border-radius: 999px; transition: background .12s, transform .12s; }
 .fr-link:hover, .fr-link:focus-visible { background: var(--link-soft); transform: translateY(-1px); outline: none; }
+.row-title .txt-link, .fr-title .txt-link { font-weight: inherit; }
 .txt-link { color: var(--link); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; overflow-wrap: anywhere; border-radius: 4px; transition: background .12s; }
 .txt-link:hover, .txt-link:focus-visible { background: var(--link-soft); text-decoration-thickness: 2px; outline: none; }
 .fr-field { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 15px; }

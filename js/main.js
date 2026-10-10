@@ -229,6 +229,9 @@ const CLICKS = [
 ];
 
 view.addEventListener('click', (e) => {
+  // A link to the outside inside a row or a card (a URL in a title or in notes) is just a link: the browser opens it.
+  const a = e.target.closest && e.target.closest('a[href^="http"]');
+  if (a && a.target === '_blank') return;
   for (const [sel, fn] of CLICKS) {
     const el = e.target.closest(sel);
     if (el) { fn(el, e); return; }
