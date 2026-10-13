@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -397,6 +397,37 @@ async function waitingSheets(check) {
 }
 
 // A person's own tag is "Waiting : their name": offered as it is typed, made on save, and renamed with them.
+// Waiting For: a person with nothing open can be archived from the People list, all of them at once from
+// the heading, and archived people can be shown and restored (never deleted).
+async function peopleTidy(check) {
+  const { sb, run } = await import('/js/state.js');
+  const { savePerson } = await import('/js/gtd.js');
+  const bea = await savePerson(null, { name: 'Busy Bea' });
+  const al = await savePerson(null, { name: 'Idle Al' });
+  const bo = await savePerson(null, { name: 'Idle Bo' });
+  await run(sb.from('tasks').update({ waiting_on: bea.id, follow_up_at: new Date(Date.now() + 2 * 86400000).toISOString() }).eq('id', 't2').select());
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  await go('#waiting');
+  const rowOf = (name) => $$('#view .group-list:not(.archived-people) .people-row').find((r) => r.textContent.includes(name));
+  check('a person with something open has no Archive button', !!rowOf('Busy Bea') && !rowOf('Busy Bea').querySelector('[data-gtd="archive-person"]'));
+  check('a person with nothing open has one', !!(rowOf('Idle Al') && rowOf('Idle Al').querySelector('[data-gtd="archive-person"]')));
+  check('the heading offers to archive all of them', has('#view .people-title', 'archive the 2 with nothing open'));
+  rowOf('Idle Al').querySelector('[data-gtd="archive-person"]').click(); await wait(300);
+  check('Archive takes them off the page; they are kept, archived', !rowOf('Idle Al') && !!T().people.find((p) => p.id === al.id && p.archived_at));
+  check('a toast offers Undo', !$('#toast').hidden && has('#toast', 'archived idle al', 'undo'));
+  $$('#toast button').find((b) => b.textContent === 'Undo').click(); await wait(300);
+  check('Undo brings them back', !!rowOf('Idle Al') && !T().people.find((p) => p.id === al.id).archived_at);
+  $('#view [data-gtd="archive-idle-people"]').click(); await wait(300);
+  check('archive all: the idle people go, the busy one stays', !rowOf('Idle Al') && !rowOf('Idle Bo') && !!rowOf('Busy Bea') && T().people.filter((p) => p.archived_at).length === 2);
+  check('“Show 2 archived” appears', has('#view [data-gtd="toggle-archived-people"]', 'show 2 archived'));
+  $('#view [data-gtd="toggle-archived-people"]').click(); await wait(200);
+  check('the archived list shows them, each with Restore', $$('#view .archived-people .people-row').length === 2 && $$('#view [data-gtd="restore-person"]').length === 2);
+  $$('#view .archived-people .people-row').find((r) => r.textContent.includes('Idle Bo')).querySelector('[data-gtd="restore-person"]').click(); await wait(300);
+  check('Restore puts them back in People', !!rowOf('Idle Bo') && !T().people.find((p) => p.id === bo.id).archived_at && $$('#view .archived-people .people-row').length === 1);
+  await go(`#person/${al.id}`);
+  check('an archived person’s page still opens, marked archived', has(undefined, 'idle al', 'archived'));
+}
+
 async function personTag(check) {
   const t = T();
   const { openPersonEditor } = await import('/js/editors/gtd.js');

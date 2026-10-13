@@ -7,7 +7,7 @@ import { taskList, taskRow } from '../rows.js';
 import { attachmentsFor, attachFieldHtml, wireAttachField } from '../editors/attachField.js';
 import { calendarEvents, liveCalendars, fmtEventTime } from '../calendars.js';
 import {
-  ticklerItems, dayKey, tickleNew, addAgendaItem, messageLink, snooze, takeBack, peopleFromWaitingTags, liveReferences, livePeople, waitingFor, agendaFor, waitingPerson, followUpDue, initials, isWaiting, mentions,
+  ticklerItems, dayKey, tickleNew, addAgendaItem, messageLink, snooze, takeBack, peopleFromWaitingTags, liveReferences, livePeople, waitingFor, agendaFor, waitingPerson, followUpDue, initials, isWaiting, mentions, archivePeople,
 } from '../gtd.js';
 
 const fmtDay = (d) => d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
@@ -133,10 +133,25 @@ export function viewWaiting() {
       return `<h2 class="section-title person-head">${p ? `<a href="#person/${p.id}">${avatar(p)}${esc(p.name)}</a>` : 'Someone'} · ${list.length}</h2><ul class="list">${list.map(waitingRow).join('')}</ul>`;
     }).join('') || '<p class="empty">Not waiting on anyone. Delegate something from Clarify or an item’s ⏳ Waiting on row.</p>'}
     ${agendas.length ? `<h2 class="section-title">Agendas</h2><div class="group-list">${agendas.map(([p, n]) => `<a class="group-row" href="#person/${p.id}"><span>${avatar(p)}${esc(p.name)}</span><span class="count">${n}</span></a>`).join('')}</div>` : ''}
-    <h2 class="section-title">People · ${people.length}</h2>
-    ${people.length ? `<div class="group-list">${people.map((p) => { const w = waitingFor(p).length; const a = agendaFor(p).length; return `<a class="group-row" href="#person/${p.id}"><span class="group-main"><span>${avatar(p)}${esc(p.name)}</span>${w || a ? `<span class="group-sub">${[w && `⏳ ${w} waiting`, a && `🗣 ${a} to discuss`].filter(Boolean).join(' · ')}</span>` : ''}</span></a>`; }).join('')}</div>` : '<p class="empty small">People appear here when you delegate or add an agenda item.</p>'}
+    ${peopleHtml(people)}
     ${waitingTagKids.length ? `<p class="view-sub"><button class="btn small" data-gtd="people-from-tags">Make people from ${waitingTagKids.length} Waiting tag${waitingTagKids.length === 1 ? '' : 's'}</button> (${waitingTagKids.slice(0, 4).map((g) => esc(g.name)).join(', ')}${waitingTagKids.length > 4 ? '…' : ''})</p>` : ''}
     <p class="view-sub">Overdue follow-ups also show in Forecast → Today.</p>`;
+}
+
+// The People list. A person with nothing open (nothing waiting on them, nothing on their agenda) has an
+// Archive button on their row, and the heading offers to archive all of them at once. Archived people are
+// never deleted: "Show n archived" lists them, each with Restore.
+const idlePeople = () => livePeople().filter((p) => !waitingFor(p).length && !agendaFor(p).length);
+function peopleHtml(people) {
+  const idle = idlePeople();
+  const archived = (db.people || []).filter((p) => p.archived_at).sort((a, b) => a.name.localeCompare(b.name));
+  const row = (p) => {
+    const w = waitingFor(p).length; const a = agendaFor(p).length; const none = !w && !a;
+    return `<div class="group-row people-row"><a class="people-link" href="#person/${p.id}"><span>${avatar(p)}${esc(p.name)}</span>${none ? '' : `<span class="group-sub">${[w && `⏳ ${w} waiting`, a && `🗣 ${a} to discuss`].filter(Boolean).join(' · ')}</span>`}</a>${none ? `<button class="btn small quiet" data-gtd="archive-person" data-id="${p.id}" title="Nothing is open with them: take them off this page. They are kept, never deleted.">Archive</button>` : ''}</div>`;
+  };
+  return `<h2 class="section-title people-title"><span>People · ${people.length}</span>${idle.length > 1 ? `<button class="link-btn muted" data-gtd="archive-idle-people" title="Nothing is waiting on them and nothing is on their agenda">Archive the ${idle.length} with nothing open</button>` : ''}</h2>
+    ${people.length ? `<div class="group-list">${people.map(row).join('')}</div>` : '<p class="empty small">People appear here when you delegate or add an agenda item.</p>'}
+    ${archived.length ? `<p class="view-sub"><button class="link-btn muted" data-gtd="toggle-archived-people">${app.showArchivedPeople ? 'Hide' : 'Show'} ${archived.length} archived</button></p>${app.showArchivedPeople ? `<div class="group-list archived-people">${archived.map((p) => `<div class="group-row people-row muted"><a class="people-link" href="#person/${p.id}"><span>${avatar(p)}${esc(p.name)}</span><span class="group-sub">archived ${esc(fmtDate(p.archived_at))}</span></a><button class="btn small" data-gtd="restore-person" data-id="${p.id}">Restore</button></div>`).join('')}</div>` : ''}` : ''}`;
 }
 
 // A person's next calendar event (title mentions their name), in the next two weeks.
@@ -190,6 +205,10 @@ export async function gtdAction(el) {
     case 'take-back': if (t) takeBack(t); break;
     case 'new-person': openPersonEditor(null, { onDone: (p) => { location.hash = `#person/${p.id}`; } }); break;
     case 'edit-person': { const p = byId(db.people || [], el.dataset.id); if (p) openPersonEditor(p); break; }
+    case 'archive-person': { const p = byId(db.people || [], el.dataset.id); if (!p) break; await archivePeople([p], true); app.render(); toast(`Archived ${p.name} · nothing was open`, [{ label: 'Undo', run: async () => { await archivePeople([p], false); app.render(); } }]); break; }
+    case 'restore-person': { const p = byId(db.people || [], el.dataset.id); if (!p) break; await archivePeople([p], false); app.render(); toast(`Restored ${p.name}`); break; }
+    case 'archive-idle-people': { const list = idlePeople(); if (!list.length) break; await archivePeople(list, true); app.render(); toast(`Archived ${list.length} people with nothing open`, [{ label: 'Undo', run: async () => { await archivePeople(list, false); app.render(); } }]); break; }
+    case 'toggle-archived-people': app.showArchivedPeople = !app.showArchivedPeople; app.render(); break;
     case 'people-from-tags': { const n = await peopleFromWaitingTags(); app.render(); toast(`Added ${n} ${n === 1 ? 'person' : 'people'}`); break; }
     default:
   }

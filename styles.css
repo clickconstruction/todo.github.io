@@ -1915,3 +1915,11 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .db-notyet input[type=text] { flex: 1 1 260px; min-height: 40px; padding: 8px 12px; }
 .db-notyet input[type=date] { min-height: 36px; padding: 6px 10px; width: auto; }
 @media (max-width: 767px) { .db-row { flex-wrap: wrap; } .db-acts { flex: 1 1 100%; justify-content: flex-end; } }
+
+/* People on Waiting For: a row is a link with an Archive button beside it when nothing is open with them */
+.people-row { gap: 8px; }
+.people-row .people-link { flex: 1; min-width: 0; display: flex; flex-direction: column; text-decoration: none; color: inherit; }
+.people-row .btn.quiet { color: var(--muted); background: none; border-color: transparent; }
+.people-row .btn.quiet:hover, .people-row .btn.quiet:focus-visible { color: inherit; border-color: var(--line); }
+.people-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.people-title .link-btn { text-transform: none; letter-spacing: 0; font-size: 13px; }

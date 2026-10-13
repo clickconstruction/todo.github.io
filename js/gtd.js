@@ -32,6 +32,15 @@ export async function savePerson(p, fields) {
   (db.people = db.people || []).push(row);
   return row;
 }
+// Archive (or restore) people in one request. Archived people are kept, listed under "Show n archived"
+// on Waiting For, and come back with Restore; nobody is deleted.
+export async function archivePeople(list, archived = true) {
+  const ids = list.map((p) => p.id);
+  if (!ids.length) return [];
+  const rows = await run(sb.from('people').update({ archived_at: archived ? new Date().toISOString() : null }).in('id', ids).select());
+  rows.forEach((row) => { const p = (db.people || []).find((x) => x.id === row.id); if (p) syncRow('people', p, row); });
+  return rows;
+}
 // Find a person by name, or create one (e.g. typed in the Delegate sheet).
 export async function personNamed(name, extra = {}) {
   const n = String(name || '').trim();
