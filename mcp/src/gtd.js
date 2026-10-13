@@ -27,6 +27,36 @@ export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
     };
   };
   const followIso = (api, v) => (v === null ? null : zonedToIso(typeof v === 'number' ? plusDays(api, v) : v, 9, api.tz));
+  // Groups (what someone is to the user; one each) and projects (any number, with a role word). Groups are
+  // archived, never deleted; the database files an archived group's people under "no group".
+  const allGroups = (api) => api.q(`people_groups?${api.u}&order=sort.asc,name.asc&select=*`);
+  const groupIdFor = async (api, ref) => {
+    const all = await allGroups(api);
+    const named = (x) => x.name.toLowerCase() === String(ref).trim().toLowerCase();
+    const g = all.find((x) => x.id === ref) || all.find((x) => !x.archived_at && named(x)) || all.find(named);
+    if (g) { if (g.archived_at) throw new Error(`Group "${g.name}" is archived; restore it with people_groups first`); return g.id; }
+    const name = String(ref).trim().slice(0, 60);
+    if (!name) return null;
+    const sort = Math.max(-1, ...all.map((x) => x.sort || 0)) + 1;
+    const [row] = await api.q('people_groups', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name, sort } });
+    return row.id;
+  };
+  // A person's group and projects, for output.
+  const ties = async (api) => {
+    const [groups, links, { projects }] = await Promise.all([api.q(`people_groups?${api.u}&select=id,name,archived_at`), api.q(`project_people?${api.u}&select=*`), api.lookups()]);
+    return (p) => { const g = p.group_id && groups.find((x) => x.id === p.group_id); return { group: g ? g.name : null, group_id: p.group_id || null, projects: links.filter((l) => l.person_id === p.id).map((l) => { const pr = projects.find((x) => x.id === l.project_id); return pr ? { id: pr.id, name: pr.name, role: l.role || undefined } : null; }).filter(Boolean) }; };
+  };
+  // Replaces the projects a person is on: each a project name or id, or { project, role }.
+  const setPersonProjects = async (api, personId, list) => {
+    const want = [];
+    for (const e of list) { const ref = typeof e === 'string' ? e : e && e.project; if (!ref) continue; const id = await api.resolveProject(ref); if (!want.some((w) => w.project_id === id)) want.push({ project_id: id, role: String((e && e.role) || '').trim().slice(0, 40) }); }
+    const have = await api.q(`project_people?${api.u}&person_id=eq.${personId}&select=*`);
+    const gone = have.filter((l) => !want.some((w) => w.project_id === l.project_id)).map((l) => l.id);
+    if (gone.length) await api.q(`project_people?${api.u}&id=in.(${gone.join(',')})`, { method: 'DELETE' });
+    const add = want.filter((w) => !have.some((l) => l.project_id === w.project_id));
+    if (add.length) await api.q('project_people', { method: 'POST', body: add.map((w) => ({ user_id: api.userId, person_id: personId, ...w })) });
+    for (const w of want) { const l = have.find((x) => x.project_id === w.project_id); if (l && (l.role || '') !== w.role) await api.q(`project_people?${api.u}&id=eq.${l.id}`, { method: 'PATCH', body: { role: w.role } }); }
+  };
 
   return [
     {
@@ -160,24 +190,34 @@ export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
     },
     {
       name: 'list_people',
-      description: 'People the user delegates to or meets with, with how many items are waiting on them and on their agenda.',
-      inputSchema: { type: 'object', properties: { include_archived: { type: 'boolean' } } },
+      description: 'People the user delegates to or meets with, with how many items are waiting on them and on their agenda, their group (what they are to the user) and the projects they are on (with a role). arrange: group nests them by group (a last set with group null), project by the projects they are on (plus not_on_a_project).',
+      inputSchema: { type: 'object', properties: { include_archived: { type: 'boolean' }, arrange: { type: 'string', enum: ['group', 'project'] } } },
       async run(api, a) {
         const people = await api.q(`people?${api.u}${a.include_archived ? '' : '&archived_at=is.null'}&order=name.asc&select=*`);
-        const { isWaiting, personFor } = await api.waitingRule();
-        const open = await api.q(`tasks?${api.u}&${OPEN}&select=*`);
-        return { people: people.map((p) => personOut(p, { waiting: open.filter((t) => !t.agenda_for && isWaiting(t) && (personFor(t) || {}).id === p.id).length, agenda: open.filter((t) => t.agenda_for === p.id).length })) };
+        const [{ isWaiting, personFor }, open, tie] = await Promise.all([api.waitingRule(), api.q(`tasks?${api.u}&${OPEN}&select=*`), ties(api)]);
+        const out = people.map((p) => personOut(p, { ...tie(p), waiting: open.filter((t) => !t.agenda_for && isWaiting(t) && (personFor(t) || {}).id === p.id).length, agenda: open.filter((t) => t.agenda_for === p.id).length }));
+        if (a.arrange === 'group') {
+          const groups = (await allGroups(api)).filter((g) => !g.archived_at);
+          return { groups: [...groups.map((g) => ({ group: g.name, id: g.id, people: out.filter((p) => p.group_id === g.id) })), { group: null, people: out.filter((p) => !p.group_id) }] };
+        }
+        if (a.arrange === 'project') {
+          const { projects } = await api.lookups();
+          const used = projects.filter((pr) => out.some((p) => p.projects.some((x) => x.id === pr.id))).sort((x, y) => x.name.localeCompare(y.name));
+          return { projects: used.map((pr) => ({ project: pr.name, id: pr.id, people: out.filter((p) => p.projects.some((x) => x.id === pr.id)).map((p) => ({ ...p, role: (p.projects.find((x) => x.id === pr.id) || {}).role })) })), not_on_a_project: out.filter((p) => !p.projects.length) };
+        }
+        return { people: out };
       },
     },
     {
       name: 'save_person',
-      description: 'Add or edit a person (name, email, phone, notes, tag). A new person gets their own tag, "Waiting : Name" (made if needed), so items with it count as waiting on them; it follows a rename. tag links a different tag instead (made if it does not exist); null for none. archived: true archives (never deleted).',
-      inputSchema: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, email: { type: ['string', 'null'] }, phone: { type: ['string', 'null'] }, notes: { type: 'string' }, tag: { type: ['string', 'null'] }, archived: { type: 'boolean' } } },
+      description: 'Add or edit a person (name, email, phone, notes, tag, group, projects). A new person gets their own tag, "Waiting : Name" (made if needed), so items with it count as waiting on them; it follows a rename. tag links a different tag instead (made if it does not exist); null for none. group: what they are to the user (Crew, Suppliers, Family; a name or id, made if new; one group each; null for none). projects: replaces the projects they are on, each a project name or id or {project, role}. archived: true archives (never deleted).',
+      inputSchema: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, email: { type: ['string', 'null'] }, phone: { type: ['string', 'null'] }, notes: { type: 'string' }, tag: { type: ['string', 'null'] }, group: { type: ['string', 'null'] }, projects: { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'object', properties: { project: { type: 'string' }, role: { type: 'string' } }, required: ['project'] }] } }, archived: { type: 'boolean' } } },
       async run(api, a) {
         const body = {};
         if (a.name !== undefined) body.name = String(a.name).trim();
         ['email', 'phone', 'notes'].forEach((k) => { if (a[k] !== undefined) body[k] = a[k] === null ? null : String(a[k]).trim(); });
         if (a.archived !== undefined) body.archived_at = a.archived ? new Date().toISOString() : null;
+        if (a.group !== undefined) body.group_id = a.group === null ? null : await groupIdFor(api, a.group);
         if (a.tag !== undefined) {
           if (a.tag === null) body.tag_id = null;
           else { const { tags, tagLabel } = await api.lookups(); const g = tags.find((x) => x.id === a.tag || tagLabel(x).toLowerCase() === String(a.tag).toLowerCase()); body.tag_id = g ? g.id : await api.ensureTag(String(a.tag)); }
@@ -185,13 +225,48 @@ export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
         if (a.id) {
           const p = await api.resolvePerson(a.id, { archived: true });
           if (body.name && a.tag === undefined) await api.renamePersonTag(p, body.name); // their own tag follows the name
-          const [row] = await api.q(`people?${api.u}&id=eq.${p.id}`, { method: 'PATCH', prefer: 'return=representation', body });
-          return personOut(row);
+          const [row] = Object.keys(body).length ? await api.q(`people?${api.u}&id=eq.${p.id}`, { method: 'PATCH', prefer: 'return=representation', body }) : [p];
+          if (Array.isArray(a.projects)) await setPersonProjects(api, row.id, a.projects);
+          return personOut(row, (await ties(api))(row));
         }
         if (!body.name) throw new Error('name is required');
         if (a.tag === undefined) body.tag_id = await api.waitingTagFor(body.name); // their own tag, made if needed
         const [row] = await api.q('people', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, ...body } });
-        return personOut(row);
+        if (Array.isArray(a.projects)) await setPersonProjects(api, row.id, a.projects);
+        return personOut(row, (await ties(api))(row));
+      },
+    },
+    {
+      name: 'people_groups',
+      description: 'People groups on Waiting For: what someone is to the user (Crew, Suppliers, Family); one group per person, set with save_person group. list (default) shows them in order with member counts; save makes one (name) or renames (id + name) and can place it (position, 1-based); archive keeps it but files its people under no group; restore brings it back (its people are not put back). Never deleted.',
+      inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['list', 'save', 'archive', 'restore'] }, id: { type: 'string' }, name: { type: 'string' }, position: { type: 'integer' }, include_archived: { type: 'boolean' } } },
+      async run(api, a = {}) {
+        const out = (g, people) => ({ id: g.id, name: g.name, people: people ? people.filter((p) => p.group_id === g.id && !p.archived_at).length : undefined, archived: !!g.archived_at || undefined });
+        const action = a.action || 'list';
+        if (action === 'list') {
+          const [all, people] = await Promise.all([allGroups(api), api.q(`people?${api.u}&select=id,group_id,archived_at`)]);
+          return { groups: all.filter((g) => !g.archived_at).map((g, i) => ({ ...out(g, people), position: i + 1 })), archived: a.include_archived ? all.filter((g) => g.archived_at).map((g) => out(g)) : undefined };
+        }
+        const find = async (ref) => { const all = await allGroups(api); const g = all.find((x) => x.id === ref) || all.find((x) => x.name.toLowerCase() === String(ref || '').trim().toLowerCase()); if (!g) throw new Error(`No group "${ref}"`); return g; };
+        if (action === 'archive' || action === 'restore') {
+          const g = await find(a.id || a.name);
+          const [row] = await api.q(`people_groups?${api.u}&id=eq.${g.id}`, { method: 'PATCH', prefer: 'return=representation', body: { archived_at: action === 'archive' ? new Date().toISOString() : null } });
+          return { group: out(row), note: action === 'archive' ? 'Kept, not deleted; its people are now under no group.' : undefined };
+        }
+        const name = a.name !== undefined ? String(a.name).trim().slice(0, 60) : undefined;
+        let g = a.id ? await find(a.id) : null;
+        if (!g && name) g = (await allGroups(api)).find((x) => !x.archived_at && x.name.toLowerCase() === name.toLowerCase()) || null;
+        if (!g) {
+          if (!name) throw new Error('name is required');
+          const all = await allGroups(api); const sort = Math.max(-1, ...all.map((x) => x.sort || 0)) + 1;
+          [g] = await api.q('people_groups', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, name, sort } });
+        } else if (name && name !== g.name) [g] = await api.q(`people_groups?${api.u}&id=eq.${g.id}`, { method: 'PATCH', prefer: 'return=representation', body: { name } });
+        if (a.position) {
+          const live = (await allGroups(api)).filter((x) => !x.archived_at && x.id !== g.id);
+          live.splice(Math.max(0, Math.min(live.length, a.position - 1)), 0, g);
+          for (let i = 0; i < live.length; i++) if (live[i].sort !== i) await api.q(`people_groups?${api.u}&id=eq.${live[i].id}`, { method: 'PATCH', body: { sort: i } });
+        }
+        return { group: out(g) };
       },
     },
     {

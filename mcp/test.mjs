@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 const TOKEN = 'tt_' + 'a'.repeat(32);
 const HASH = createHash('sha256').update(TOKEN).digest('hex');
 const UID = '11111111-1111-1111-1111-111111111111';
-const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [], slipbox_notes: [], task_waits: [], events: [], daily_ticks: [], tree_links: [] };
+const db = { tasks: [], tags: [], task_tags: [], projects: [], folders: [], api_tokens: [{ id: 't1', user_id: UID, token_hash: HASH, scope: 'full' }], email_senders: [{ id: 'e1', user_id: UID, email: 'robert@douglasmining.com' }], project_tags: [], places: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], perspectives: [], imports: [], project_templates: [], user_settings: [], calendars: [], people: [], people_groups: [], project_people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], review_sessions: [], review_items: [], slipbox_notes: [], task_waits: [], events: [], daily_ticks: [], tree_links: [] };
 let n = 0; const id = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 // Tiny PostgREST imitation: eq/is/in filters, POST/PATCH/DELETE.
 const pushed = []; // requests to push services
@@ -207,6 +207,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (m === 'POST' && Array.isArray(body) && body.some((b) => Object.keys(b).sort().join() !== Object.keys(body[0]).sort().join())) return res({ code: 'PGRST102', message: 'All object keys must match' }, 400); // as PostgREST does
   if (m === 'POST') { const add = (Array.isArray(body) ? body : [body]).map(b => ({ id: id(), in_inbox: true, flagged: false, notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), parent_id: null, project_id: null, completed_at: null, dropped_at: null, due_at: null, defer_at: null, status: 'active', place_id: null, location_trigger: null, location_radius_m: null, ...(table === 'places' ? { radius_m: 402, archived_at: null, address: '', notes: '' } : {}), ...(table === 'checklists' ? { complete_action: true, archived_at: null } : {}), ...(table === 'review_items' ? { status: 'pending', note: '', changed: {}, priority: false } : {}), ...(table === 'checklist_runs' ? { started_at: new Date().toISOString(), finished_at: null } : {}), ...(table === 'daily_ticks' ? { state: 'done' } : {}), ...(table === 'tree_links' ? { state: 'accepted', proposed_by: 'user', archived_at: null } : {}), ...(table === 'goals' ? { kind: 'goal', status: 'active' } : {}), ...b })); if (table === 'tasks') add.forEach((r) => dailyGuard(r)); rows.push(...add); return init.headers.Prefer ? res(add, 201) : res(null, 201); }
   if (m === 'PATCH') { const hit = rows.filter((r) => match(r) && orMatch(r)); hit.forEach(r => Object.assign(r, body, 'updated_at' in r ? { updated_at: new Date().toISOString() } : {})); if (table === 'user_settings') hit.forEach((r) => ['purpose', 'vision'].forEach((k) => { if (body[`${k}_read_at`]) r[k] = String(r[k] || '').replace(/^([ \t]*(?:[-*][ \t]+)?)\[[xX]\]/gm, '$1[ ]'); })); // mirror of user_settings_read_clears
+  if (table === 'people_groups') hit.forEach((g) => { if (g.archived_at) db.people.forEach((p) => { if (p.group_id === g.id) p.group_id = null; }); }); // people_groups_archive
   if (table === 'tasks') hit.forEach((r) => { if (!r.waiting_on) r.follow_up_at = null; dailyGuard(r, r.__was); delete r.__was; }); return init.headers.Prefer ? res(hit) : res(null, 204); }
   if (m === 'DELETE') { db[table] = rows.filter(r => !match(r)); return res(null, 204); }
 };
@@ -230,7 +231,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 80 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 80 tools, no internals leaked');
+assert(list.body.result.tools.length === 81 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 81 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -891,6 +892,30 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(lp.people.find((p) => p.name === 'Jodi Park').agenda === 1 && lp.people.find((p) => p.name === 'Jodi Park').waiting === 1, 'list_people with counts');
   const arch = await tool('save_person', { id: hiro.id, archived: true });
   assert(arch.archived && db.people.some((p) => p.id === hiro.id), 'people are archived, not deleted');
+  // Groups (what someone is to the user) and projects (what they're working on together).
+  const crewG = await tool('people_groups', { action: 'save', name: 'Crew' });
+  assert(crewG.group && crewG.group.name === 'Crew' && db.people_groups.length === 1, 'people_groups save makes a group');
+  await tool('create_project', { name: 'Crew Shed' });
+  const sven = await tool('save_person', { name: 'Sven', group: 'crew', projects: [{ project: 'Crew Shed', role: 'crew' }] });
+  assert(sven.group === 'Crew' && sven.projects.length === 1 && sven.projects[0].role === 'crew' && db.project_people.length === 1, 'save_person files them in a group (by name, any case) and puts them on a project with a role');
+  const sven2 = await tool('save_person', { id: sven.id, group: 'Suppliers' });
+  assert(sven2.group === 'Suppliers' && db.people_groups.length === 2, 'an unknown group name is made');
+  const byG = await tool('list_people', { arrange: 'group' });
+  assert(byG.groups.find((g) => g.group === 'Suppliers').people.some((p) => p.name === 'Sven') && byG.groups[byG.groups.length - 1].group === null, 'list_people arranged by group, the no-group set last');
+  const byP = await tool('list_people', { arrange: 'project' });
+  assert(byP.projects.find((x) => x.project === 'Crew Shed').people.some((p) => p.name === 'Sven' && p.role === 'crew'), 'list_people arranged by project, with roles');
+  const cpId = db.projects.find((p) => p.name === 'Crew Shed').id;
+  await tool('update_project', { project: 'Crew Shed', people: ['Sven', { person: 'Jodi Park', role: 'customer' }] });
+  assert(db.project_people.filter((l) => l.project_id === cpId).length === 2 && db.project_people.some((l) => l.project_id === cpId && l.role === 'customer'), 'update_project people replaces who is on it');
+  await tool('update_project', { project: 'Crew Shed', people: [] });
+  assert(db.project_people.filter((l) => l.project_id === cpId).length === 0, 'project links can be removed');
+  const supG = db.people_groups.find((g) => g.name === 'Suppliers');
+  const archG = await tool('people_groups', { action: 'archive', id: supG.id });
+  assert(archG.group.archived && db.people_groups.length === 2 && db.people.find((p) => p.id === sven.id).group_id === null, 'archiving a group keeps it and files its people under no group');
+  const lg = await tool('people_groups', { include_archived: true });
+  assert(lg.groups.length === 1 && lg.groups[0].position === 1 && lg.archived.length === 1, 'people_groups list: live ones in order, archived apart');
+  let refused = null; try { await tool('save_person', { id: sven.id, group: 'Suppliers' }); } catch (e) { refused = e; }
+  assert(refused, 'an archived group is refused until restored');
   // Tickler.
   const tk = await tool('tickle', { title: 'Reconsider the gym membership', date: '2099-01-15' });
   assert(tk.item.tickler === 'back in the Inbox on 2099-01-15' && tk.item.in_inbox, 'tickle a new reminder');

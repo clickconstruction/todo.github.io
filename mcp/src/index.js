@@ -529,6 +529,18 @@ class Api {
     return this.reads.get(path).then((rows) => (Array.isArray(rows) ? rows.slice() : rows));
   }
 
+  // Who is on a project: replaces the set. Each entry a person name or id (made if unknown), or { person, role }.
+  async setProjectPeople(projectId, list) {
+    const want = [];
+    for (const e of list) { const ref = typeof e === 'string' ? e : e && e.person; if (!ref) continue; const p = await this.resolvePerson(ref, { create: true }); if (!want.some((w) => w.person_id === p.id)) want.push({ person_id: p.id, role: String((e && e.role) || '').trim().slice(0, 40) }); }
+    const have = await this.q(`project_people?${this.u}&project_id=eq.${projectId}&select=*`);
+    const gone = have.filter((l) => !want.some((w) => w.person_id === l.person_id)).map((l) => l.id);
+    if (gone.length) await this.q(`project_people?${this.u}&id=in.(${gone.join(',')})`, { method: 'DELETE' });
+    const add = want.filter((w) => !have.some((l) => l.person_id === w.person_id));
+    if (add.length) await this.q('project_people', { method: 'POST', body: add.map((w) => ({ user_id: this.userId, project_id: projectId, ...w })) });
+    for (const w of want) { const l = have.find((x) => x.person_id === w.person_id); if (l && (l.role || '') !== w.role) await this.q(`project_people?${this.u}&id=eq.${l.id}`, { method: 'PATCH', body: { role: w.role } }); }
+  }
+
   async lookups() {
     const [projects, tags, people] = await Promise.all([
       this.q(`projects?${this.u}&select=id,name,status,folder_id`),
@@ -1992,6 +2004,7 @@ const TOOLS = [
         complete_with_last: { type: 'boolean' },
         flagged: { type: 'boolean', description: 'Flagged projects put all their actions in the Flagged list' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Replaces the project tags; its actions inherit them' },
+        people: { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'object', properties: { person: { type: 'string' }, role: { type: 'string' } }, required: ['person'] }] }, description: 'Replaces who is on the project: each a person name or id, or {person, role} (a role word such as customer, crew). Made if unknown. list_people shows the projects a person is on' },
         review_every_days: { type: 'integer', description: 'Review interval in days (older form; prefer review_every + review_unit)' },
         defer: { type: ['string', 'null'], description: 'YYYY-MM-DD: the project and its actions are hidden until then; null to clear' },
         planned: { type: ['string', 'null'], description: 'YYYY-MM-DD when the user intends to work on it; null to clear' },
@@ -2025,6 +2038,7 @@ const TOOLS = [
     },
     async run(api, a) {
       const id = await api.resolveProject(a.project);
+      if (Array.isArray(a.people)) await api.setProjectPeople(id, a.people);
       const patch = {};
       if (a.name !== undefined) patch.name = String(a.name).trim();
       if (a.folder !== undefined) patch.folder_id = await api.resolveFolder(a.folder);
