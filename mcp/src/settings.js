@@ -4,7 +4,7 @@ import { TRIGGERS } from '../../js/weekly.js';
 
 // As js/sidebar.js (GROUPS, FIXED): the views in each sidebar group, and the two that can't be hidden.
 const SIDEBAR = {
-  do: ['forecast', 'now', 'matrix', 'flagged', 'nearby'],
+  do: ['six', 'forecast', 'now', 'matrix', 'flagged', 'nearby'],
   organize: ['projects', 'tags', 'perspectives', 'checklists'],
   lists: ['waiting', 'someday', 'tickler', 'events', 'reference', 'reading', 'slipbox'],
   reflect: ['full', 'daily', 'weekly', 'horizons'],
@@ -12,7 +12,7 @@ const SIDEBAR = {
 const FIXED = ['forecast', 'projects'];
 const VIEWS = Object.values(SIDEBAR).flat();
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const TIMES = { due_time: 'due_minutes', planned_time: 'planned_minutes', defer_time: 'defer_minutes', review_time: 'review_minutes', daily_time: 'daily_minutes' };
+const TIMES = { due_time: 'due_minutes', planned_time: 'planned_minutes', defer_time: 'defer_minutes', review_time: 'review_minutes', daily_time: 'daily_minutes', six_evening_time: 'six_evening_minutes' };
 const FLAGS = ['review_notify', 'daily_notify', 'daily_weekdays_only'];
 const RANGES = { waiting_followup_days: [1, 60], matrix_urgent_days: [1, 60] };
 
@@ -34,7 +34,7 @@ export function settingsTools() {
     due_time: hhmm(s.due_minutes ?? 1020), planned_time: hhmm(s.planned_minutes ?? 540), defer_time: hhmm(s.defer_minutes ?? 0),
     today_tag: tagName || null, distance_from: placeName || null,
     review_day: DAYS[s.review_day ?? 5], review_time: hhmm(s.review_minutes ?? 900), review_notify: s.review_notify ?? true,
-    daily_notify: s.daily_notify ?? false, daily_time: hhmm(s.daily_minutes ?? 420), daily_weekdays_only: s.daily_weekdays_only ?? true,
+    daily_notify: s.daily_notify ?? false, daily_time: hhmm(s.daily_minutes ?? 420), daily_weekdays_only: s.daily_weekdays_only ?? true, six_evening_time: hhmm(s.six_evening_minutes ?? 960),
     waiting_followup_days: s.waiting_followup_days ?? 7, matrix_urgent_days: s.matrix_urgent_days ?? 7,
     todo_folder: s.todo_folder || null, folder_shortcut: s.folder_shortcut || 'Open in Finder',
     sidebar: { hidden: (s.sidebar && s.sidebar.hidden) || [], order: (s.sidebar && s.sidebar.order) || {} },
@@ -45,7 +45,7 @@ export function settingsTools() {
     name: 'settings',
     description: `The user's account settings, as on the app's Settings page. Change one only when they ask.
 actions: get · set {any of the fields below} · sidebar {hide?, show?, order? ({group: [views, first to last]}), reset?} · sweep_prompt {add: {group: Work|Personal, prompt}} or {hide: a prompt's text} or {remove: id of one of theirs} or {restore_hidden: true}
-set fields: due_time, planned_time, defer_time ("HH:MM", the time of day a plain date lands at) · today_tag (a tag whose actions always show in Today; null for none) · distance_from (the saved place distances are measured from; null for none) · review_day (Sunday…Saturday), review_time, review_notify (the Weekly Review reminder) · daily_notify, daily_time, daily_weekdays_only (the morning reminder) · waiting_followup_days, matrix_urgent_days (1 to 60) · todo_folder (the folder on their Mac that holds actions' files), folder_shortcut (the Shortcut that opens one).
+set fields: due_time, planned_time, defer_time ("HH:MM", the time of day a plain date lands at) · today_tag (a tag whose actions always show in Today; null for none) · distance_from (the saved place distances are measured from; null for none) · review_day (Sunday…Saturday), review_time, review_notify (the Weekly Review reminder) · daily_notify, daily_time, daily_weekdays_only (the morning reminder) · six_evening_time (from this time Six opens on tomorrow's list) · waiting_followup_days, matrix_urgent_days (1 to 60) · todo_folder (the folder on their Mac that holds actions' files), folder_shortcut (the Shortcut that opens one).
 Sidebar views: ${Object.entries(SIDEBAR).map(([g, v]) => `${g}: ${v.join(', ')}`).join(' · ')} (${FIXED.join(' and ')} can't be hidden).
 The time zone follows their device. API tokens, approved email senders and each device's notifications are set in the app.`,
     inputSchema: { type: 'object', properties: {
@@ -53,7 +53,7 @@ The time zone follows their device. API tokens, approved email senders and each 
       due_time: { type: 'string' }, planned_time: { type: 'string' }, defer_time: { type: 'string' },
       today_tag: { type: ['string', 'null'], description: 'Tag name or id' }, distance_from: { type: ['string', 'null'], description: 'Saved place name or id' },
       review_day: { type: 'string', enum: DAYS }, review_time: { type: 'string' }, review_notify: { type: 'boolean' },
-      daily_notify: { type: 'boolean' }, daily_time: { type: 'string' }, daily_weekdays_only: { type: 'boolean' },
+      daily_notify: { type: 'boolean' }, daily_time: { type: 'string' }, daily_weekdays_only: { type: 'boolean' }, six_evening_time: { type: 'string' },
       waiting_followup_days: { type: 'integer' }, matrix_urgent_days: { type: 'integer' },
       todo_folder: { type: ['string', 'null'] }, folder_shortcut: { type: ['string', 'null'] },
       hide: { type: ['array', 'string'], items: { type: 'string' }, description: 'sidebar: views to hide; sweep_prompt: the text of the prompt to hide' },

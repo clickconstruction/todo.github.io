@@ -270,6 +270,7 @@ function reviewSection() {
       <label class="set-row"><span class="set-text"><b>Notification</b><span class="hint">a push to your devices at that time, unless you’ve already reviewed</span></span><input type="checkbox" data-setting-review-notify ${st.review_notify ? 'checked' : ''}></label>
       <label class="set-row"><span class="set-text"><b>Morning reminder</b><span class="hint">“☀️ Start your day”, skipped once you have</span></span><input type="checkbox" data-setting-daily-notify ${st.daily_notify ? 'checked' : ''}></label>
       <label class="set-row"><span class="set-text"><b>At</b><span class="hint">${st.daily_weekdays_only ? 'Monday to Friday' : 'every day'} · <button type="button" class="link-btn" data-setting-daily-days>${st.daily_weekdays_only ? 'every day' : 'weekdays only'}</button></span></span><input type="time" step="900" data-setting-time="daily_minutes" value="${minutesToInput(st.daily_minutes)}"></label>
+      <label class="set-row"><span class="set-text"><b>Six: plan tomorrow from</b><span class="hint">from this time Six opens on tomorrow’s list, with what’s left of today at the top</span></span><input type="time" step="900" data-setting-time="six_evening_minutes" value="${minutesToInput(st.six_evening_minutes ?? 960)}"></label>
       <p class="hint">Mind sweep prompts: ${hidden ? `${hidden} hidden · ` : ''}${custom ? `${custom} of your own · ` : ''}<a href="#sweep">open the mind sweep</a> to add or change them.</p>
     </div>`;
 }

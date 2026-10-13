@@ -6,7 +6,7 @@ import { db, app, $, esc, openSheet, run, sb, syncRow, toast } from './state.js'
 import { saveSettings } from './prefs.js';
 
 export const GROUPS = [
-  ['do', 'Do', [['forecast', '📅', 'Forecast'], ['now', '▶️', 'What now?'], ['matrix', '🔲', 'Matrix'], ['flagged', '🚩', 'Flagged'], ['nearby', '📍', 'Nearby']]],
+  ['do', 'Do', [['six', '6️⃣', 'Six'], ['forecast', '📅', 'Forecast'], ['now', '▶️', 'What now?'], ['matrix', '🔲', 'Matrix'], ['flagged', '🚩', 'Flagged'], ['nearby', '📍', 'Nearby']]],
   ['organize', 'Organize', [['projects', '🗂️', 'Projects'], ['tags', '🏷️', 'Tags'], ['perspectives', '🔭', 'Perspectives'], ['checklists', '☑️', 'Checklists']]],
   ['lists', 'Lists', [['waiting', '⏳', 'Waiting For'], ['someday', '💭', 'Someday/Maybe'], ['tickler', '📆', 'Tickler'], ['events', '🗓️', 'Events'], ['reference', '🗄️', 'Reference'], ['reading', '📚', 'Reading & watching'], ['slipbox', '🗃️', 'Slipbox']]],
   ['reflect', 'Reflect', [['full', '🃏', 'Full Review'], ['daily', '☀️', 'Daily review'], ['weekly', '🧭', 'Weekly Review'], ['horizons', '🏔️', 'Horizons']]],

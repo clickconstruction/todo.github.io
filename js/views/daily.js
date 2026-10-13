@@ -1,5 +1,5 @@
 // Daily review. Morning, "Start your day": the calendar first (hard landscape), then must-dos, then up
-// to 3 things for today (planned today; "Fit in" makes a time block). Evening, "Shut down": capture,
+// to 6 things for today (the same list as Six) (planned today; "Fit in" makes a time block). Evening, "Shut down": capture,
 // carry over what didn't happen, a glance at tomorrow. One row per day (daily_reviews).
 import { mustLeft, summary } from '../dailies.js';
 import { db, app, sb, run, syncRow, esc, byId, isOpen, toast } from '../state.js';
@@ -14,7 +14,7 @@ import { openSchedule, slotsFor } from '../editors/schedule.js';
 import { splitGain } from '../gain.js';
 import { capture } from '../data.js';
 
-export const MAX_FOCUS = 3;
+export const MAX_FOCUS = 6; // the same list as Six (js/views/six.js)
 const todayKey = () => dayKey(startOfToday());
 export const rowFor = (key = todayKey()) => (db.dailyReviews || []).find((r) => r.day === key) || null;
 async function ensureRow() {
@@ -99,8 +99,8 @@ export function viewDaily(mode) {
     ${m.follow.map((t) => { const p = waitingPerson(t); return `<div class="dv-row" data-task="${t.id}"><span class="dv-x">${esc(t.title)}${p ? ` · ${esc(p.name)}` : ''}</span><span class="chip">follow up</span>${p && (p.email || p.phone) ? `<button class="btn small" data-daily="nudge" data-id="${t.id}">Nudge</button>` : ''}</div>`; }).join('')}
     ${m.tickled.map((t) => `<div class="dv-row" data-task="${t.id}"><span class="dv-x">📆 ${esc(t.title)}</span><span class="chip">from the tickler</span></div>`).join('')}
     ${m.inbox ? `<p class="hint">📥 ${m.inbox} in the Inbox · <a href="#clarify">Process</a></p>` : ''}
-    <h2 class="section-title dv-sec">Today’s focus <span class="hint">${focus.length} of ${MAX_FOCUS}</span></h2>
-    ${focus.map((id) => focusRow(byId(db.tasks, id))).join('') || '<p class="hint">Pick up to three things that would make today a good day.</p>'}
+    <h2 class="section-title dv-sec">Today’s focus <span class="hint">${focus.length} of ${MAX_FOCUS} · <a href="#six">Six</a></span></h2>
+    ${focus.map((id) => focusRow(byId(db.tasks, id))).join('') || '<p class="hint">Pick up to six things that would make today a good day, in order.</p>'}
     ${sugs.length ? `<p class="hint dv-sug">Suggested by What now?</p>${sugs.map(({ t, reasons }) => `<div class="dv-pick" data-task="${t.id}"><button class="dv-box" data-daily="focus" data-id="${t.id}" aria-label="Add to today">＋</button>
       <span class="dv-x">${esc(t.title)}<span class="dv-why">${reasonChips(reasons)}${t.estimate_minutes ? `<span class="chip">${t.estimate_minutes} min</span>` : ''}</span></span></div>`).join('')}` : ''}
     ${r && r.started_at ? '' : '<div class="wk-finish"><button class="btn primary" data-daily="start">Start the day</button></div>'}
@@ -121,7 +121,7 @@ function shutdownHtml() {
     <form class="capture" data-daily-capture><input type="text" name="title" placeholder="Capture it before you stop…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
     <h2 class="section-title dv-sec">Today’s focus <span class="hint">${focus.length ? `${done} of ${focus.length} done` : 'none picked'}</span></h2>
     ${focus.map((t) => (t.completed_at || t.dropped_at ? `<div class="dv-row"><span class="ok">✓</span><span class="dv-x done">${esc(t.title)}</span></div>`
-      : `<div class="dv-row" data-task="${t.id}"><span>○</span><span class="dv-x">${esc(t.title)}</span><span class="dv-carry"><button class="btn small primary" data-daily="tomorrow" data-id="${t.id}">Tomorrow</button><button class="btn small" data-daily="nextweek" data-id="${t.id}">Next week</button><button class="btn small" data-daily="drop" data-id="${t.id}">Drop</button></span></div>`)).join('') || '<p class="hint">Tomorrow morning, pick up to three.</p>'}
+      : `<div class="dv-row" data-task="${t.id}"><span>○</span><span class="dv-x">${esc(t.title)}</span><span class="dv-carry"><button class="btn small primary" data-daily="tomorrow" data-id="${t.id}">Tomorrow</button><button class="btn small" data-daily="nextweek" data-id="${t.id}">Next week</button><button class="btn small" data-daily="drop" data-id="${t.id}">Drop</button></span></div>`)).join('') || '<p class="hint">Tomorrow morning, pick up to six.</p>'}
     <h2 class="section-title dv-sec">Tomorrow <span class="hint">${esc(new Date(`${tmr}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long' }))}${dueTmr.length ? ` · ${dueTmr.length} due` : ''}</span></h2>
     <div class="dv-day">${day.html}</div>
     ${dueTmr.map((t) => `<div class="dv-row" data-task="${t.id}"><span class="dv-x">${esc(t.title)}</span><span class="chip red">due ${esc(fmtDate(t.due_at))}</span></div>`).join('')}

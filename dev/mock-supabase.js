@@ -291,7 +291,7 @@
     events: () => ({ notes: '', location: '', url: '', all_day: false, project_id: null, place_id: null, task_id: null, lat: null, lng: null, drive_minutes: null, drive_from: null, source: 'app', archived_at: null }),
     calendars: () => ({ color: '#1D9E75', enabled: true, sort: 0, last_ok_at: null, last_error: null, event_count: null, archived_at: null }),
     user_settings: () => ({ due_minutes: 1020, defer_minutes: 0, planned_minutes: 540, forecast_tag_id: null, distance_place_id: null, timezone: null, review_day: 5, review_minutes: 900, review_notify: true, review_notified_at: null, trigger_hidden: [], trigger_custom: [], purpose: '', purpose_read_at: null, vision: '', vision_year: null, vision_read_at: null, waiting_followup_days: 7, daily_notify: false, daily_minutes: 420, daily_weekdays_only: true, daily_notified_at: null, horizons_quarter_at: null, horizons_year_at: null, horizons_month_at: null, sidebar: {}, matrix_urgent_days: 7, todo_folder: null, folder_shortcut: 'Open in Finder' }),
-    daily_reviews: () => ({ started_at: null, shutdown_at: null, focus: [] }),
+    daily_reviews: () => ({ started_at: null, shutdown_at: null, focus: [], carried: [], carried_at: null }),
     slipbox_notes: () => ({ body: '', source: '', source_url: null, kind: 'fleeting', from_task_id: null, reading_task_id: null, processed_at: null, archived_at: null }),
     review_sessions: () => ({ title: 'Full Review', scope: {}, current_item: null, status: 'active', agent_seen_at: null, agent_status: '', finished_at: null }),
     review_items: () => ({ task_id: null, grp: null, priority: false, status: 'pending', decision: null, decided_by: null, note: '', changed: {}, before: [], reviewed_at: null, suggestion: null }),
@@ -623,6 +623,24 @@
           tables.slipbox_notes.push(n);
           t.dropped_at = t.dropped_at || now();
           return { data: n.id, error: null };
+        }
+        // Mirrors six_carry() / six_uncarry() (migration 20261112000001): yesterday's open leftovers to the top of a day, once.
+        if (name === 'six_carry' || name === 'six_uncarry') {
+          const day = args.p_day;
+          let r = tables.daily_reviews.find((x) => x.day === day && x.user_id === uid);
+          if (name === 'six_carry') {
+            if (!r) { r = { ...DEFAULTS.daily_reviews(), id: id(), user_id: uid, day, created_at: now(), updated_at: now() }; tables.daily_reviews.push(r); }
+            if (!r.carried_at) {
+              const prev = tables.daily_reviews.filter((x) => x.user_id === uid && x.day < day).sort((a, b) => b.day.localeCompare(a.day))[0];
+              const left = prev ? prev.focus.filter((tid) => { const t = tables.tasks.find((x) => x.id === tid && x.user_id === uid); return t && !t.completed_at && !t.dropped_at && !r.focus.includes(tid); }) : [];
+              const fit = left.slice(0, Math.max(0, 6 - r.focus.length));
+              r.focus = [...fit, ...r.focus]; r.carried = fit; r.carried_at = now(); r.updated_at = now();
+            }
+            return { data: r, error: null };
+          }
+          if (!r) return { data: null, error: { message: 'No list for that day.' } };
+          r.focus = r.focus.filter((tid) => !(r.carried || []).includes(tid)); r.carried = []; r.updated_at = now();
+          return { data: r, error: null };
         }
         // Mirrors review_apply() (migration 20261016000001): apply the suggestion's fields, then decide.
         if (name === 'review_apply') {

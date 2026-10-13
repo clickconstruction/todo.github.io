@@ -125,6 +125,23 @@ globalThis.fetch = async (url, init = {}) => {
       project_tags: db.project_tags.map(({ project_id, tag_id }) => ({ project_id, tag_id })), projects: mine(db.projects), people: mine(db.people),
       places: mine(db.places), task_waits: db.task_waits.map(({ task_id, waits_for }) => ({ task_id, waits_for })) }), { status: 200 });
   }
+  if (String(url).includes('/rest/v1/rpc/six_carry') || String(url).includes('/rest/v1/rpc/six_uncarry')) { // mirror of migration 20261112000001
+    const b = JSON.parse(init.body); const day = b.p_day; const owner = b.owner;
+    let r = db.daily_reviews.find((x) => x.day === day && x.user_id === owner);
+    if (String(url).includes('six_carry')) {
+      if (!r) { r = { id: id(), user_id: owner, day, focus: [], carried: [], carried_at: null, started_at: null, shutdown_at: null }; db.daily_reviews.push(r); }
+      if (!r.carried_at) {
+        const prev = db.daily_reviews.filter((x) => x.user_id === owner && x.day < day).sort((p, q) => q.day.localeCompare(p.day))[0];
+        const left = prev ? (prev.focus || []).filter((tid) => { const t = db.tasks.find((x) => x.id === tid && x.user_id === owner); return t && !t.completed_at && !t.dropped_at && !(r.focus || []).includes(tid); }) : [];
+        const fit = left.slice(0, Math.max(0, 6 - (r.focus || []).length));
+        r.focus = [...fit, ...(r.focus || [])]; r.carried = fit; r.carried_at = new Date().toISOString();
+      }
+      return new Response(JSON.stringify(r), { status: 200 });
+    }
+    if (!r) return new Response(JSON.stringify({ message: 'No list for that day.' }), { status: 400 });
+    r.focus = (r.focus || []).filter((tid) => !(r.carried || []).includes(tid)); r.carried = [];
+    return new Response(JSON.stringify(r), { status: 200 });
+  }
   if (String(url).includes('/rest/v1/rpc/')) { rpcCalls.push({ fn: String(url).split('/rpc/')[1], body: JSON.parse(init.body) }); return new Response('{}', { status: 200 }); }
   const u = new URL(url); const table = u.pathname.split('/').pop();
   const filters = [...u.searchParams].filter(([k]) => !['select','order','limit','offset','or'].includes(k));
@@ -213,7 +230,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 79 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 79 tools, no internals leaked');
+assert(list.body.result.tools.length === 80 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 80 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -1137,7 +1154,7 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(b.day && !b.started && b.must_dos && typeof b.must_dos.inbox_count === 'number' && Array.isArray(b.suggestions) && b.suggestions.every((x) => Array.isArray(x.why)), 'daily_review briefing: calendar, must-dos, suggestions with reasons');
   const picks = b.suggestions.slice(0, 4).map((x) => x.id);
   const f = await tool('daily_review', { action: 'focus', ids: picks });
-  assert(f.focus.length === Math.min(3, picks.length) && db.daily_reviews.length === 1 && db.daily_reviews[0].focus.length === f.focus.length, 'focus: up to 3 saved for today');
+  assert(f.focus.length === Math.min(6, picks.length) && db.daily_reviews.length === 1 && db.daily_reviews[0].focus.length === f.focus.length, 'focus: up to 6 saved for today');
   const p0 = db.tasks.find((t) => t.id === f.focus[0].id);
   assert(p0.planned_at && Math.abs(Date.parse(p0.planned_at) - Date.now()) < 24 * 3600e3, 'focus items are planned today');
   const st = await tool('daily_review', { action: 'start' });
@@ -1163,6 +1180,47 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(await sendDailyReminders(env, fake, new Date('2026-09-26T12:30:00Z')) === 0, 'weekdays only: not on Saturday');
   started = [{ id: 'x' }];
   assert(await sendDailyReminders(env, fake, thu730) === 0, 'not if the day was already started');
+}
+// ---------- Six (the Ivy Lee list) ----------
+{
+  const s0 = await tool('six', {});
+  const today = s0.day; // the user's day, as the tool sees it
+  const shift = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+  const yest = shift(today, -1); const tmr = shift(today, 1);
+  const chi = (iso) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: (db.user_settings[0] && db.user_settings[0].timezone) || 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(iso)).map((x) => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}`; };
+  const todayRow = db.daily_reviews.find((r) => r.day === today) || { focus: [] }; // from the daily review above
+  const openIds = db.tasks.filter((t) => !t.completed_at && !t.dropped_at && !t.parent_id && !t.in_inbox && !t.daily && !(todayRow.focus || []).includes(t.id)).map((t) => t.id);
+  const doneId = db.tasks.find((t) => t.completed_at).id;
+  const y = [openIds[0], openIds[1]];
+  db.daily_reviews.push({ id: id(), user_id: UID, day: yest, focus: [y[0], doneId, y[1]], carried: [], carried_at: null, started_at: null, shutdown_at: null });
+  assert(s0.which === 'today' && s0.count === (todayRow.focus || []).length && s0.limit === 6 && s0.suggestions && Array.isArray(s0.suggestions.next) && Array.isArray(s0.suggestions.due), 'six status: today\'s list, with suggestions');
+  const c = await tool('six', { action: 'carry' });
+  assert(c.carried_over.join() === y.join() && c.items[0].id === y[0] && c.items[0].carried_over && c.items[0].rank === 1 && c.now === y[0], 'carry: yesterday\'s open leftovers come first, the done one stays behind');
+  assert((await tool('six', { action: 'carry' })).count === c.count, 'carrying again changes nothing');
+  const ty = db.tasks.find((t) => t.id === y[0]);
+  assert(ty.planned_at && chi(ty.planned_at) === today, 'carried cards are planned today');
+  const u = await tool('six', { action: 'undo_carry' });
+  assert(!u.carried_over && !u.items.some((x) => x.id === y[0]) && db.daily_reviews.find((r) => r.day === today).carried_at, 'undo_carry takes them off; the day stays marked');
+  const free = 6 - u.count;
+  const pick = openIds.slice(2, 2 + free + 1);
+  let err = null; try { await tool('six', { action: 'add', ids: pick }); } catch (e) { err = e.message; }
+  assert(/six is the limit/i.test(err || ''), 'a seventh is refused');
+  const ad = await tool('six', { action: 'add', ids: pick.slice(0, free) });
+  assert(ad.count === 6 && !ad.suggestions && ad.items[5].id === pick[free - 1] && ad.items[5].rank === 6, 'add: to the end, up to six; no suggestions when full');
+  assert(chi(db.tasks.find((t) => t.id === pick[0]).planned_at) === today, 'added cards are planned today');
+  const mv = await tool('six', { action: 'move', id: pick[0], to: 'top' });
+  assert(mv.items[0].id === pick[0] && mv.now === pick[0], 'move to the top: it is now');
+  const mv2 = await tool('six', { action: 'move', id: pick[0], to: '3' });
+  assert(mv2.items[2].id === pick[0], 'move to a position');
+  const tm = await tool('six', { action: 'tomorrow', id: pick[0] });
+  assert(tm.which === 'tomorrow' && tm.count === 1 && tm.items[0].id === pick[0] && !tm.now && db.daily_reviews.find((r) => r.day === today).focus.length === 5, 'tomorrow: off today, onto tomorrow\'s list; no "now" tomorrow');
+  assert(chi(db.tasks.find((t) => t.id === pick[0]).planned_at) === tmr, 'planned tomorrow');
+  const bk = await tool('six', { action: 'today', id: pick[0] });
+  assert(bk.which === 'today' && bk.count === 6 && bk.items[5].id === pick[0], 'today: back on today\'s list, at the end');
+  const rm = await tool('six', { action: 'remove', id: pick[0] });
+  assert(rm.count === 5 && rm.suggestions && !rm.items.some((x) => x.id === pick[0]), 'remove: off the list, suggestions back');
+  const st = await tool('settings', { action: 'set', six_evening_time: '17:30' });
+  assert(st.six_evening_time === '17:30' && db.user_settings[0].six_evening_minutes === 1050, 'settings: the evening hour');
 }
 // ---------- quarterly and yearly horizon reviews ----------
 {

@@ -1,13 +1,13 @@
 // Daily review for agents: a morning briefing (calendar, must-dos, today's focus with suggestions) and
 // an evening wrap-up (focus done or not, carry the rest over, tomorrow at a glance). Same rows the app
-// uses (daily_reviews); up to 3 focus items, each planned for today.
+// uses (daily_reviews); up to 6 focus items (the same list as the six tool), each planned for today.
 import { mustLeft } from './dailies.js';
 import { rankNow } from '../../js/whatnow.js';
 
 export function dailyTools({ OPEN, localDate, zonedToIso, availableTasks, calendar }) {
   return [{
     name: 'daily_review',
-    description: 'The daily review. action: briefing (default; morning: today\'s calendar, due/overdue, follow-ups due, tickler, Inbox count, today\'s focus and suggestions), focus (set up to 3 task ids for today; they are planned today), start (mark the day started), wrapup (evening: focus done or not, tomorrow\'s calendar and due items), carry (move unfinished focus: [{id, to: tomorrow|next_week|drop}]), shutdown (mark the day closed). Keep it short and conversational.',
+    description: 'The daily review. action: briefing (default; morning: today\'s calendar, due/overdue, follow-ups due, tickler, Inbox count, today\'s focus and suggestions), focus (set up to 6 task ids for today, in order; they are planned today; the same list as the six tool), start (mark the day started), wrapup (evening: focus done or not, tomorrow\'s calendar and due items), carry (move unfinished focus: [{id, to: tomorrow|next_week|drop}]), shutdown (mark the day closed). Keep it short and conversational.',
     inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['briefing', 'focus', 'start', 'wrapup', 'carry', 'shutdown'] }, ids: { type: 'array', items: { type: 'string' } }, carry: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, to: { type: 'string', enum: ['tomorrow', 'next_week', 'drop'] } }, required: ['id', 'to'] } } } },
     async run(api, a) {
       const action = a.action || 'briefing';
@@ -20,7 +20,7 @@ export function dailyTools({ OPEN, localDate, zonedToIso, availableTasks, calend
       const patch = async (fields) => { const r = await ensure(); return (await api.q(`daily_reviews?${api.u}&id=eq.${r.id}`, { method: 'PATCH', prefer: 'return=representation', body: fields }))[0]; };
       const at9 = (day) => zonedToIso(day, api.hours.planned, api.tz);
       if (action === 'focus') {
-        const ids = [...new Set(a.ids || [])].slice(0, 3);
+        const ids = [...new Set(a.ids || [])].slice(0, 6);
         for (const id of ids) { const t = await api.task(id); if (!t.planned_at || t.planned_at >= endToday || t.planned_at < zonedToIso(today, 0, api.tz)) await api.q(`tasks?${api.u}&id=eq.${t.id}`, { method: 'PATCH', body: { planned_at: at9(today) } }); }
         await patch({ focus: ids });
       }
@@ -61,7 +61,7 @@ export function dailyTools({ OPEN, localDate, zonedToIso, availableTasks, calend
         must_dos: { daily: dailyLeft.length ? dailyLeft.map((t) => ({ id: t.id, title: t.title, every_day: true })) : undefined, due: await api.shape(due), follow_ups: await api.shape(follow), from_tickler: await api.shape(tickler), inbox_count: inbox },
         focus: focus.map((t) => ({ id: t.id, title: t.title, status: t.status })),
         suggestions: sugg.map(({ t, reasons, gain }) => ({ ...shapedS.get(t.id), why: reasons.map((x) => x.text), ...(gain ? { gain } : {}) })),
-        note: 'Up to 3 focus items (action focus with ids).',
+        note: 'Up to 6 focus items, in order (action focus with ids; the six tool works the same list).',
       };
     },
   }];

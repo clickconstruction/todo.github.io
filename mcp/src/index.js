@@ -22,6 +22,7 @@ import { planTools } from './plan.js';
 import { handleCapture, followTag, nameFor } from './capture.js';
 import { checklistTools } from './checklists.js';
 import { dailyTools } from './daily.js';
+import { sixTools } from './six.js';
 import { dailiesTools, dailiesFor, dailyOut } from './dailies.js';
 import { describeDaily, readDaily, onDay } from '../../js/daily-rules.js';
 import { settleTools } from './settle.js';
@@ -48,7 +49,8 @@ Notifications: pass notifications (e.g. [{"kind":"before_due","minutes":60}]) to
 Attachments: add_attachment attaches text, base64 or a URL's file to an action or project; get_task returns download links; remove_attachment archives.
 Repeating items: pass repeat on capture/update_task/create_project/update_project (e.g. {"every":2,"unit":"week","weekdays":[1,4]}); completing one creates the next occurrence automatically; use skip_occurrence to skip one; dropping it ends the series.
 Weekly Review: call weekly_review (action start) and walk the user through each step in order (Get clear: papers, mind sweep with mind_sweep_prompts, inbox with clarify_item; Get current: calendars, stale actions, waiting, projects via list_review/mark_reviewed; Get creative: list_someday, anything new), marking each done_step, then finish. Someday/Maybe: clarify_item someday (with a category), list_someday, activate_someday.
-Daily review: in the morning call daily_review (briefing), help the user pick up to 3 focus items (action focus), then start; in the evening wrapup, carry what didn't happen, shutdown.
+Daily review: in the morning call daily_review (briefing), help the user pick up to 6 focus items (action focus), then start; in the evening wrapup, carry what didn't happen, shutdown.
+Six (the Ivy Lee list): the six tool keeps up to six cards per day in order, today and tomorrow (the same list as the daily review's focus); the first open one is what to do now. Adding plans the card for that day; what is left of a day comes over to the top of the next (carry).
 Time blocks: update_task schedule ("YYYY-MM-DDTHH:MM") puts an action on their calendar (Forecast and their calendar feed); check forecast for free time first. Checklists (routines run again and again): list_checklists, save_checklist (attach_to an action), run_checklist to tick through one with them.
 Horizons of Focus: list_horizons shows purpose, vision, goals and areas (with balance warnings); save_area, save_goal, save_horizon edit them; projects take outcome ("done looks like"), area and goal. To plan a project with the user (Natural Planning Model), use plan_project: why, done looks like, brainstorm, organize, next actions; show the preview, then create. For "what should I do now?", call what_now (where, minutes, energy) and explain its reasons.
 Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
@@ -2361,6 +2363,7 @@ TOOLS.push(...settingsTools());
 TOOLS.push(...dailiesTools({ localDate }));
 TOOLS.push(...treeTools());
 TOOLS.push(...dailyTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
+TOOLS.push(...sixTools({ localDate, zonedToIso, availableTasks }));
 TOOLS.push(...horizonsTools({ OPEN, zonedToIso, localDate, availableTasks, calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 TOOLS.push(...weeklyTools({ OPEN, zonedToIso, localDate, tool: (name) => TOOLS.find((t) => t.name === name), calendar: (api, from, to) => calendarEvents(api, from, to, api.ctx, { sha256Hex }) }));
 

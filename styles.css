@@ -1742,3 +1742,36 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .sg-tt b { overflow-wrap: anywhere; }
 .sg-tt-x { justify-self: start; font-size: 12px; margin-top: 2px; }
 .sg-tt-more > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+
+/* Six: the Ivy Lee list. One list for the day; the first open card is Now, the rest wait under Then. */
+.view-head h1.six { color: var(--accent); }
+.six-seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; }
+.six-seg a { display: inline-flex; align-items: center; min-height: 36px; padding: 4px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--muted); text-decoration: none; }
+.six-seg a.on { background: var(--accent-soft); color: var(--accent); }
+.six-carried { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; background: var(--accent-soft); font-size: 14px; margin: 0 0 12px; }
+.six-carried span { flex: 1; }
+.six-now { margin: 10px 0 4px; padding: 18px 20px; border-radius: 14px; background: var(--surface); border: 1px solid var(--accent); }
+.six-now-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.six-now-head .row-meta { margin: 0; }
+.six-label { font-size: 12px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--accent); }
+.six-now-title { margin: 8px 0 4px; font-size: 24px; line-height: 1.25; letter-spacing: -0.3px; cursor: pointer; }
+.six-now-btns { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
+.six-gain { margin: 8px 0 0; font-size: 14px; }
+.six-gain .six-nogain { font-style: italic; }
+.six-then { margin: 16px 0 2px 4px; font-size: 12px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); }
+.six-row { display: flex; gap: 10px; align-items: flex-start; padding: 12px 4px; border-bottom: 1px solid var(--line); }
+.six-row .row-main { cursor: pointer; }
+.six-row.done .row-title { color: var(--muted); text-decoration: line-through; }
+.six-row .six-gain { margin-top: 3px; font-size: 13px; }
+.six-num { flex: none; width: 18px; margin-top: 3px; font-size: 13px; font-weight: 700; color: var(--muted); text-align: right; }
+.six-ctl { display: flex; gap: 4px; align-items: center; flex: none; flex-wrap: wrap; justify-content: flex-end; max-width: 46%; }
+.six-ib { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); display: grid; place-items: center; padding: 0; cursor: pointer; font: inherit; font-size: 16px; }
+.six-ib:disabled { opacity: .4; cursor: default; }
+.six-empty { padding: 20px; border-radius: 14px; background: var(--surface); border: 1px dashed var(--line); color: var(--muted); }
+.six-all { margin: 12px 4px; color: var(--ok); font-weight: 600; }
+.six-foot { margin-top: 14px; }
+.six-keys { margin-top: 10px; }
+.six-keys kbd { font: inherit; font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); }
+.chip.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+/* Phones: the title keeps the width; a row's controls sit on a line of their own, under it. */
+@media (max-width: 767px) { .six-keys { display: none; } .six-now-btns .btn { flex: 1 1 auto; } .six-now-btns .btn.link { flex: 1 1 100%; } .six-row { flex-wrap: wrap; } .six-ctl { max-width: none; flex: 1 1 100%; justify-content: flex-end; } }

@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -352,6 +352,71 @@ async function slipboxReading(check) {
   check('Up next: priority (flagged) first, marked ⚑, counted', rows.findIndex((x) => x.includes('High Output')) < rows.findIndex((x) => x.includes('Newer unflagged')) && rows.find((x) => x.includes('High Output')).includes('⚑') && has(undefined, '1 priority'));
   const { isFlaggedTask } = await import('/js/views/basic.js');
   check('flagged but waiting on the list: not in Flagged', !isFlaggedTask(db.tasks.find((x) => x.id === 'rdP1')));
+}
+
+// Six: the Ivy Lee list. Today and tomorrow are the Daily review's focus rows; yesterday's open leftovers
+// come to the top once (with Undo); Now, Then, Add with suggestions and search; six at most; keys.
+async function six(check) {
+  const { app } = await import('/js/state.js');
+  const dk = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  const tmr = new Date(); tmr.setDate(tmr.getDate() + 1);
+  const t = T();
+  const open = t.tasks.filter((x) => !x.completed_at && !x.dropped_at && !x.parent_id && !x.daily && !x.in_inbox && x.title.length > 8).slice(0, 8);
+  const doneOne = t.tasks.find((x) => x.completed_at) || open.pop();
+  if (!doneOne.completed_at) doneOne.completed_at = new Date().toISOString();
+  t.daily_reviews.push({ id: 'dy', user_id: 'u1', day: dk(yesterday), started_at: null, shutdown_at: null, focus: [open[0].id, doneOne.id, open[1].id], carried: [], carried_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  app.six = null; app.settings.six_evening_minutes = 1439;
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const task = (id) => t.tasks.find((x) => x.id === id);
+  const sameDay = (iso, d) => !!iso && new Date(iso).toDateString() === d.toDateString();
+  await go('#six'); await until(() => !!$('.six-carried'));
+  check('Six in the sidebar’s Do group, above Forecast', (() => { const a = $('a[data-nav="six"]'); return !!a && a.nextElementSibling && a.nextElementSibling.dataset.nav === 'forecast'; })());
+  const today = t.daily_reviews.find((r) => r.day === dk(new Date()));
+  check('yesterday’s open leftovers come to the top, once, in order; the done one stays behind', !!today && today.focus.join() === [open[0].id, open[1].id].join() && today.carried.length === 2 && !!today.carried_at && has('.six-carried', '2 came over from yesterday'), today && today.focus.join());
+  check('the first open one is Now, the rest wait under Then', has('.six-now', 'now · 1 of 2', open[0].title) && has('.six-then', 'then') && $$('.six-row').length === 1);
+  check('carried cards are planned today', sameDay(task(open[0].id).planned_at, new Date()));
+  check('gain line: not written yet, with a way to write it', has('.six-now .six-gain', 'not written yet') && !!$(`.six-now .link-btn[data-task="${open[0].id}"]`));
+  key('a'); await wait(100);
+  check('a opens Add: suggestions grouped, then search', $('#sheet2').open && has('#sheet2', 'add to today') && $$('#sheet2 .po-group').length >= 1 && $$('#sheet2 [data-six-pick]').length >= 1);
+  const s = $('[data-six-search]'); s.value = open[3].title; s.dispatchEvent(new Event('input')); await wait(50);
+  check('typing searches every open card', !!$(`#sheet2 [data-six-pick="${open[3].id}"]`));
+  $(`#sheet2 [data-six-pick="${open[3].id}"]`).click(); await wait(300);
+  check('picked: added as the third, planned today, with a toast', today.focus.length === 3 && today.focus[2] === open[3].id && has('#toast', 'added as the third') && sameDay(task(open[3].id).planned_at, new Date()), text('#toast'));
+  const focusWas = `${document.activeElement.tagName}.${document.activeElement.className} sheet2:${$('#sheet2').open}`;
+  key('n'); await wait(300);
+  check('n: Now goes to the bottom; the next one is Now', today.focus[2] === open[0].id && has('.six-now', open[1].title), `${today.focus.join()} · ${focusWas}`);
+  $(`[data-six="up"][data-id="${open[0].id}"]`).click(); await wait(300);
+  check('↑ moves a row up', today.focus[1] === open[0].id, today.focus.join());
+  key('t'); await wait(300);
+  const tomorrowRow = () => t.daily_reviews.find((r) => r.day === dk(tmr));
+  check('t: Now goes to tomorrow’s list, planned tomorrow', !today.focus.includes(open[1].id) && !!tomorrowRow() && tomorrowRow().focus.join() === open[1].id && sameDay(task(open[1].id).planned_at, tmr));
+  await go('#six/tomorrow');
+  check('Tomorrow: a plain numbered list with a Today button, no Now card', has(undefined, open[1].title) && !$('.six-now') && !!$(`[data-six="today"][data-id="${open[1].id}"]`));
+  $(`[data-six="today"][data-id="${open[1].id}"]`).click(); await wait(300);
+  check('Today sends it back, to the end', today.focus[today.focus.length - 1] === open[1].id && tomorrowRow().focus.length === 0);
+  await go('#six/today');
+  const first = today.focus[0];
+  key('d'); await until(() => !!task(first).completed_at);
+  await wait(200);
+  check('d: Now is done, stays in place crossed out; the next one is Now', !!$('.six-row.done') && $$('.six-now').length === 1 && !has('.six-now', task(first).title) && has('#toast', 'completed'));
+  for (const x of open.slice(4)) {
+    if (today.focus.length >= 6) break;
+    key('a'); await wait(100);
+    const q = $('[data-six-search]'); q.value = x.title; q.dispatchEvent(new Event('input')); await wait(50);
+    const b = $(`#sheet2 [data-six-pick="${x.id}"]`); if (b) b.click(); else $('[data-six-cancel]').click();
+    await wait(300);
+  }
+  check('six is the limit: Add is off and says so', today.focus.length === 6 && $('[data-six="add"]').disabled && has('.six-foot', 'six is the limit'), String(today.focus.length));
+  $('[data-six="uncarry"]').click(); await wait(300);
+  check('Undo takes yesterday’s leftovers off today; the day stays marked', !today.focus.includes(open[0].id) && today.carried.length === 0 && !!today.carried_at && !$('.six-carried'));
+  app.settings.six_evening_minutes = 0;
+  await go('#six');
+  check('from the evening hour, Tomorrow opens first', ($('.six-seg a.on') || {}).getAttribute && $('.six-seg a.on').getAttribute('href') === '#six/tomorrow');
+  app.settings.six_evening_minutes = 960;
+  await go('#daily');
+  check('the Daily review shows the same list, up to six, with a link to Six', has(undefined, 'of 6') && !!$('.dv-sec a[href="#six"]'));
 }
 
 // Full Review: one card at a time, Claude alongside (simulated here by writing what the MCP writes).
@@ -1450,9 +1515,9 @@ async function sidebar(check) {
   check('hide Nearby: gone from the sidebar, saved to the account', $('[data-nav="nearby"]').classList.contains('nav-hidden') && T().user_settings[0].sidebar.hidden.includes('nearby'));
   $('#sheet [data-nav-move="flagged"][data-dir="-1"]').click(); await until(() => ((T().user_settings[0] || {}).sidebar?.order || {}).do);
   await until(() => T().user_settings[0].sidebar.order.do.indexOf('flagged') < T().user_settings[0].sidebar.order.do.indexOf('matrix'));
-  $('#sheet [data-nav-move="flagged"][data-dir="-1"]').click(); await until(() => T().user_settings[0].sidebar.order.do[1] === 'flagged');
+  $('#sheet [data-nav-move="flagged"][data-dir="-1"]').click(); await until(() => T().user_settings[0].sidebar.order.do[2] === 'flagged');
   const o2 = $$('.nav-group[data-group="do"] [data-nav]').map((a) => a.dataset.nav);
-  check('▲ moves Flagged above What now?', o2.indexOf('flagged') < o2.indexOf('now') && T().user_settings[0].sidebar.order.do[1] === 'flagged', o2.join());
+  check('▲ moves Flagged above What now? (Six and Forecast stay first)', o2.indexOf('flagged') < o2.indexOf('now') && o2[0] === 'six' && T().user_settings[0].sidebar.order.do[2] === 'flagged', o2.join());
   const pin = $('#sheet [data-nav-pin="psB"]'); pin.checked = true; pin.dispatchEvent(new Event('change', { bubbles: true }));
   await until(() => T().perspectives.find((x) => x.id === 'psB').pinned);
   check('pin a perspective: it joins Do', has('.nav-group[data-group="do"]', 'errands run'));
@@ -1897,7 +1962,7 @@ async function dailyReview(check) {
   await go('#forecast');
   check('Forecast offers the daily review', !!$('a.dv-banner[href="#daily"]') && /start your day|plan today/i.test($('a.dv-banner').textContent));
   await go('#daily');
-  check('your day, must-dos, focus', has(undefined, 'your day', 'must-dos', 'today’s focus', '0 of 3'));
+  check('your day, must-dos, focus', has(undefined, 'your day', 'must-dos', 'today’s focus', '0 of 6'));
   check('must-dos: overdue, due today, follow-up with Nudge', has(undefined, 'call gvec about utilities', 'overdue', 'get plans released', 'due today', 'make funeral playlist', 'follow up') && !!$('[data-daily="nudge"][data-id="t5"]'));
   window.__opened = null;
   $('[data-daily="nudge"][data-id="t5"]').click(); await wait(50);
@@ -1907,7 +1972,7 @@ async function dailyReview(check) {
   const picked = [];
   for (let i = 0; i < 3; i++) { const b = sugg()[0]; picked.push(b.dataset.id); b.click(); await wait(250); }
   const row = T().daily_reviews[0];
-  check('up to 3 focus items, saved for today', row && row.focus.length === 3 && has(undefined, '3 of 3') && sugg().length === 0);
+  check('focus items, saved for today (up to six, the same list as Six)', row && row.focus.length === 3 && has(undefined, '3 of 6') && sugg().length >= 1 && !!$('.dv-sec a[href="#six"]'));
   const t0 = T().tasks.find((t) => t.id === picked[0]);
   check('focus items are planned today', t0.planned_at && new Date(t0.planned_at).toDateString() === new Date().toDateString());
   $$('[data-daily="fit"]')[0].click(); await wait(150);
@@ -3638,7 +3703,7 @@ async function datesSettings(check) {
   const { db, app } = await import('/js/state.js');
   const { HOURS } = await import('/js/dates.js');
   await go('#settings');
-  check('dates section with three times and the Today tag (plus the review time)', $$('[data-setting-time]').length === 5 && !!$('[data-setting-forecast-tag]') && has(undefined, 'due dates', 'defer dates', 'planned dates', 'always show in today'));
+  check('dates section with three times and the Today tag (plus the review, morning and Six times)', $$('[data-setting-time]').length === 6 && !!$('[data-setting-forecast-tag]') && has(undefined, 'due dates', 'defer dates', 'planned dates', 'always show in today'));
   const due = $('[data-setting-time="due_minutes"]'); due.value = '15:30'; due.dispatchEvent(new Event('change', { bubbles: true }));
   await wait(200);
   check('saved to the account and used right away', T().user_settings[0].due_minutes === 930 && HOURS.due_at === 15.5);

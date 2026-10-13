@@ -9,8 +9,8 @@ insert into public.daily_reviews (day, focus, started_at) values ('2026-09-24', 
 insert into r (test, ok, detail) select 'owner starts a day; can''t see others', count(*) = 1, '' from public.daily_reviews;
 do $$ begin insert into public.daily_reviews (day) values ('2026-09-24'); insert into r (test, ok, detail) values ('one row per day', false, '');
 exception when unique_violation then insert into r (test, ok, detail) values ('one row per day', true, sqlerrm); end $$;
-do $$ begin update public.daily_reviews set focus = '["a","b","c","d","e","f"]'; insert into r (test, ok, detail) values ('focus is short (5 at most)', false, '');
-exception when check_violation then insert into r (test, ok, detail) values ('focus is short (5 at most)', true, sqlerrm); end $$;
+do $$ begin update public.daily_reviews set focus = '["a","b","c","d","e","f","g"]'; insert into r (test, ok, detail) values ('focus is short (6 at most)', false, '');
+exception when check_violation then insert into r (test, ok, detail) values ('focus is short (6 at most)', true, sqlerrm); end $$;
 insert into public.user_settings (daily_notify, daily_minutes) values (true, 450);
 insert into r (test, ok, detail) select 'morning reminder settings (off unless turned on)', daily_notify and daily_minutes = 450 and daily_weekdays_only, '' from public.user_settings;
 delete from public.daily_reviews;

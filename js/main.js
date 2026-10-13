@@ -30,6 +30,7 @@ import { newCaptureKey, captureGuide } from './views/settings.js';
 import { noticeEmailPeople } from './views/capture.js';
 import { checklistAction, checklistChange } from './views/checklists.js';
 import { dailyAction, dailySubmit } from './views/daily.js';
+import { sixAction, sixKey } from './views/six.js';
 import { settleAction, settleKey } from './views/settle.js';
 import { fullReviewAction, fullReviewChange, fullReviewKey, startFullReview, activeSession, quickReview } from './views/fullreview.js';
 import { moreSheetHtml, openCustomize } from './sidebar.js';
@@ -193,6 +194,7 @@ const CLICKS = [
   ['[data-plan]', (el, e) => { e.stopPropagation(); planAction(el); }],
   ['[data-ck]', (el, e) => { e.stopPropagation(); checklistAction(el); }],
   ['[data-daily]', (el, e) => { e.stopPropagation(); dailyAction(el); }],
+  ['[data-six]', (el, e) => { e.stopPropagation(); sixAction(el); }],
   ['[data-settle]', (el, e) => { e.stopPropagation(); if (!el.disabled) settleAction(el); }],
   ['[data-fr]', (el, e) => { if (e.target.closest && e.target.closest('a[href]')) return; e.stopPropagation(); fullReviewAction(el, e); }], // a link inside a row is just a link
   ['[data-slip]', (el, e) => { e.stopPropagation(); slipAction(el); }],
@@ -317,7 +319,7 @@ $('#more-tab').onclick = () => {
 };
 window.addEventListener('hashchange', render);
 document.addEventListener('keydown', (e) => {
-  if (clarifyKey(e) || sweepKey(e) || (!$('#sheet').open && (settleKey(e) || fullReviewKey(e)))) return;
+  if (clarifyKey(e) || sweepKey(e) || (!$('#sheet').open && (settleKey(e) || fullReviewKey(e) || sixKey(e)))) return;
   if (!e.metaKey && !e.ctrlKey && !$('#sheet').open && !typing() && location.hash.startsWith('#review') && ['j', 'k', 'm'].includes(e.key)) {
     const btn = e.key === 'm' ? $('[data-mark-reviewed]') : $$review(e.key === 'j' ? 1 : 0);
     if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
