@@ -44,6 +44,11 @@ export function effectiveTagIds(t) {
   if (t.project_id) db.projectTags.forEach((x) => { if (x.project_id === t.project_id) ids.add(x.tag_id); });
   return ids;
 }
+// A tag group's children in their order: sort, then when they were made, then name. "Sort by the group"
+// in lists follows it; the tag editor sets a child's place.
+export const tagGroupChildren = (parentId) => db.tags.filter((g) => g.parent_id === parentId && tagStatus(g) !== 'dropped')
+  .sort((a, b) => ((a.sort ?? 0) - (b.sort ?? 0)) || String(a.created_at || '').localeCompare(String(b.created_at || '')) || a.name.localeCompare(b.name));
+export const tagGroups = () => db.tags.filter((g) => !g.parent_id && tagStatus(g) !== 'dropped' && tagGroupChildren(g.id).length >= 2).sort((a, b) => a.name.localeCompare(b.name));
 export const tagLabel = (tag) => {
   const parent = tag.parent_id && byId(db.tags, tag.parent_id);
   return parent ? `${parent.name} : ${tag.name}` : tag.name;

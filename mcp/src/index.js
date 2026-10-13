@@ -1143,6 +1143,7 @@ const TOOLS = [
         available_only: { type: 'boolean', description: 'Only actions that can be done now (not deferred, not waiting in a sequential project, not delegated or on an agenda, project active). This is the Next Actions list.' },
         max_energy: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Only actions marked with at most this energy ("I\'m tired": low)' },
         due_before: { type: 'string', description: 'YYYY-MM-DD; items due on or before this date' },
+        sort_by_tag_group: { type: 'string', description: 'A parent tag (name or id) whose child tags order the result: cards with the first child first, then the second…, cards with none of them last. A project\'s tags count for its actions. The children\'s order is set with update_tag position.' },
         include_completed: { type: 'boolean', default: false },
         limit: { type: 'integer', default: 100 },
       },
@@ -1193,7 +1194,23 @@ const TOOLS = [
         const ok = await api.availableSet(rows.map((t) => t.id)); // the database decides, for just these rows
         rows = rows.filter((t) => ok.has(t.id));
       }
-      return { count: rows.length, items: await api.shape(rows) };
+      let note;
+      if (a.sort_by_tag_group) { // the group's children in their order (sort, then made, then name); untagged last
+        const tags = await api.q(`tags?${api.u}&select=id,name,parent_id,status,sort,created_at`);
+        const key = String(a.sort_by_tag_group).trim().toLowerCase();
+        const parent = tags.find((t) => !t.parent_id && (t.id === a.sort_by_tag_group || t.name.toLowerCase() === key));
+        if (!parent) throw new Error(`No tag group "${a.sort_by_tag_group}". A group is a parent tag with child tags (list_tags).`);
+        const kids = tags.filter((t) => t.parent_id === parent.id && t.status !== 'dropped').sort((x, y) => ((x.sort ?? 0) - (y.sort ?? 0)) || String(x.created_at || '').localeCompare(String(y.created_at || '')) || x.name.localeCompare(y.name));
+        const pos = new Map(kids.map((k, i) => [k.id, i]));
+        const [links, pLinks] = await Promise.all([
+          api.q(`task_tags?${api.u}&tag_id=${inList(kids.map((k) => k.id))}&select=task_id,tag_id`),
+          api.q(`project_tags?${api.u}&tag_id=${inList(kids.map((k) => k.id))}&select=project_id,tag_id`),
+        ]);
+        const rank = (t) => Math.min(kids.length, ...links.filter((l) => l.task_id === t.id).map((l) => pos.get(l.tag_id)), ...pLinks.filter((l) => l.project_id === t.project_id).map((l) => pos.get(l.tag_id)));
+        rows = rows.map((t, i) => [t, i]).sort((x, y) => rank(x[0]) - rank(y[0]) || x[1] - y[1]).map(([t]) => t);
+        note = `Sorted by ${parent.name}: ${kids.map((k) => k.name).join(' › ')}, then cards with none of them.`;
+      }
+      return { count: rows.length, items: await api.shape(rows), ...(note ? { note } : {}) };
     },
   },
   {
@@ -2116,6 +2133,7 @@ const TOOLS = [
         tag: { type: 'string', description: 'Tag label ("Errands" or "Waiting : Hiro") or id' },
         name: { type: 'string', description: 'New name (just this level, not the parent)' },
         status: { type: 'string', enum: ['active', 'on_hold', 'dropped'] },
+        position: { type: 'integer', description: 'For a child tag: its place in its group, 1 = first. Lists sorted by the group (list_tasks sort_by_tag_group, the app\'s View sort) follow this order.' },
         place: { type: ['string', 'null'], description: 'Saved place name or id, or an address/business to look up and save; null to clear' },
         location_alert: { type: ['string', 'null'], enum: ['arrive', 'leave', 'nearby', null], description: 'Alert when arriving at, leaving, or near the place; null for none' },
         location_radius_m: { type: ['integer', 'null'], description: 'How close counts, in meters (152 = 500 ft, 402 = ¼ mi, 1609 = 1 mi); null uses the place radius' },
@@ -2134,6 +2152,14 @@ const TOOLS = [
         patch.status = a.status;
       }
       if (Object.keys(patch).length) await api.q(`tags?${api.u}&id=eq.${tag.id}`, { method: 'PATCH', body: patch });
+      if (a.position !== undefined) { // renumber the group so this one sits at that place
+        if (!tag.parent_id) throw new Error('position is for a child tag (one inside a group).');
+        const all = await api.q(`tags?${api.u}&parent_id=eq.${tag.parent_id}&select=id,name,status,sort,created_at`);
+        const kids = all.filter((t) => t.status !== 'dropped').sort((x, y) => ((x.sort ?? 0) - (y.sort ?? 0)) || String(x.created_at || '').localeCompare(String(y.created_at || '')) || x.name.localeCompare(y.name));
+        const n = Math.min(Math.max(1, Math.round(Number(a.position) || 1)), kids.length);
+        const order = kids.filter((t) => t.id !== tag.id); order.splice(n - 1, 0, kids.find((t) => t.id === tag.id));
+        for (let i = 0; i < order.length; i++) if ((order[i].sort ?? 0) !== i) await api.q(`tags?${api.u}&id=eq.${order[i].id}`, { method: 'PATCH', body: { sort: i } });
+      }
       const [row] = await api.q(`tags?${api.u}&id=eq.${tag.id}&select=*`);
       const place = row.place_id ? (await api.q(`places?${api.u}&id=eq.${row.place_id}&select=*`))[0] : null;
       return { id: row.id, label: tagLabel(row), status: row.status || 'active', place: place ? { name: place.name, alert: row.location_trigger, radius_m: row.location_radius_m || place.radius_m } : null };

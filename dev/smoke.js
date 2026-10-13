@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -352,6 +352,78 @@ async function slipboxReading(check) {
   check('Up next: priority (flagged) first, marked ⚑, counted', rows.findIndex((x) => x.includes('High Output')) < rows.findIndex((x) => x.includes('Newer unflagged')) && rows.find((x) => x.includes('High Output')).includes('⚑') && has(undefined, '1 priority'));
   const { isFlaggedTask } = await import('/js/views/basic.js');
   check('flagged but waiting on the list: not in Flagged', !isFlaggedTask(db.tasks.find((x) => x.id === 'rdP1')));
+}
+
+// Sort by a tag group: Revenue › Maintenance › Relevance as three child tags; the View sort lists the
+// group; a project's tag counts for its cards; the tag editor sets a child's place in the group.
+async function bucketSort(check) {
+  const t = T();
+  const mk = (id, name, parent_id, sort, created_at) => ({ id, user_id: 'u1', name, parent_id, sort, created_at, status: 'active', place_id: null, location_trigger: null, location_radius_m: null });
+  t.tags.push(mk('bk', 'Bucket', null, 50, '2026-10-01T00:00:00Z'), mk('bk1', 'Revenue', 'bk', 0, '2026-10-01T00:00:01Z'), mk('bk2', 'Maintenance', 'bk', 0, '2026-10-01T00:00:02Z'), mk('bk3', 'Relevance', 'bk', 0, '2026-10-01T00:00:03Z'));
+  // Three Laptop cards from three projects: one Relevance, one Maintenance, one whose project is Revenue.
+  const seen = new Set(); const lap = [];
+  for (const x of t.tasks) { if (lap.length < 3 && !x.completed_at && !x.dropped_at && !x.parent_id && !x.daily && x.project_id && !seen.has(x.project_id)) { seen.add(x.project_id); lap.push(x); } }
+  lap.forEach((x) => { if (!t.task_tags.some((l) => l.task_id === x.id && l.tag_id === 'g1')) t.task_tags.push({ task_id: x.id, tag_id: 'g1', user_id: 'u1' }); });
+  const [rel, viaProject, maint] = lap;
+  t.task_tags.push({ task_id: rel.id, tag_id: 'bk3', user_id: 'u1' }, { task_id: maint.id, tag_id: 'bk2', user_id: 'u1' });
+  t.project_tags.push({ project_id: viaProject.project_id, tag_id: 'bk1', user_id: 'u1' });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const { setFilter } = await import('/js/filter.js'); setFilter({ sort: 'default', show: 'remaining' });
+  await go('#tag/g1');
+  const order = () => $$('#view [data-task]').map((r) => r.dataset.task);
+  check('View has a Sort with the group, with no location fix', !!$('[data-filter="sort"]') && !!$('[data-filter="sort"] option[value="tag:bk"]') && /by bucket/i.test($('[data-filter="sort"] option[value="tag:bk"]').textContent));
+  $('[data-filter="sort"]').value = 'tag:bk'; $('[data-filter="sort"]').dispatchEvent(new Event('change', { bubbles: true })); await wait(150);
+  const o = order();
+  check('sorted: Revenue (through its project) › Maintenance › Relevance, the rest after', o.indexOf(viaProject.id) < o.indexOf(maint.id) && o.indexOf(maint.id) < o.indexOf(rel.id) && lap.every((x) => o.includes(x.id)), o.join());
+  check('the View summary says so', has('.fv-sum', 'by bucket'));
+  const { openTagEditor } = await import('/js/editors/place.js');
+  openTagEditor(t.tags.find((x) => x.id === 'bk3')); await wait(80);
+  check('the tag editor sets a child’s place in its group', $('#sheet').open && !!$('#sheet [name=position]') && $$('#sheet [name=position] option').length === 3 && $('#sheet [name=position]').value === '2');
+  $('#sheet [name=position]').value = '0'; $('#sheet form').requestSubmit(); await wait(400);
+  check('first: the group is renumbered', t.tags.filter((x) => x.parent_id === 'bk').sort((x, y) => x.sort - y.sort).map((x) => x.name).join() === 'Relevance,Revenue,Maintenance');
+  const o2 = order();
+  check('and the list follows', o2.indexOf(rel.id) < o2.indexOf(viaProject.id) && o2.indexOf(viaProject.id) < o2.indexOf(maint.id), o2.join());
+  setFilter({ sort: 'default' });
+}
+
+// Capture with details: #project, @tag and a day word become chips under the box (taken off with a tap),
+// recent projects are a tap, "#" opens the project search, and what's saved is right.
+async function captureDetails(check) {
+  const t = T();
+  try { localStorage.removeItem('todo.capture.recent'); } catch { /* ignore */ }
+  const dk = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const fri = new Date(); fri.setDate(fri.getDate() + ((5 - fri.getDay() + 7) % 7));
+  await go('#forecast');
+  $('#fab').click(); await wait(100);
+  const title = () => $('#quick [name=title]');
+  const type = async (s) => { title().value = s; title().dispatchEvent(new Event('input', { bubbles: true })); await wait(50); };
+  check('quick entry: a hint of what the line can carry', $('#sheet').open && has('#quick .qe-chips', '#project', 'due fri'));
+  await type('Call Jodi about the quote #Click Plumbing due friday @tcruznc');
+  check('#Click Plumbing and “due friday” become chips; @tcruznc stays text', has('#quick .qe-chips', 'click plumbing', 'due') && !!$('#quick [data-qe-drop="project"]') && !!$('#quick [data-qe-drop="due"]') && !$('#quick [data-qe-drop="tag"]'));
+  $('#quick').requestSubmit(); await wait(400);
+  const made = t.tasks.find((x) => x.title === 'Call Jodi about the quote @tcruznc');
+  check('saved: in the project, not the Inbox, due Friday, the words gone from the title', !!made && made.project_id === 'p1' && made.in_inbox === false && dk(new Date(made.due_at)) === dk(fri) && !made.planned_at && has('#toast', 'captured to click plumbing', 'due'), made ? `${made.project_id} ${made.due_at}` : 'not made');
+  $('#fab').click(); await wait(100);
+  check('the project is now a recent chip', !!$('#quick [data-qe-project="p1"]'));
+  await type('Buy the fuel filter friday');
+  check('a bare day word is Planned', !!$('#quick [data-qe-drop="planned"]') && has('#quick .qe-chips', 'planned'));
+  $('#quick [data-qe-drop="planned"]').click(); await wait(50);
+  check('taken off: the word stays in the title', !$('#quick [data-qe-drop="planned"]'));
+  $('#quick [data-qe-project="p1"]').click(); await wait(50);
+  check('a recent chip sets the project', !!$('#quick [data-qe-drop="project"]') && has('#quick .qe-chips', 'click plumbing'));
+  $('#quick').requestSubmit(); await wait(400);
+  const made2 = t.tasks.find((x) => x.title === 'Buy the fuel filter friday');
+  check('saved with the project and no date', !!made2 && made2.project_id === 'p1' && !made2.planned_at && !made2.due_at);
+  $('#fab').click(); await wait(100);
+  await type('Order fittings @Laptop by tomorrow #');
+  check('“#” opens the project search', !!$('.ss-pop .ss-q') && !!$('#quick [data-qe-drop="tag"]') && has('#quick .qe-chips', 'laptop', 'due tomorrow'));
+  const opt = $$('.ss-pop .ss-opt').find((li) => /driveway trailer/i.test(li.textContent));
+  opt.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); await wait(100);
+  check('picked: the project chip, and the # is gone', !$('.ss-pop') && has('#quick .qe-chips', 'driveway trailer') && !title().value.includes('#'));
+  $('#quick').requestSubmit(); await wait(400);
+  const made3 = t.tasks.find((x) => x.title === 'Order fittings');
+  const tmr = new Date(); tmr.setDate(tmr.getDate() + 1);
+  check('saved: project, tag and due tomorrow', !!made3 && made3.project_id === 'p3' && t.task_tags.some((l) => l.task_id === made3.id && l.tag_id === 'g1') && dk(new Date(made3.due_at)) === dk(tmr), made3 ? `${made3.project_id} ${made3.due_at}` : 'not made');
 }
 
 // Six: the Ivy Lee list. Today and tomorrow are the Daily review's focus rows; yesterday's open leftovers

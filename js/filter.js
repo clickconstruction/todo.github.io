@@ -1,7 +1,7 @@
 // View filter (the "eye"): which actions a list shows, remembered per viewer.
 //   show: available (can do now) | remaining (all open) | all (open, completed, dropped)
 //   fits: 0 (any) or a number of minutes; only actions estimated at or under it
-import { sb, app, run, isOpen, visible, onHoldTagFor, esc } from './state.js';
+import { sb, app, run, isOpen, visible, onHoldTagFor, esc, db, effectiveTagIds, tagGroups, tagGroupChildren, byId } from './state.js';
 import { isAvailable } from './availability.js';
 import { byDistance } from './places.js';
 
@@ -18,7 +18,15 @@ export function setFilter(patch) {
 }
 
 const SHOW = [['available', 'Available'], ['remaining', 'Remaining'], ['all', 'All']];
-const SORTS = [['default', 'Default order'], ['distance', 'Nearest first']];
+// Sorts: the list's own order, nearest first (with a location fix), and any tag group with two or more
+// children, in the children's order (a project's tags count for its actions; untagged last).
+const sortOptions = () => [['default', 'Default order'], ...(app.here ? [['distance', 'Nearest first']] : []), ...tagGroups().map((g) => [`tag:${g.id}`, `By ${g.name}`])];
+const groupSort = () => { const m = /^tag:(.+)$/.exec(filter.sort || ''); return m && byId(db.tags, m[1]) ? byId(db.tags, m[1]) : null; };
+// 0 for the first child's cards … n for cards with none of them.
+function groupRank(parent) {
+  const pos = new Map(tagGroupChildren(parent.id).map((g, i) => [g.id, i]));
+  return (t) => { let best = pos.size; effectiveTagIds(t).forEach((id) => { if (pos.has(id) && pos.get(id) < best) best = pos.get(id); }); return best; };
+}
 const ENERGIES = [['', 'Any energy'], ['low', '🔋 Low energy'], ['medium', '⚡ Up to medium']];
 const LEVEL = { low: 1, medium: 2, high: 3 };
 const FITS = [[0, 'Any time'], [5, '≤ 5 min'], [15, '≤ 15 min'], [30, '≤ 30 min'], [60, '≤ 1 hour']];
@@ -30,7 +38,7 @@ document.addEventListener('toggle', (e) => { if (e.target.matches && e.target.ma
 const label = (list, v) => (list.find(([x]) => String(x) === String(v)) || [0, ''])[1];
 export function filterSummary() {
   return [filter.show !== DEFAULT.show && label(SHOW, filter.show), Number(filter.fits) && label(FITS, filter.fits), filter.energy && label(ENERGIES, filter.energy).replace(/^\S+\s/, ''),
-    filter.sort === 'distance' && app.here && 'Nearest first'].filter(Boolean).join(' · ');
+    filter.sort === 'distance' && app.here && 'Nearest first', groupSort() && `By ${groupSort().name}`].filter(Boolean).join(' · ');
 }
 export const filterBar = (extra = '') => {
   const sum = filterSummary();
@@ -40,14 +48,19 @@ export const filterBar = (extra = '') => {
   <label><span aria-hidden="true">⏱</span><select data-filter="fits" aria-label="Fits in">${FITS.map(([v, l]) => `<option value="${v}" ${Number(filter.fits) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   <label><span aria-hidden="true">⚡</span><select data-filter="energy" aria-label="Energy">${ENERGIES.map(([v, l]) => `<option value="${v}" ${(filter.energy || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   ${extra}
-  ${app.here ? `<label><span aria-hidden="true">↕</span><select data-filter="sort" aria-label="Sort">${SORTS.map(([v, l]) => `<option value="${v}" ${filter.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
+  ${app.here || tagGroups().length ? `<label><span aria-hidden="true">↕</span><select data-filter="sort" aria-label="Sort">${sortOptions().map(([v, l]) => `<option value="${v}" ${filter.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
   ${sum ? '<button type="button" class="link-btn" data-act="reset-filter">Reset</button>' : ''}
   <button type="button" class="btn small save-persp" data-act="save-perspective" title="Save this view as a perspective">Save as perspective</button>
   </div></details>`;
 };
 
 // "Nearest first" (needs a location fix); otherwise the list's own order.
-export const sortTasks = (tasks, fallback) => (filter.sort === 'distance' && app.here ? byDistance(tasks, fallback) : [...tasks].sort(fallback));
+export const sortTasks = (tasks, fallback) => {
+  if (filter.sort === 'distance' && app.here) return byDistance(tasks, fallback);
+  const group = groupSort();
+  if (group) { const rank = groupRank(group); return [...tasks].sort((a, b) => rank(a) - rank(b) || fallback(a, b)); }
+  return [...tasks].sort(fallback);
+};
 
 export function passes(t) {
   // Just-completed items stay visible (struck through) until reload so Undo has context.

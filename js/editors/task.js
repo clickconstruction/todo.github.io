@@ -1,9 +1,12 @@
 // Task editor: one form builder used by the pop-up sheet (phones, new items) and by the
 // desktop inspector panel (edits in place, saving as you go). Plus quick entry.
-import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, isOpen, taskSort, tagsFor, onHoldTagFor, tagLabel } from '../state.js';
+import { sb, db, app, $, esc, byId, run, syncRow, toast, openSheet, isOpen, taskSort, tagsFor, onHoldTagFor, tagLabel, sortedTags } from '../state.js';
+import { parseCapture, dayLabel } from '../capture-grammar.js';
+import { openSearch } from '../select-search.js';
+import { atDefaultTime } from '../dates.js';
 import { fromDateInput, fromDateTimeInput, HOURS, quickDate } from '../dates.js';
 import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
-import { saveTask, capture } from '../data.js';
+import { saveTask, capture, setLinks } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { locationFieldHtml, wireLocationField } from './place.js';
 import { placeFor } from '../places.js';
@@ -266,7 +269,9 @@ export function renderTaskInspector(container, task) {
 export function openQuickEntry(opts = {}) {
   const sheet = openSheet(`<form method="dialog" id="quick">
     <h2>${esc(opts.heading || 'Capture to Inbox')}</h2>
-    <input type="text" name="title" placeholder="What's on your mind?" autocomplete="off" enterkeyhint="next">
+    <div class="qe-title"><input type="text" name="title" placeholder="What's on your mind?" autocomplete="off" enterkeyhint="next">
+      <select name="qe_project" class="qe-select" data-create="project" aria-hidden="true" tabindex="-1"><option value=""></option>${db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold').sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
+    <div class="qe-chips" data-qe-chips></div>
     <label class="gain-quick"><span class="gain-label"><span aria-hidden="true">✦</span> What do I gain?</span>
       <input type="text" name="gain" maxlength="500" placeholder="Optional · say why it’s worth doing" autocomplete="off" enterkeyhint="done"></label>
     <div class="actions quick-media"><label class="btn" title="Take or choose a photo">📷 Photo<input type="file" accept="image/*" capture="environment" data-quick-file hidden></label>
@@ -275,6 +280,45 @@ export function openQuickEntry(opts = {}) {
   </form>`);
   const form = $('#quick', sheet);
   $('[data-cancel]', sheet).onclick = () => sheet.close();
+  // What the line carries (js/capture-grammar.js): a project, tags, a due or planned day, shown as chips
+  // you can take off; recent projects to tap; "#" opens the project search.
+  const pick = { project_id: null, tag_ids: [], due: null, planned: null, drop: new Set() };
+  const titleEl = form.elements.title; const selEl = form.elements.qe_project;
+  const RECENT = 'todo.capture.recent';
+  const recentIds = () => { try { return JSON.parse(localStorage.getItem(RECENT) || '[]'); } catch { return []; } };
+  const parsed = () => parseCapture(titleEl.value, { projects: db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold'), tags: sortedTags().map((g) => ({ id: g.id, name: g.name, label: tagLabel(g) })), keep: pick.drop });
+  const applied = () => {
+    const r = parsed();
+    return { title: r.title, gain: r.gain, chips: r.chips,
+      project_id: pick.project_id || (!pick.drop.has('project') && r.project ? r.project.id : null),
+      tag_ids: [...new Set([...pick.tag_ids, ...(pick.drop.has('tag') ? [] : r.tags.map((t) => t.id))])],
+      due: pick.due || (pick.drop.has('due') ? null : r.due), planned: pick.planned || (pick.drop.has('planned') ? null : r.planned) };
+  };
+  const drawChips = () => {
+    const a = applied();
+    const chips = [];
+    if (a.project_id) chips.push(`<button type="button" class="qe-chip on" data-qe-drop="project" title="Take off">🗂️ ${esc((byId(db.projects, a.project_id) || {}).name || '')} ×</button>`);
+    a.tag_ids.forEach((id) => { const g = byId(db.tags, id); if (g) chips.push(`<button type="button" class="qe-chip on" data-qe-drop="tag" data-id="${id}" title="Take off">🏷️ ${esc(tagLabel(g))} ×</button>`); });
+    if (a.due) chips.push(`<button type="button" class="qe-chip on red" data-qe-drop="due" title="Take off">due ${esc(dayLabel(a.due))} ×</button>`);
+    if (a.planned) chips.push(`<button type="button" class="qe-chip on" data-qe-drop="planned" title="Take off">planned ${esc(dayLabel(a.planned))} ×</button>`);
+    if (!a.project_id) recentIds().map((id) => byId(db.projects, id)).filter((p) => p && p.status === 'active').slice(0, 3).forEach((p) => chips.push(`<button type="button" class="qe-chip" data-qe-project="${p.id}">＋ ${esc(p.name)}</button>`));
+    if (!chips.length) chips.push('<span class="hint">#project · @tag · “due fri” · a day word</span>');
+    $('[data-qe-chips]', form).innerHTML = chips.join('');
+  };
+  titleEl.addEventListener('input', () => { if (titleEl.value.endsWith('#')) openSearch(selEl); drawChips(); });
+  selEl.addEventListener('change', () => { if (selEl.value) { pick.project_id = selEl.value; pick.drop.delete('project'); titleEl.value = `${titleEl.value.replace(/#$/, '').trimEnd()} `.replace(/^ $/, ''); } selEl.value = ''; drawChips(); setTimeout(() => titleEl.focus(), 0); });
+  $('[data-qe-chips]', form).addEventListener('click', (e) => {
+    const off = e.target.closest('[data-qe-drop]'); const on = e.target.closest('[data-qe-project]');
+    if (off) {
+      const k = off.dataset.qeDrop;
+      if (k === 'project') { if (pick.project_id) pick.project_id = null; else pick.drop.add('project'); }
+      else if (k === 'tag') { const id = off.dataset.id; if (pick.tag_ids.includes(id)) pick.tag_ids = pick.tag_ids.filter((x) => x !== id); else pick.drop.add('tag'); }
+      else if (pick[k]) pick[k] = null; else pick.drop.add(k);
+    } else if (on) { pick.project_id = on.dataset.qeProject; pick.drop.delete('project'); }
+    else return;
+    drawChips(); titleEl.focus();
+  });
+  drawChips();
   form.onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -293,14 +337,20 @@ export function openQuickEntry(opts = {}) {
       }
       return;
     }
-    // "Idea → gain" in the title works too.
-    const split = splitGain(f.get('title'));
-    const gain = String(f.get('gain') || '').trim() || split.gain;
-    if (!split.title) { form.elements.title.focus(); return; }
+    // "Idea → gain" in the title works too, and so do #project, @tag and a day (the chips).
+    const a = applied();
+    const gain = String(f.get('gain') || '').trim() || a.gain;
+    if (!a.title) { form.elements.title.focus(); return; }
     sheet.close();
-    const row = await capture(split.title, gain ? { gain } : {});
+    const at = (day, key) => atDefaultTime(new Date(`${day}T12:00:00`), key).toISOString();
+    const row = await capture(a.title, { ...(gain ? { gain } : {}), ...(a.project_id ? { project_id: a.project_id, in_inbox: false } : {}), ...(a.due ? { due_at: at(a.due, 'due_at') } : {}), ...(a.planned ? { planned_at: at(a.planned, 'planned_at') } : {}) });
+    if (row && a.tag_ids.length) { await setLinks('task_tags', 'taskTags', 'task_id', row.id, a.tag_ids); app.render(); }
+    if (row && a.project_id) { try { localStorage.setItem(RECENT, JSON.stringify([a.project_id, ...recentIds().filter((x) => x !== a.project_id)].slice(0, 5))); } catch { /* private mode */ } }
     if (opts.onCaptured) { await opts.onCaptured(row); return; }
-    if (row) offerPlacement(row, location.hash === '#inbox' ? '' : 'Captured to Inbox'); // in the Inbox, only when it fits somewhere
+    const when = [a.due && `due ${dayLabel(a.due)}`, a.planned && `planned ${dayLabel(a.planned)}`].filter(Boolean).join(' · ');
+    const where = a.project_id ? `Captured to ${(byId(db.projects, a.project_id) || {}).name}` : 'Captured to Inbox';
+    if (row && !a.project_id) offerPlacement(row, location.hash === '#inbox' ? '' : `${where}${when ? ` · ${when}` : ''}`); // in the Inbox, only when it fits somewhere
+    else if (row) toast(`${where}${when ? ` · ${when}` : ''}`);
     else if (location.hash !== '#inbox') toast('Captured to Inbox');
   };
   // A photo or file: an Inbox item with it attached (titled "Photo · 3:42 PM" unless you typed one).

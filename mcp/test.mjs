@@ -1181,6 +1181,27 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   started = [{ id: 'x' }];
   assert(await sendDailyReminders(env, fake, thu730) === 0, 'not if the day was already started');
 }
+// ---------- sort by a tag group (Revenue › Maintenance › Relevance), and a child's place in it ----------
+{
+  const mk = (id, name, parent_id, sort, created_at) => ({ id, user_id: UID, name, parent_id, sort, created_at, status: 'active', place_id: null, location_trigger: null, location_radius_m: null });
+  db.tags.push(mk('bk', 'Bucket', null, 50, '2026-10-01T00:00:00Z'), mk('bk1', 'Revenue', 'bk', 0, '2026-10-01T00:00:01Z'), mk('bk2', 'Maintenance', 'bk', 0, '2026-10-01T00:00:02Z'), mk('bk3', 'Relevance', 'bk', 0, '2026-10-01T00:00:03Z'));
+  const open = db.tasks.filter((t) => !t.completed_at && !t.dropped_at && !t.parent_id && t.project_id).slice(0, 3);
+  const [rel, viaProject, maint] = open;
+  db.task_tags.push({ task_id: rel.id, tag_id: 'bk3', user_id: UID }, { task_id: maint.id, tag_id: 'bk2', user_id: UID });
+  db.project_tags.push({ project_id: viaProject.project_id, tag_id: 'bk1', user_id: UID });
+  const sorted = await tool('list_tasks', { sort_by_tag_group: 'Bucket', limit: 500 });
+  const at = (id) => sorted.items.findIndex((x) => x.id === id);
+  assert(at(viaProject.id) < at(maint.id) && at(maint.id) < at(rel.id) && /Revenue › Maintenance › Relevance/.test(sorted.note), 'list_tasks sort_by_tag_group: Revenue (via its project) › Maintenance › Relevance');
+  const untagged = sorted.items.filter((x) => ![rel.id, viaProject.id, maint.id].includes(x.id) && x.project_id !== viaProject.project_id);
+  assert(untagged.every((x) => sorted.items.indexOf(x) > at(rel.id)), 'cards with none of the group come last');
+  let err = null; try { await tool('list_tasks', { sort_by_tag_group: 'Nope' }); } catch (e) { err = e.message; }
+  assert(/no tag group/i.test(err || ''), 'an unknown group says so');
+  const moved = await tool('update_tag', { tag: 'Bucket : Relevance', position: 1 });
+  const order = db.tags.filter((t) => t.parent_id === 'bk').sort((x, y) => x.sort - y.sort).map((t) => t.name);
+  assert(moved.id === 'bk3' && order.join() === 'Relevance,Revenue,Maintenance', 'update_tag position renumbers the group');
+  const again = await tool('list_tasks', { sort_by_tag_group: 'bk', limit: 500 });
+  assert(again.items.findIndex((x) => x.id === rel.id) < again.items.findIndex((x) => x.id === viaProject.id), 'the new order sorts lists');
+}
 // ---------- Six (the Ivy Lee list) ----------
 {
   const s0 = await tool('six', {});

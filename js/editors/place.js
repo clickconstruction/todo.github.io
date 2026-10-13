@@ -1,7 +1,7 @@
 // Place editor (search an address, use your location, or drop a pin; set the radius) and
 // the Location field shared by the action, project and tag editors. The place editor
 // opens in its own dialog so it can sit on top of another editor ("+ New place…").
-import { db, app, $, esc, byId, openSheet, tagLabel } from '../state.js';
+import { db, app, $, esc, byId, openSheet, tagLabel, tagGroupChildren } from '../state.js';
 import { requestLocation, fmtDistance, RADIUS_PRESETS, fmtRadius } from '../geo.js';
 import { activePlaces, activePlace, placeFor, placeDistance, insertPlace, updatePlace, TRIGGERS, triggerLabel, actionsAt } from '../places.js';
 import { loadMaps, makeMap, pinEl, circle, reverseGeocode } from '../maps.js';
@@ -209,7 +209,9 @@ export function openTagEditor(tag) {
   const sheet = openSheet(`<form method="dialog" id="tag-form">
     <h2>Edit tag</h2>
     <input type="text" name="name" value="${esc(tag.name)}" required autocomplete="off" aria-label="Tag name">
-    ${tag.parent_id ? `<p class="hint">Inside “${esc(tagLabel(byId(db.tags, tag.parent_id)))}”</p>` : ''}
+    ${tag.parent_id ? `<p class="hint">Inside “${esc(tagLabel(byId(db.tags, tag.parent_id)))}”</p>
+    <label>Place in its group<select name="position">${tagGroupChildren(tag.parent_id).map((s, i) => `<option value="${i}" ${s.id === tag.id ? 'selected' : ''}>${i + 1}${s.id === tag.id ? ' · this one' : ` · ${esc(s.name)}`}</option>`).join('')}</select></label>
+    <p class="hint">Lists sorted by “${esc((byId(db.tags, tag.parent_id) || {}).name || '')}” (View → Sort) follow this order.</p>` : ''}
     ${locationFieldHtml(tag)}
     <p class="hint">Actions with this tag use its place unless they have their own.</p>
     <div class="actions"><div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div></div>
@@ -221,8 +223,14 @@ export function openTagEditor(tag) {
     e.preventDefault();
     const name = form.elements.name.value.trim();
     if (!name) return;
+    const pos = form.elements.position ? Number(form.elements.position.value) : null;
     sheet.close();
     await updateTag(tag, { name, ...collect() });
+    if (pos !== null && tag.parent_id) { // renumber the group so this one sits at that place
+      const order = tagGroupChildren(tag.parent_id).filter((s) => s.id !== tag.id); order.splice(pos, 0, byId(db.tags, tag.id) || tag);
+      for (let i = 0; i < order.length; i++) if ((order[i].sort ?? 0) !== i) await updateTag(order[i], { sort: i });
+      app.render();
+    }
   };
   sheet.showModal();
 }
