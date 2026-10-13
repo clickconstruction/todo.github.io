@@ -555,11 +555,22 @@ class Api {
       return hit;
     }
     if (!create) throw new Error(`No person called "${r}". Use list_people or save_person.`);
-    // An existing "Waiting : Name" tag becomes theirs, so items with it count as waiting on them.
-    const tags = await this.q(`tags?${this.u}&select=id,name,parent_id`);
-    const tag = tags.find((g) => g.parent_id && g.name.toLowerCase() === r.toLowerCase() && /waiting/i.test((tags.find((x) => x.id === g.parent_id) || {}).name || ''));
-    const [row] = await this.q('people', { method: 'POST', prefer: 'return=representation', body: { user_id: this.userId, name: r, email: email || null, phone: phone || null, tag_id: tag ? tag.id : null } });
+    // Their tag is "Waiting : Name" (an existing one is theirs; otherwise it is made), so items with it count as waiting on them.
+    const [row] = await this.q('people', { method: 'POST', prefer: 'return=representation', body: { user_id: this.userId, name: r, email: email || null, phone: phone || null, tag_id: await this.waitingTagFor(r) } });
     return row;
+  }
+  // The id of the "Waiting : Name" tag for a person: the existing one, else made.
+  async waitingTagFor(name) {
+    const tags = await this.q(`tags?${this.u}&select=id,name,parent_id`);
+    const have = tags.find((g) => g.parent_id && g.name.toLowerCase() === String(name).toLowerCase() && /^waiting/i.test((tags.find((x) => x.id === g.parent_id) || {}).name || ''));
+    return have ? have.id : this.ensureTag(`Waiting : ${name}`);
+  }
+  // A person's own "Waiting : Name" tag follows a rename.
+  async renamePersonTag(p, newName) {
+    if (!p || !p.tag_id || !newName || newName === p.name) return;
+    const tags = await this.q(`tags?${this.u}&select=id,name,parent_id`);
+    const g = tags.find((x) => x.id === p.tag_id);
+    if (g && g.parent_id && g.name === p.name && /^waiting/i.test((tags.find((x) => x.id === g.parent_id) || {}).name || '')) await this.q(`tags?${this.u}&id=eq.${g.id}`, { method: 'PATCH', body: { name: newName } });
   }
 
   // Project outcome, area and goal (Horizons of Focus), by name or id.

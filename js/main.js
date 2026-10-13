@@ -1,8 +1,8 @@
 // Todo Tooling entry point: event wiring, auth, service worker.
 import { tickDaily } from './dailies.js';
-import { sb, db, app, $, byId, isOpen, toggleCollapsed, toast } from './state.js';
+import { sb, db, app, $, byId, isOpen, toggleCollapsed, toast, tagLabel } from './state.js';
 import { render } from './router.js';
-import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, bulkUpdate, markReviewed, indentTask, outdentTask } from './data.js';
+import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, bulkUpdate, markReviewed, indentTask, outdentTask, ensureTag } from './data.js';
 import { openBreakdown } from './editors/breakdown.js';
 import { descendants } from './tree.js';
 import { reviewQueue, remainingIds, reviewDueCount } from './views/review.js';
@@ -18,6 +18,7 @@ import { setFilter } from './filter.js';
 import { setTagStatus, insertProject } from './data.js';
 // A project picker can make the project typed into it ("+ New project").
 registerCreator('project', async (name) => { const p = await insertProject(name); return p ? { value: p.id, label: p.name } : null; });
+registerCreator('tag', async (label) => { const g = await ensureTag(label); return g ? { value: g.id, label: tagLabel(g) } : null; });
 import { openNewProject, openNewTemplate, openSaveAsTemplate } from './views/templates.js';
 import { openFocusPicker, unfocus, focusOn } from './editors/focus.js';
 import { handleKey, H } from './shortcuts.js';

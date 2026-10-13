@@ -7,7 +7,7 @@ const DECISIONS = ['next_action', 'done', 'delegate', 'project', 'someday', 'tic
 export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
   const today = (api) => localDate(new Date().toISOString(), api.tz);
   const plusDays = (api, n) => localDate(new Date(Date.now() + n * 86400000).toISOString(), api.tz);
-  const personOut = (p, extra = {}) => ({ id: p.id, name: p.name, email: p.email || undefined, phone: p.phone || undefined, notes: p.notes || undefined, archived: !!p.archived_at || undefined, ...extra });
+  const personOut = (p, extra = {}) => ({ id: p.id, name: p.name, email: p.email || undefined, phone: p.phone || undefined, notes: p.notes || undefined, tag_id: p.tag_id || null, archived: !!p.archived_at || undefined, ...extra });
   const refOut = (r, projects, reveal) => ({
     id: r.id, title: r.title, topic: r.topic || undefined, notes: r.body || undefined,
     project: r.project_id ? ((projects.find((p) => p.id === r.project_id) || {}).name || null) : undefined,
@@ -171,7 +171,7 @@ export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
     },
     {
       name: 'save_person',
-      description: 'Add or edit a person (name, email, phone, notes, tag). tag links an existing tag like "Waiting : Hiro" so items with it count as waiting on them. archived: true archives (never deleted).',
+      description: 'Add or edit a person (name, email, phone, notes, tag). A new person gets their own tag, "Waiting : Name" (made if needed), so items with it count as waiting on them; it follows a rename. tag links a different tag instead (made if it does not exist); null for none. archived: true archives (never deleted).',
       inputSchema: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, email: { type: ['string', 'null'] }, phone: { type: ['string', 'null'] }, notes: { type: 'string' }, tag: { type: ['string', 'null'] }, archived: { type: 'boolean' } } },
       async run(api, a) {
         const body = {};
@@ -180,14 +180,16 @@ export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
         if (a.archived !== undefined) body.archived_at = a.archived ? new Date().toISOString() : null;
         if (a.tag !== undefined) {
           if (a.tag === null) body.tag_id = null;
-          else { const { tags, tagLabel } = await api.lookups(); const g = tags.find((x) => x.id === a.tag || tagLabel(x).toLowerCase() === String(a.tag).toLowerCase()); if (!g) throw new Error(`No tag "${a.tag}"`); body.tag_id = g.id; }
+          else { const { tags, tagLabel } = await api.lookups(); const g = tags.find((x) => x.id === a.tag || tagLabel(x).toLowerCase() === String(a.tag).toLowerCase()); body.tag_id = g ? g.id : await api.ensureTag(String(a.tag)); }
         }
         if (a.id) {
           const p = await api.resolvePerson(a.id, { archived: true });
+          if (body.name && a.tag === undefined) await api.renamePersonTag(p, body.name); // their own tag follows the name
           const [row] = await api.q(`people?${api.u}&id=eq.${p.id}`, { method: 'PATCH', prefer: 'return=representation', body });
           return personOut(row);
         }
         if (!body.name) throw new Error('name is required');
+        if (a.tag === undefined) body.tag_id = await api.waitingTagFor(body.name); // their own tag, made if needed
         const [row] = await api.q('people', { method: 'POST', prefer: 'return=representation', body: { user_id: api.userId, ...body } });
         return personOut(row);
       },

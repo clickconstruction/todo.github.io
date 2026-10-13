@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -352,6 +352,26 @@ async function slipboxReading(check) {
   check('Up next: priority (flagged) first, marked ⚑, counted', rows.findIndex((x) => x.includes('High Output')) < rows.findIndex((x) => x.includes('Newer unflagged')) && rows.find((x) => x.includes('High Output')).includes('⚑') && has(undefined, '1 priority'));
   const { isFlaggedTask } = await import('/js/views/basic.js');
   check('flagged but waiting on the list: not in Flagged', !isFlaggedTask(db.tasks.find((x) => x.id === 'rdP1')));
+}
+
+// A person's own tag is "Waiting : their name": offered as it is typed, made on save, and renamed with them.
+async function personTag(check) {
+  const t = T();
+  const { openPersonEditor } = await import('/js/editors/gtd.js');
+  await go('#waiting');
+  openPersonEditor(null); await wait(80);
+  check('New person: the tag is “Waiting : …”, made for them, chosen to start', $('#sheet').open && $('#sheet [name=tag_id]').value === 'auto' && has('#sheet [name=tag_id] option[data-auto]', 'waiting : …'));
+  const name = $('#sheet [name=name]'); name.value = 'Taunya'; name.dispatchEvent(new Event('input', { bubbles: true })); await wait(30);
+  check('the option follows the name as it is typed', has('#sheet [name=tag_id] option[data-auto]', 'waiting : taunya'));
+  $('#sheet form').requestSubmit(); await wait(400);
+  const person = t.people.find((p) => p.name === 'Taunya');
+  const tag = person && t.tags.find((g) => g.id === person.tag_id);
+  check('saved: a tag named for them under Waiting, linked', !!tag && tag.name === 'Taunya' && /^waiting$/i.test((t.tags.find((g) => g.id === tag.parent_id) || {}).name));
+  openPersonEditor(t.people.find((p) => p.name === 'Taunya')); await wait(80);
+  check('editing: their tag is the one chosen', $('#sheet [name=tag_id]').value === tag.id);
+  const n2 = $('#sheet [name=name]'); n2.value = 'Taunya Reyes'; n2.dispatchEvent(new Event('input', { bubbles: true }));
+  $('#sheet form').requestSubmit(); await wait(400);
+  check('renamed: the tag follows', t.tags.find((g) => g.id === tag.id).name === 'Taunya Reyes' && t.people.find((p) => p.id === person.id).name === 'Taunya Reyes');
 }
 
 // Sort by a tag group: Revenue › Maintenance › Relevance as three child tags; the View sort lists the

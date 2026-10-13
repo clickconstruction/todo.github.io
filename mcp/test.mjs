@@ -1181,6 +1181,19 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   started = [{ id: 'x' }];
   assert(await sendDailyReminders(env, fake, thu730) === 0, 'not if the day was already started');
 }
+// ---------- a person's own tag: "Waiting : Name", made with them, following a rename ----------
+{
+  const t1 = await tool('save_person', { name: 'Taunya', email: 'taunya@clickplumbing.com' });
+  const g = db.tags.find((x) => x.id === t1.tag_id);
+  const parent = g && db.tags.find((x) => x.id === g.parent_id);
+  assert(g && g.name === 'Taunya' && parent && /^waiting$/i.test(parent.name), 'a new person gets "Waiting : Name", made for them');
+  const t2 = await tool('save_person', { id: t1.id, name: 'Taunya Reyes' });
+  assert(t2.tag_id === t1.tag_id && db.tags.find((x) => x.id === t1.tag_id).name === 'Taunya Reyes', 'the tag follows a rename');
+  const t3 = await tool('save_person', { name: 'Nobody Tagged', tag: null });
+  assert(t3.tag_id === null, 'tag: null keeps a person without one');
+  const t4 = await tool('save_person', { name: 'Chris', tag: 'Waiting : Chris O' });
+  assert(db.tags.find((x) => x.id === t4.tag_id).name === 'Chris O', 'a tag named for them is made if it does not exist');
+}
 // ---------- sort by a tag group (Revenue › Maintenance › Relevance), and a child's place in it ----------
 {
   const mk = (id, name, parent_id, sort, created_at) => ({ id, user_id: UID, name, parent_id, sort, created_at, status: 'active', place_id: null, location_trigger: null, location_radius_m: null });

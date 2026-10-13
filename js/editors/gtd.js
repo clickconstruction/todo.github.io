@@ -2,6 +2,7 @@
 // Tickle ("remind me on…"), Person and Reference item. Handlers are set on each sheet's own form,
 // so nothing leaks onto the shared #sheet.
 import { db, app, $, esc, byId, openSheet, toast, tagLabel, sortedTags } from '../state.js';
+import { waitingTagFor, renamePersonTag } from '../gtd.js';
 import { startOfToday, addDays, addMonths } from '../dates.js';
 import { livePeople, personNamed, savePerson, delegate, draftMessage, messageLink, tickle, tickleNew, dayKey, topics, saveReference, initials } from '../gtd.js';
 import { attachFieldHtml, wireAttachField, uploadFiles } from './attachField.js';
@@ -115,14 +116,16 @@ export function openPersonEditor(p, { onDone = () => {} } = {}) {
     <label>Name<input type="text" name="name" value="${esc(p ? p.name : '')}" required maxlength="100" autocomplete="off"></label>
     <div class="grid2"><label>Email<input type="email" name="email" value="${esc((p && p.email) || '')}" autocomplete="off"></label>
       <label>Phone<input type="tel" name="phone" value="${esc((p && p.phone) || '')}" autocomplete="off"></label></div>
-    <label>Tag <span class="hint">items with this tag count as waiting on them (e.g. Waiting : ${esc(p ? p.name : 'Hiro')})</span>
-      <select name="tag_id"><option value="">None</option>${tags.map((g) => `<option value="${g.id}" ${p && p.tag_id === g.id ? 'selected' : ''}>${esc(tagLabel(g))}</option>`).join('')}</select></label>
+    <label>Tag <span class="hint">items with this tag count as waiting on them; their own tag is “Waiting : their name”</span>
+      <select name="tag_id" data-create="tag"><option value="auto" data-auto ${p && p.tag_id ? '' : 'selected'}>Waiting : ${esc(p ? p.name : '…')} · made for them</option><option value="">None</option>${tags.map((g) => `<option value="${g.id}" ${p && p.tag_id === g.id ? 'selected' : ''}>${esc(tagLabel(g))}</option>`).join('')}</select></label>
     <label>Notes<textarea name="notes" rows="3" placeholder="Prefers texts after 5pm…">${esc((p && p.notes) || '')}</textarea></label>
     <div class="actions">${p ? `<button type="button" class="btn danger" data-archive>${p.archived_at ? 'Restore' : 'Archive'}</button>` : ''}
       <div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div></div>
   </form>`);
   const form = $('form', sheet);
   $('[data-cancel]', form).onclick = () => sheet.close();
+  // The made-for-them option follows the name as it is typed.
+  form.elements.name.addEventListener('input', () => { const o = $('[data-auto]', form); if (o) o.textContent = `Waiting : ${form.elements.name.value.trim() || '…'} · made for them`; });
   const archive = $('[data-archive]', form);
   if (archive) archive.onclick = async () => {
     sheet.close();
@@ -138,6 +141,8 @@ export function openPersonEditor(p, { onDone = () => {} } = {}) {
     const fields = { name: f.get('name').trim(), email: f.get('email').trim() || null, phone: f.get('phone').trim() || null, tag_id: f.get('tag_id') || null, notes: f.get('notes') };
     if (!fields.name) return;
     sheet.close();
+    if (fields.tag_id === 'auto') { const g = await waitingTagFor(fields.name); fields.tag_id = g ? g.id : null; }
+    else if (p) await renamePersonTag(p, fields.name); // their own tag follows a rename
     const row = await savePerson(p, fields);
     app.render();
     onDone(row);

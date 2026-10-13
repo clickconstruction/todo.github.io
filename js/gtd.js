@@ -5,7 +5,7 @@ import { db, app, sb, run, byId, syncRow, toast, isOpen, tagsFor } from './state
 import { waitingRule } from './availability.js';
 import { startOfToday, addDays, isDeferred } from './dates.js';
 import { placeFor } from './gain.js';
-import { saveTask } from './data.js';
+import { saveTask, ensureTag, updateTag } from './data.js';
 
 export const ENERGY = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
 export const ENERGY_ICON = { low: '🔋', medium: '⚡', high: '🔥' };
@@ -38,9 +38,23 @@ export async function personNamed(name, extra = {}) {
   if (!n) return null;
   const hit = livePeople().find((p) => p.name.toLowerCase() === n.toLowerCase());
   if (hit) { if (Object.keys(extra).some((k) => extra[k] && !hit[k])) await savePerson(hit, Object.fromEntries(Object.entries(extra).filter(([k, v]) => v && !hit[k]))); return hit; }
-  // An existing "Waiting : Name" tag becomes this person's tag, so those items are waiting on them.
-  const tag = db.tags.find((g) => g.name.toLowerCase() === n.toLowerCase() && g.parent_id && /waiting/i.test((byId(db.tags, g.parent_id) || {}).name || ''));
+  // Their tag is "Waiting : Name" (an existing one is theirs; otherwise it is made), so items with it
+  // count as waiting on them.
+  const tag = await waitingTagFor(n);
   return savePerson(null, { name: n, ...extra, tag_id: tag ? tag.id : null });
+}
+// The "Waiting : Name" tag for a person: the existing one, else made.
+export async function waitingTagFor(name) {
+  const n = String(name || '').trim();
+  if (!n) return null;
+  const have = db.tags.find((g) => g.name.toLowerCase() === n.toLowerCase() && g.parent_id && /^waiting/i.test((byId(db.tags, g.parent_id) || {}).name || ''));
+  return have || ensureTag(`Waiting : ${n}`);
+}
+// A person's own "Waiting : Name" tag follows a rename.
+export async function renamePersonTag(p, newName) {
+  const g = p && p.tag_id && byId(db.tags, p.tag_id);
+  if (!g || !g.parent_id || g.name !== p.name || newName === p.name) return;
+  if (/^waiting/i.test((byId(db.tags, g.parent_id) || {}).name || '')) await updateTag(g, { name: newName });
 }
 // People for every "Waiting : X" tag that doesn't have one yet.
 export async function peopleFromWaitingTags() {
