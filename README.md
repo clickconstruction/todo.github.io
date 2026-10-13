@@ -9,7 +9,7 @@ A GTD (Getting Things Done) to-do app at **[todotooling.com](https://todotooling
 ## What it does
 
 - **Capture anywhere:** the Inbox, email (send or BCC `inbox@todotooling.com`), an iPhone Shortcut, or Claude.
-- **Clarify and organize:** projects (parallel, sequential or single actions), steps up to four levels deep, tags, people, "waiting on", "waits for" links between cards, the tickler, reference and someday.
+- **Clarify and organize:** projects (parallel, sequential or single actions), steps up to four levels deep, tags, people, "waiting on", "waits for" links between cards, the tickler, reference and someday. Typing a name no project has into any project picker offers to make it.
 - **Delegate and follow up:** hand an action to a person with a drafted message you send yourself, see which follow-ups are due, and keep an agenda of what to raise with each person. A person's own tag is "Waiting : their name": made with them, offered as you type their name, and renamed with them, so items with it count as waiting on them. **Print sheets** gives each person one printed page of what they owe you, oldest first with the day agreed, Done and Not yet boxes, a line for why and by when, and their agenda to talk about; **Debrief** on their page goes down the same list when the sheet comes back, completing cards and writing the reasons and new days onto them. A person with nothing open has an **Archive** button on the People list (the heading archives all of them at once), and "Show n archived" lists them with Restore; nobody is deleted. People can be in a **group** (what they are to you: Crew, Suppliers, Family; one each) and **on projects** (as many as they're part of, with a role word): the People list arranges itself by group, by project or A–Z, each group or project has its own Print sheets, a project's page lists its people with their open items there and offers anyone with open items who isn't on it yet, and the Tags list arranges people's tags by their group.
 - **What do I gain?** Every action can say why it's worth doing, so priorities explain themselves and ideas with no payoff are easy to drop.
 - **Six (the Ivy Lee list):** up to six things for the day, in order. The first open one is *Now*, the rest wait under *Then*, and finished ones stay in place, crossed out. Today and tomorrow are the Daily review's focus list, so both screens show the same six. What was left of yesterday comes to the top of today once (with Undo), and from the evening hour (Settings) the view opens on tomorrow. Add offers suggestions first (overdue and due, flagged, what *What now?* would pick), or a place to look: a Matrix box, Forecast's days, Projects or Tags as a tree (every project or tag opens in place to Next and Later, and a closed one shows what you ticked inside it), or Flagged; typing searches there, one link widens it to every open card, and you tick several and add them at once. It remembers where you last looked. The gear at the end of a row (or holding the row, or pressing e) edits the card there and then; the list redraws when you save. The copy button beside it puts the card's title on the clipboard. Adding plans the card for that day. Keys: d done, n not now, t tomorrow, a add. Claude works the same list with the `six` tool.
@@ -21,12 +21,12 @@ A GTD (Getting Things Done) to-do app at **[todotooling.com](https://todotooling
 - **Once a month, quarter or year:** a monthly check is the same checkbox for the routines and questions of a monthly review, a quarterly check for the ones you ask every quarter ("Am I making businesses?"), and a yearly check for the ones you ask every year. They never show in Today. Horizons has a monthly review, a quarterly check-in and a yearly review (the last next to the yearly read of your purpose and vision), each listing its checks and reaching the Weekly Review's horizons step while it is due; tick each as you answer it, and the review's "done" button starts them fresh. Make one from the editor ("Every month…", "Every quarter…", "Every year…"), a Full Review suggestion, or by asking Claude.
 - **A tick doesn't last forever:** a check's tick holds for half its cycle (3½ days for a weekly check, 15 days for a monthly one, 45 days for a quarterly one, six months for a yearly one) and then lapses on its own, so the next review always finds it fresh even if you never pressed done. The row says when ("ticked Oct 3 · fresh from Nov 17"). A lapsed tick is just an empty box, never a miss.
 - **Your own events:** an airshow, a trip, an appointment. Forecast shows them on every day they cover, next to the calendars you subscribe to (private iCal links from Google, iCloud or Outlook), the Events list shows what's coming by month, and they reach your phone through the calendar feed. Add them with + Event or ask Claude.
-- **Reviews:** Daily, Weekly (the full GTD checklist), per-project Review, and Full Review, which walks you through a whole library card by card with Claude suggesting and you approving Every decision can be undone, and Back looks at the cards you decided: your choice is ticked, and a click on another changes it.
+- **Reviews:** Daily, Weekly (the full GTD checklist), per-project Review, and Full Review, which walks you through a whole library card by card with Claude suggesting and you approving. Every decision can be undone, and Back looks at the cards you decided: your choice is ticked, and a click on another changes it.
 - **Capture with details:** one line can carry the project (`#Click Plumbing`), a tag (`@Laptop`), a deadline (`due fri`, `by fri`) and an intention (`plan fri`, or just `friday`). Each shows as a chip under the box before you save, and a tap takes it off. A `#` on its own opens the project search, and your recent projects are a tap. A word only becomes a chip when a project or tag of that name exists, so an @handle in a title stays text.
 - **Sort by a tag group:** make a parent tag with children, say Bucket with Revenue, Maintenance and Relevance, and every list's View gets a "By Bucket" sort: cards with the first child first, then the next, cards with none last. A project's tag counts for its cards. A child's place in the group is set in the tag editor, and Claude's list_tasks sorts the same way.
 - **Links in titles and notes:** a URL in a title shows as a small "↗ site" pill in its place, in lists and on the Full Review card, and opens the page in a new tab; a URL in notes is an underlined link. A card whose link lives in its notes gets the pill beside its title instead. The rest of the title still opens or edits the card.
 - **Edit as you go:** on a Full Review card, click the title, Gain, Project, When, Tags or Notes and it becomes a small editor right there. Save writes that one field, Esc puts it back, and the review keys sleep while it is open. Edit details still opens the whole editor.
-- **Claude a few cards ahead:** tick **Keep Claude ahead** at the top of a Full Review and Claude keeps a suggestion waiting on each of the next 20 cards, so a card already has one when you reach it and you only press Submit, Edit or Dismiss. The count beside the box ("7 of 10 drafted") shows how far ahead it is. Drafts come from your patterns, not your words, so Claude never drafts Drop or Done for something you haven't let go of.
+- **Claude a few cards ahead:** tick **Keep Claude ahead** at the top of a Full Review and Claude keeps a suggestion waiting on each of the next 20 cards, so a card already has one when you reach it and you only press Submit, Edit or Dismiss. The count beside the box ("7 of 20 drafted") shows how far ahead it is. Drafts come from your patterns, not your words, so Claude never drafts Drop or Done for something you haven't let go of.
 - **Places:** actions tied to locations, with Nearby, errand runs and location alerts.
 - **Reminders:** notifications on your devices that follow an item's dates.
 - **Attachments:** files on an action or project.
@@ -34,7 +34,7 @@ A GTD (Getting Things Done) to-do app at **[todotooling.com](https://todotooling
 - **A purpose you can tick:** your purpose and vision are written plainly (`# title`, `## section`, `**bold**`, `*italic*`, `- bullet`) with buttons for each, and read formatted; while you edit, the page as it will read sits beside the text. A line that starts with `[ ]` is a checkbox: tick them as you read, and "Mark as read today" clears them for next time.
 - **Horizons, perspectives, the Eisenhower matrix, checklists, templates, a slipbox and a reading list.**
 - **An OmniFocus import** with a guided sort afterwards.
-- **Nothing is ever deleted.** Actions are completed or dropped, projects are completed or dropped, and everything else (folders, places, events, calendars, attachments, perspectives) is archived. The database enforces this.
+- **Nothing is ever deleted.** Actions are completed or dropped, projects are completed or dropped, and everything else (folders, places, people and their groups, events, calendars, attachments, perspectives) is archived. The database enforces this.
 
 ## Connect Claude
 
@@ -78,7 +78,7 @@ To pick up a Full Review on another computer, open the review in the app, copy t
 python3 -m http.server 8765
 ```
 
-Open `http://localhost:8765/?mock` to use the in-memory mock (`dev/mock-supabase.js`) instead of the real database.
+Open `http://localhost:8765/?mock` to use the in-memory mock (`dev/mock-supabase.js`) instead of the real database. Set `window.__mockDelay = 800` in the console to make each mock request take that many milliseconds, to see what the app shows while a write is on its way.
 
 **UI smoke tests:** with the mock page open, run this in the browser console:
 
@@ -86,7 +86,7 @@ Open `http://localhost:8765/?mock` to use the in-memory mock (`dev/mock-supabase
 const { run } = await import('/dev/smoke.js'); await run()
 ```
 
-Pass `{ only: ['suiteName'] }` to run one suite.
+The full run takes two to three minutes. Pass `{ only: ['suiteName'] }` to run one suite.
 
 **MCP tests**
 
@@ -104,7 +104,7 @@ python3 dev/sbq.py supabase/tests/dailies.sql
 
 ## Deploying
 
-- **The app** deploys when you push to `main` (GitHub Pages). Bump `VERSION` in `sw.js` whenever a shell file changes, or phones keep the old cached copy.
+- **The app** deploys when you push to `main` (GitHub Pages). Bump `VERSION` in `sw.js` whenever a shell file changes, or phones keep the old cached copy. The version a device runs shows at the foot of the sidebar, next to **Refresh**, which reads everything again and switches to a new version at once if one is ready.
 - **The MCP server:**
 
   ```bash
