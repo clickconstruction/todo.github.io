@@ -509,10 +509,12 @@ function fieldEditorHtml(field, t) {
 function openFieldEditor(el) {
   const f = F();
   const s = f.session;
-  const cur = s && f.byId.get(s.current_item);
+  // The card on screen: the one you're looking back at, else the current one. A decided card's action can
+  // still be edited (the review's record of how it was stays as it is; Undo gives back what it recorded).
+  const cur = (f.peek && f.byId.get(f.peek)) || (s && f.byId.get(s.current_item));
   const t = cur && cur.kind === 'task' && byId(db.tasks, cur.task_id);
   const field = el.dataset.field;
-  if (!t || f.peek || !EDITABLE[field]) return;
+  if (!t || !EDITABLE[field]) return;
   cancelFieldEditor(); // one row at a time
   const host = el.closest('.fr-title, .fr-notes') || el;
   const form = document.createElement('form');
@@ -701,8 +703,8 @@ export async function fullReviewAction(el, e) {
   if (a === 'look-now') { f.peek = null; app.render(); return; }
   // Looking back: a choice changes that card's decision; everything else belongs to the current card.
   if (f.peek && a === 'decide') { if (f.busy) return; f.busy = true; try { await redecide(el); } finally { f.busy = false; } return; }
+  if (a === 'edit-field') { openFieldEditor(el); return; } // a row edits in place on the current card and on one you look back at
   if (f.peek && a !== 'undo') return;
-  if (a === 'edit-field') { openFieldEditor(el); return; }
   if (a === 'notes-toggle') { // remembered for this card, so a live update doesn't fold it back
     const cur = s && f.byId.get(s.current_item);
     const d = el.closest('details');
