@@ -22,8 +22,12 @@ export function viewInbox() {
 }
 
 export function viewTags() {
+  // One pass over the open actions counts every tag (an action's own tags and its project's), rather
+  // than a scan of every action for each tag: with 145 tags and 8,000 actions that took a minute.
+  const counts = new Map();
+  db.tasks.forEach((t) => { if (!isOpen(t)) return; effectiveTagIds(t).forEach((id) => counts.set(id, (counts.get(id) || 0) + 1)); });
   const row = (tag) => {
-    const n = db.tasks.filter((t) => isOpen(t) && effectiveTagIds(t).has(tag.id)).length;
+    const n = counts.get(tag.id) || 0;
     const st = tagStatus(tag);
     return `<a class="group-row ${tag.parent_id ? 'tag-child' : ''} ${st !== 'active' ? 'muted' : ''}" href="#tag/${tag.id}"><span>🏷️ ${esc(tag.name)}${st === 'on_hold' ? ' <span class="chip hold">⏸ on hold</span>' : ''}</span><span class="count">${n || ''}</span></a>`;
   };

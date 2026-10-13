@@ -36,12 +36,27 @@ export const taskSort = (a, b) => (a.sort - b.sort) || (new Date(a.created_at) -
 export const bySort = (a, b) => a.sort - b.sort || a.name.localeCompare(b.name);
 export const PROJECT_STATUSES = [['active', 'Active'], ['on_hold', 'On hold'], ['completed', 'Completed'], ['dropped', 'Dropped']];
 
-export const tagsFor = (taskId) => db.taskTags.filter((x) => x.task_id === taskId).map((x) => byId(db.tags, x.tag_id)).filter(Boolean);
-export const projectTagsFor = (projectId) => db.projectTags.filter((x) => x.project_id === projectId).map((x) => byId(db.tags, x.tag_id)).filter(Boolean);
+// Tag links by task and by project, built once per screen draw (a synchronous pass) and dropped after
+// it (microtask), or sooner if a link list is replaced or changes size. Never scan db.taskTags for one
+// task: with 8,000 actions and 10,000 links, the Tags list did that for every action and every tag,
+// eleven billion comparisons, and the tab froze for a minute.
+let TIX = null;
+export function tagIndex() {
+  const links = db.taskTags; const plinks = db.projectTags || [];
+  if (TIX && TIX.links === links && TIX.plinks === plinks && TIX.n === links.length && TIX.pn === plinks.length) return TIX;
+  const byTask = new Map(); links.forEach((x) => { const l = byTask.get(x.task_id); if (l) l.push(x.tag_id); else byTask.set(x.task_id, [x.tag_id]); });
+  const byProject = new Map(); plinks.forEach((x) => { const l = byProject.get(x.project_id); if (l) l.push(x.tag_id); else byProject.set(x.project_id, [x.tag_id]); });
+  TIX = { links, plinks, n: links.length, pn: plinks.length, byTask, byProject };
+  queueMicrotask(() => { TIX = null; });
+  return TIX;
+}
+export const tagsFor = (taskId) => (tagIndex().byTask.get(taskId) || []).map((id) => byId(db.tags, id)).filter(Boolean);
+export const projectTagsFor = (projectId) => (tagIndex().byProject.get(projectId) || []).map((id) => byId(db.tags, id)).filter(Boolean);
 // A task's own tags plus its project's tags (actions inherit project tags for tag views and filters).
 export function effectiveTagIds(t) {
-  const ids = new Set(db.taskTags.filter((x) => x.task_id === t.id).map((x) => x.tag_id));
-  if (t.project_id) db.projectTags.forEach((x) => { if (x.project_id === t.project_id) ids.add(x.tag_id); });
+  const x = tagIndex();
+  const ids = new Set(x.byTask.get(t.id));
+  if (t.project_id) { const l = x.byProject.get(t.project_id); if (l) l.forEach((id) => ids.add(id)); }
   return ids;
 }
 // A tag group's children in their order: sort, then when they were made, then name. "Sort by the group"

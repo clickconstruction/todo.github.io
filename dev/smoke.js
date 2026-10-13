@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -397,6 +397,33 @@ async function waitingSheets(check) {
 }
 
 // A person's own tag is "Waiting : their name": offered as it is typed, made on save, and renamed with them.
+// A library the size of a real one (145 tags, 8,000 open actions, 9,745 tag links): the Tags list, a
+// tag's page and What now? draw in well under a second, with the right counts. The per-tag scan of
+// every action and every link that this replaces took a minute.
+async function tagsScale(check) {
+  const { db, app, effectiveTagIds } = await import('/js/state.js');
+  for (let i = 0; i < 145; i++) db.tags.push({ id: 'bt' + i, name: 'Bench ' + i, parent_id: i % 10 === 0 ? null : 'bt' + (i - i % 10), sort: 100 + i, status: 'active' });
+  for (let i = 0; i < 8000; i++) db.tasks.push({ id: 'bx' + i, title: 'Bench task ' + i, project_id: i % 3 ? 'p1' : null, completed_at: null, dropped_at: null, sort: i, created_at: new Date().toISOString() });
+  for (let i = 0; i < 9745; i++) db.taskTags.push({ task_id: 'bx' + (i % 8000), tag_id: 'bt' + (i % 145) }); // 68 links carry bt0
+  const timed = (fn) => { const t0 = performance.now(); fn(); return Math.round(performance.now() - t0); };
+  location.hash = '#tags'; await wait(50);
+  const tagsMs = timed(() => app.render());
+  check('Tags list: 145 tags over 8,000 actions draws in well under a second', tagsMs < 400, `${tagsMs} ms`);
+  const bench0 = $$('#view a.group-row').find((a) => a.textContent.includes('Bench 0'));
+  check('…with the right count per tag', !!bench0 && bench0.querySelector('.count').textContent === '68');
+  check('a task’s effective tags come from the index', effectiveTagIds(db.tasks.find((t) => t.id === 'bx145')).has('bt0') && !effectiveTagIds(db.tasks.find((t) => t.id === 'bx1')).has('bt0'));
+  location.hash = '#tag/bt0'; await wait(50);
+  const tagMs = timed(() => app.render());
+  check('a tag’s page draws in well under a second', tagMs < 400, `${tagMs} ms`);
+  location.hash = '#now'; await wait(50);
+  const nowMs = timed(() => app.render());
+  check('What now? draws in well under a second', nowMs < 600, `${nowMs} ms`);
+  // A link added after a draw is seen by the next one (the index is per pass, never stale).
+  db.taskTags.push({ task_id: 'bx1', tag_id: 'bt0' });
+  await wait(0);
+  check('a link added after a draw is seen by the next', effectiveTagIds(db.tasks.find((t) => t.id === 'bx1')).has('bt0'));
+}
+
 // Waiting For: a person with nothing open can be archived from the People list, all of them at once from
 // the heading, and archived people can be shown and restored (never deleted).
 async function peopleTidy(check) {
