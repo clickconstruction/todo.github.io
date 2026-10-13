@@ -79,6 +79,10 @@ function place() {
   else { pop.style.bottom = innerHeight - r.top + 4 + 'px'; pop.style.top = ''; }
 }
 
+// Open the search on a select straight away, e.g. a Project row whose editor has just opened with nothing
+// picked yet: the list is there to type into without a second click. Also closes it when the select goes away.
+export const openSearch = (sel) => { if (qualifies(sel) && sel.isConnected) { sel.focus({ preventScroll: true }); open(sel); } };
+export const closeSearch = () => close(false);
 function open(sel, seed = '') {
   close(false);
   current = sel;

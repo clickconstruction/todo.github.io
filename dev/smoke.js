@@ -397,11 +397,13 @@ async function reviewUndo(check) {
   key('ArrowLeft'); await until(() => has('.fr-card', 'sharpen the chainsaw'));
   check('← goes one further back; it is the first, so Back is off', has('.fr-look', 'keep', '2 back of 2') && $('[data-fr="look-back"]').disabled);
   check('Edit details is there on a card you look back at', !!$('.fr-looking [data-task="uA"]'));
-  $('.fr-looking [data-fr="edit-field"][data-field="project"]').click(); await wait(50);
+  $('.fr-looking [data-fr="edit-field"][data-field="project"]').click(); await until(() => !!$('.ss-pop'));
   check('a row on a card you look back at edits in place', !!$('.fr-looking form.fr-inline[data-field="project"] select[name=project_id]'));
-  $('.fr-inline select[name=project_id]').value = t.projects[0].id; $('.fr-inline').requestSubmit();
+  check('Project with none picked: the search is open at once, ready to type into', !!$('.ss-pop .ss-q') && document.activeElement === $('.ss-pop .ss-q'));
+  $('.ss-pop .ss-q').value = t.projects[0].name; $('.ss-pop .ss-q').dispatchEvent(new Event('input')); await wait(30);
+  $('.ss-pop .ss-q').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   await until(() => !$('.fr-inline') && t.tasks.find((x) => x.id === 'uA').project_id === t.projects[0].id);
-  check('saved on the action, still looking back at it', t.tasks.find((x) => x.id === 'uA').project_id === t.projects[0].id && !!$('.fr-look') && has('.fr-card', 'sharpen the chainsaw') && item('iuA').status === 'reviewed', text('#toast'));
+  check('picking it saves at once, still looking back at the card', t.tasks.find((x) => x.id === 'uA').project_id === t.projects[0].id && !$('.ss-pop') && !!$('.fr-look') && has('.fr-card', 'sharpen the chainsaw') && item('iuA').status === 'reviewed', text('#toast'));
   key('ArrowRight'); await until(() => has('.fr-card', 'learn to weld'));
   key('ArrowRight'); await until(() => !$('.fr-look'));
   check('→ comes forward, and past the newest is the current card', !$('.fr-look') && has('.fr-card', 'renew the trailer tags') && !!$('.fr-btns [data-fr="decide"]'));

@@ -17,6 +17,7 @@ import { fmtDate, fromDateInput, HOURS } from '../dates.js';
 import { dateField, wireQuickButtons } from '../components.js';
 import { tagPickerHtml, wireTagPicker } from '../editors/tagPicker.js';
 import { gainFieldHtml, wireGainField } from '../editors/gainField.js';
+import { openSearch, closeSearch } from '../select-search.js';
 import { buildQueue, priorityReason, proposalText } from '../review.js';
 import { folderButton, shortPath } from '../folders.js';
 
@@ -528,6 +529,7 @@ function openFieldEditor(el) {
   const tagIds = field === 'tags' ? wireTagPicker(form, ids) : () => ids;
   const gain = field === 'gain' ? wireGainField(form, t) : null;
   if (field === 'dates') wireQuickButtons(form);
+  if (field === 'project') form.elements.project_id.addEventListener('change', () => form.requestSubmit()); // picking one is the whole edit: the pick saves
   if (field === 'title') { // grow with the text, so a long title wraps instead of scrolling in one line
     const ta = form.elements.title;
     const grow = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
@@ -550,18 +552,20 @@ function openFieldEditor(el) {
     if (field === 'notes') fields.notes = form.elements.notes.value;
     const btns = [...form.querySelectorAll('button')];
     btns.forEach((b) => { b.disabled = true; });
-    f.editing = null; // the save redraws the card; its row shows the new value
+    f.editing = null; closeSearch(); // the save redraws the card; its row shows the new value
     try { await saveTask(live, fields, tagIds()); } catch { btns.forEach((b) => { b.disabled = false; }); f.editing = ed; return; }
     toast(`${EDITABLE[field]} saved`);
   };
   const first = form.querySelector('input:not([type=hidden]), textarea, select');
   if (first && !matchMedia('(pointer: coarse)').matches) { first.focus(); if (first.tagName === 'TEXTAREA' || first.type === 'text') first.setSelectionRange(first.value.length, first.value.length); }
   else if (first) first.focus();
+  if (field === 'project' && !t.project_id) openSearch(form.elements.project_id); // nothing picked yet: the search is open, ready to type into
 }
 function cancelFieldEditor() {
   const f = F();
   const ed = f.editing;
   f.editing = null;
+  closeSearch();
   if (!ed || !ed.form.isConnected) return;
   ed.form.replaceWith(ed.host);
   const back = ed.host.matches('[tabindex]') ? ed.host : ed.host.querySelector('[tabindex]');
