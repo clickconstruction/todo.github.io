@@ -544,6 +544,11 @@ async function six(check) {
   check('the click that ends the hold is not a tick', !$(`#sheet2 [data-sp-tick="${heldId}"]`).classList.contains('on'));
   $('#sheet #editor [name=title]').value = 'Renamed while adding'; $('#sheet #editor').requestSubmit(); await wait(400);
   check('saved: the editor closes, the picker stays and shows the new title', !$('#sheet').open && $('#sheet2').open && has(`#sheet2 [data-sp-row="${heldId}"]`, 'renamed while adding') && task(heldId).title === 'Renamed while adding');
+  let clipped = ''; const hadClip = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (x) => { clipped = x; } } });
+  $(`#sheet2 [data-sp-copy="${heldId}"]`).click(); await wait(80);
+  check('the copy button puts the title on the clipboard, with a toast, and ticks nothing', clipped === 'Renamed while adding' && has('#toast', 'copied') && !$(`#sheet2 [data-sp-tick="${heldId}"]`).classList.contains('on'));
+  if (hadClip) Object.defineProperty(navigator, 'clipboard', hadClip); else delete navigator.clipboard;
   $(`#sheet2 [data-sp-edit="${heldId}"]`).click(); await wait(100);
   check('the gear at the end of a row opens the editor too', $('#sheet').open && $('#sheet #editor [name=title]').value === 'Renamed while adding' && !$(`#sheet2 [data-sp-tick="${heldId}"]`).classList.contains('on'));
   $('#sheet [data-cancel]').click(); await wait(80);

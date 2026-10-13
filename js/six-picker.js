@@ -7,7 +7,8 @@
 // Keys: ↑ ↓ move, ← → close and open, space ticks (with the search empty; on a project it opens or
 // closes it), ⏎ adds the ticked ones (else the lit card; on a project it opens or closes it), Tab the
 // next place to look, e edits the lit card, Esc closes. The gear at the end of a card (or holding it,
-// or right-clicking it) opens the card's editor over the picker; the list redraws when it saves.
+// or right-clicking it) opens the card's editor over the picker; the list redraws when it saves. The copy
+// button before it puts the card's title on the clipboard.
 import { db, esc, byId, isOpen, toast, $, taskSort, tagsFor, tagLabel, sortedTags } from './state.js';
 import { isAvailable, cardBlockers, isSequenceBlocked, sequentialHead, projectOf } from './availability.js';
 import { rankNow } from './whatnow.js';
@@ -145,7 +146,7 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     return `<li class="sp-row ${day ? 'off' : ''} ${r.later ? 'later' : ''} ${i === st.active ? 'act' : ''}" data-sp-row="${r.t.id}">
       <button type="button" class="sp-tick ${on ? 'on' : ''}" data-sp-tick="${r.t.id}" aria-label="${on ? 'Ticked' : 'Tick'}" ${day ? 'disabled' : ''}>✓</button>
       <div class="sp-main"><div class="sp-title">${esc(r.t.title)}</div><div class="sp-meta">${r.chips.join('')}${day ? chip(`on ${day} already · ${ord(rank(r.t))}`) : ''}</div></div>
-      <button type="button" class="sp-gear" data-sp-edit="${r.t.id}" aria-label="Edit this card" title="Edit">⚙</button></li>`;
+      <button type="button" class="sp-gear" data-sp-copy="${r.t.id}" aria-label="Copy the title" title="Copy">⧉</button><button type="button" class="sp-gear" data-sp-edit="${r.t.id}" aria-label="Edit this card" title="Edit">⚙</button></li>`;
   };
   const chipsHtml = () => {
     const main = `<div class="sp-chips" role="tablist" aria-label="Where to look">${SOURCES.map(([k, l]) => `<button type="button" class="sp-chip ${st.source === k ? 'on' : ''}" role="tab" aria-selected="${st.source === k}" data-sp-source="${k}">${l}</button>`).join('')}</div>`;
@@ -241,6 +242,15 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     if (!t) return;
     openEditor(t, {}, { onSaved: () => { st.ticked = st.ticked.filter((x) => byId(db.tasks, x) && isOpen(byId(db.tasks, x))); draw(); setTimeout(() => search.focus(), 0); }, onClose: () => setTimeout(() => search.focus(), 0) });
   };
+  // One click copies the card's title (the clipboard where there is one; a selection to copy by hand otherwise).
+  const copyTitle = async (id) => {
+    const t = byId(db.tasks, id);
+    if (!t) return;
+    try { await navigator.clipboard.writeText(t.title); toast('Copied'); } catch {
+      const el = $(`[data-sp-row="${id}"] .sp-title`, dlg);
+      if (el) { const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); toast('Selected: copy it with ⌘C'); }
+    }
+  };
   // The lit row, from the keys: a card ticks; a project or a section opens or closes (← from a card
   // closes its project).
   const act = (r, dir) => {
@@ -273,6 +283,7 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     if (el('[data-sp-sec]')) { const s = el('[data-sp-sec]'); if (s.dataset.spSec === 'later') setLater(s.dataset.id); else setNode(s.dataset.id, false); return; }
     if (el('[data-sp-wide]')) { st.everywhere = true; st.active = 0; draw(); search.focus(); return; }
     if (el('[data-sp-narrow]')) { st.everywhere = false; st.active = 0; draw(); search.focus(); return; }
+    if (el('[data-sp-copy]')) { copyTitle(el('[data-sp-copy]').dataset.spCopy); return; }
     if (el('[data-sp-edit]')) { editCard(el('[data-sp-edit]').dataset.spEdit); return; }
     if (el('[data-sp-tick]')) { toggle(el('[data-sp-tick]').dataset.spTick); return; }
     const r = el('[data-sp-row]'); if (r) toggle(r.dataset.spRow);
@@ -282,7 +293,7 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
   const endHold = () => { if (hold) { clearTimeout(hold.timer); hold = null; } };
   form.addEventListener('pointerdown', (e) => {
     const r = e.target.closest('[data-sp-row]');
-    if (!r || e.button !== 0 || e.target.closest('[data-sp-edit]')) return; // the gear is a plain click
+    if (!r || e.button !== 0 || e.target.closest('[data-sp-edit], [data-sp-copy]')) return; // the gear and copy are plain clicks
     endHold();
     hold = { id: r.dataset.spRow, x: e.clientX, y: e.clientY, timer: setTimeout(() => { hold = null; st.held = true; editCard(r.dataset.spRow); }, 500) };
   });
