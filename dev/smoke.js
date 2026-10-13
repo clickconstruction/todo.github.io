@@ -734,6 +734,24 @@ async function six(check) {
   $('#sheet [data-cancel]').click(); await wait(80);
   check('Cancel: back to the picker, search focused', !$('#sheet').open && $('#sheet2').open && document.activeElement === $('[data-sp-search]'));
   $('[data-sp-cancel]').click(); await wait(80);
+  // Nothing matches what's typed: the picker offers to save it as a new card and add it.
+  today.focus = today.focus.slice(0, 3); today.updated_at = new Date(Date.now() + 500).toISOString();
+  await until(() => $$('.six-row, .six-now').length === 3, 2500);
+  const typeIn = async (v) => { const q = $('[data-sp-search]'); q.value = v; q.dispatchEvent(new Event('input')); await wait(50); };
+  key('a'); await wait(100); await typeIn('Call the glazier friday');
+  check('nothing matches: the last row offers to save it and add it, lit for Enter', has('#sheet2 [data-sp-new]', 'save “call the glazier friday” and add it to today', 'inbox') && $('#sheet2 [data-sp-new]').classList.contains('act'), text('#sheet2 [data-sp-list]'));
+  pk('Enter');
+  const made = await until(() => t.tasks.find((x) => x.title === 'Call the glazier friday' && today.focus.includes(x.id)));
+  check('Enter saves it (a day word stays in the title) to the Inbox, planned today, at the end of the list', !!made && made.in_inbox && sameDay(made.planned_at, new Date()) && today.focus[today.focus.length - 1] === made.id && has('#toast', 'saved to inbox · added as the fourth') && !$('#sheet2').open, made ? `${made.in_inbox} ${made.planned_at} ${today.focus.join()} ${text('#toast')}` : 'not made');
+  const into = t.projects.find((p) => p.status === 'active');
+  key('a'); await wait(100); await typeIn(`Order spare glass #${into.name}`);
+  check('#project files it there, and the row says so', has('#sheet2 [data-sp-new]', 'save “order spare glass”', into.name), text('#sheet2 [data-sp-new]'));
+  $('#sheet2 [data-sp-new]').click();
+  const made2 = await until(() => t.tasks.find((x) => x.title === 'Order spare glass' && today.focus.includes(x.id)));
+  check('a click saves it in the project, out of the Inbox, and adds it', !!made2 && made2.project_id === into.id && !made2.in_inbox && has('#toast', `saved to ${into.name}`), made2 ? `${made2.project_id} ${made2.in_inbox} ${text('#toast')}` : 'not made');
+  key('a'); await wait(100); await typeIn('order spare glass');
+  check('an open card with that exact title: no offer to make another', !$('#sheet2 [data-sp-new]') && !!$(`#sheet2 [data-sp-row="${made2.id}"]`));
+  $('[data-sp-cancel]').click(); await wait(80);
   // A change made elsewhere (Claude's six tool, another device) shows without a reload.
   const elsewhere = open.find((x) => !today.focus.includes(x.id) && !task(x.id).completed_at) || open[0];
   today.focus = [elsewhere.id, ...today.focus.filter((id) => id !== elsewhere.id)].slice(0, 5); today.updated_at = new Date(Date.now() + 1000).toISOString();

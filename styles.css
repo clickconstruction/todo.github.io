@@ -1813,6 +1813,7 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .sp-main { flex: 1; min-width: 0; }
 .sp-title { font-size: 15px; overflow-wrap: anywhere; }
 .sp-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; font-size: 12px; color: var(--muted); align-items: center; }
+.sp-tick.sp-plus { color: var(--accent); border-color: var(--accent); border-style: dashed; font-size: 16px; line-height: 1; }
 .sp-wide { margin: 0; }
 .sp-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .sp-foot .hint { flex: 1; }

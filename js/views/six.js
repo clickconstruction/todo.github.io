@@ -9,7 +9,7 @@
 // write fails the rows are read back and the toast says why. While the view is open it listens for
 // changes made elsewhere (Claude's six tool, another device): live updates when available, a poll either way.
 import { db, app, sb, run, syncRow, esc, byId, isOpen, toast, $ } from '../state.js';
-import { setCompleted, refreshTasks } from '../data.js';
+import { setCompleted, refreshTasks, capture, setLinks } from '../data.js';
 import { startOfToday, addDays, atDefaultTime, isOverdue, fmtDate } from '../dates.js';
 import { dayKey } from '../gtd.js';
 import { gainOf } from '../gain.js';
@@ -226,7 +226,7 @@ export function viewSix(arg) {
 // ---------- adding ----------
 // The picker (js/six-picker.js) hands back one or more ids: onto the end of the day's list in that order,
 // off the other day's list if they were there, planned for the day.
-async function addMany(key, ids) {
+async function addMany(key, ids, { saved } = {}) {
   const list = listOf(key);
   const fresh = ids.filter((id) => byId(db.tasks, id) && !list.includes(id)).slice(0, Math.max(0, SIX - list.length));
   if (!fresh.length) { if (list.length >= SIX) toast('Six is the limit'); return; }
@@ -236,9 +236,21 @@ async function addMany(key, ids) {
   put(key, [...list, ...fresh]);
   if (moved.length) put(otherKey, other.filter((id) => !moved.includes(id)));
   flash(...fresh);
-  toast(fresh.length === 1 ? `Added as the ${ORD[list.length]}` : `Added ${fresh.length}${moved.length ? ` · ${moved.length} moved from ${otherKey === keyOf('today') ? 'today' : 'tomorrow'}` : ''}`);
+  const lead = saved === undefined ? 'A' : `Saved${saved ? ` to ${saved}` : ''} · a`; // a card made from the picker's search
+  toast(fresh.length === 1 ? `${lead}dded as the ${ORD[list.length]}` : `${lead}dded ${fresh.length}${moved.length ? ` · ${moved.length} moved from ${otherKey === keyOf('today') ? 'today' : 'tomorrow'}` : ''}`);
   app.render();
   await Promise.all([save(key), moved.length ? save(otherKey) : null, ...fresh.map((id) => planFor(byId(db.tasks, id), key))]);
+}
+
+// A card typed into the picker that doesn't exist yet (the line as the picker read it: title, project,
+// tags, due, gain): saved as Capture saves it, already planned for the day, then added after any ticked ones.
+// With no project and no tags it is in the Inbox, to clarify later.
+async function createAndAdd(key, a, ids) {
+  const row = await capture(a.title, { planned_at: atDefaultTime(dayOf(key), 'planned_at').toISOString(), in_inbox: !a.project && !a.tags.length,
+    ...(a.project ? { project_id: a.project.id } : {}), ...(a.due ? { due_at: atDefaultTime(new Date(`${a.due}T12:00:00`), 'due_at').toISOString() } : {}), ...(a.gain ? { gain: a.gain } : {}) });
+  if (!row) return; // offline: capture keeps it for later and says so
+  if (a.tags.length) await setLinks('task_tags', 'taskTags', 'task_id', row.id, a.tags.map((x) => x.id));
+  await addMany(key, [...ids, row.id], { saved: a.project ? a.project.name : a.tags.length ? '' : 'Inbox' });
 }
 
 // ---------- actions and keys ----------
@@ -251,7 +263,7 @@ export async function sixAction(el) {
   const i = t ? list.indexOf(t.id) : -1;
   if (a === 'add') {
     const otherWhich = which === 'today' ? 'tomorrow' : 'today';
-    openSixPicker({ key, which, free: SIX - list.length, listed: new Set(list), other: { which: otherWhich, ids: listOf(keyOf(otherWhich)) }, onAdd: (ids) => addMany(key, ids), onClose: drawIfDirty });
+    openSixPicker({ key, which, free: SIX - list.length, listed: new Set(list), other: { which: otherWhich, ids: listOf(keyOf(otherWhich)) }, onAdd: (ids) => addMany(key, ids), onCreate: (a, ids) => createAndAdd(key, a, ids), onClose: drawIfDirty });
     return;
   }
   if (a === 'uncarry') {

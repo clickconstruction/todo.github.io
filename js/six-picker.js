@@ -8,7 +8,8 @@
 // closes it), ⏎ adds the ticked ones (else the lit card; on a project it opens or closes it), Tab the
 // next place to look, e edits the lit card, Esc closes. The gear at the end of a card (or holding it,
 // or right-clicking it) opens the card's editor over the picker; the list redraws when it saves. The copy
-// button before it puts the card's title on the clipboard.
+// button before it puts the card's title on the clipboard. When no open card has the title typed, the
+// list ends with "Save “…” and add it to today": a new card, read as Capture reads a line.
 import { db, esc, byId, isOpen, toast, $, taskSort, tagsFor, tagLabel, sortedTags } from './state.js';
 import { isAvailable, cardBlockers, isSequenceBlocked, sequentialHead, projectOf } from './availability.js';
 import { rankNow } from './whatnow.js';
@@ -17,6 +18,7 @@ import { matrixBoxes } from './views/matrix.js';
 import { startOfToday, addDays, isDeferred, fmtDate } from './dates.js';
 import { dayKey, isWaiting, waitingPerson } from './gtd.js';
 import { openEditor } from './editors/task.js';
+import { parseCapture, dayLabel as dayWord } from './capture-grammar.js';
 
 const SOURCES = [['suggested', 'Suggested'], ['matrix', 'Matrix'], ['forecast', 'Forecast'], ['projects', 'Projects'], ['tags', 'Tags'], ['flagged', 'Flagged']];
 const FORECAST = [['overdue', 'Overdue'], ['today', 'Today'], ['tomorrow', 'Tomorrow'], ['week', 'This week']];
@@ -57,7 +59,7 @@ function nextLater(list) {
   return { next, later };
 }
 
-export function openSixPicker({ key, which, free, listed, other, onAdd, onClose = () => {} }) {
+export function openSixPicker({ key, which, free, listed, other, onAdd, onCreate = null, onClose = () => {} }) {
   const dlg = $('#sheet2');
   const saved = pref();
   const st = { source: SOURCES.some(([k]) => k === saved.source) ? saved.source : 'suggested', sub: saved.sub || {}, q: '', ticked: [], active: 0, everywhere: false, held: false,
@@ -137,6 +139,14 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
       return { id: g.id, name: tagLabel(g), side: '', cards: db.tasks.filter((t) => pickable(t) && tagsFor(t.id).some((x) => ids.has(x.id))).sort(taskSort) };
     });
   };
+  // A new card from what is typed (js/capture-grammar.js: #project, @tag, due fri, "→ gain"), unless an
+  // open card already has that title. A day word stays in the title, since the list decides the day.
+  const typed = () => {
+    if (!onCreate || !words(st.q).length) return null;
+    const a = parseCapture(st.q, { projects: db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold'), tags: sortedTags().map((g) => ({ id: g.id, name: g.name, label: tagLabel(g) })), keep: new Set(['planned']) });
+    const same = a.title.toLowerCase();
+    return a.title && !db.tasks.some((t) => pickable(t) && t.title.trim().toLowerCase() === same) ? a : null;
+  };
   const placeName = () => (st.source === 'suggested' ? '' : st.source === 'matrix' ? `Matrix › ${(BOXES.find((b) => b.key === (st.sub.matrix || 'do')) || BOXES[0]).label}` : st.source === 'forecast' ? FORECAST.find(([k]) => k === (st.sub.forecast || 'today'))[1].toLowerCase() : st.source);
 
   // ---------- drawing ----------
@@ -189,7 +199,17 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     if (!shown) return `<li class="hint">${w.length ? `No ${st.source} match.` : `No ${st.source} yet.`}</li>`;
     return out.join('');
   };
+  const newHtml = (a, i) => `<li class="sp-row sp-new ${i === st.active ? 'act' : ''}" data-sp-new><span class="sp-tick sp-plus" aria-hidden="true">+</span>
+      <div class="sp-main"><div class="sp-title">Save “${esc(a.title)}” and add it to ${which}</div><div class="sp-meta">${[chip(a.project ? a.project.name : a.tags.length ? 'new card' : 'Inbox'), ...a.tags.map((x) => chip(x.label)), a.due ? chip(`due ${dayWord(a.due)}`, 'red') : '', a.gain ? chip(`✦ ${a.gain}`) : ''].join('')}</div></div></li>`;
+  // The list, then the new card to make from the search when there is one to offer.
   const listHtml = () => {
+    const html = listBody();
+    const a = typed();
+    if (!a) return html;
+    st.rows.push({ create: a });
+    return html + newHtml(a, st.rows.length - 1);
+  };
+  const listBody = () => {
     if (treeSource() && !st.everywhere) return treeHtml();
     const groups = groupsFor();
     st.rows = groups.flatMap((g) => g.rows);
@@ -221,6 +241,15 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     remember({ source: st.source, sub: st.sub });
     close();
     onAdd(ids);
+  };
+  // Make the typed card and add it, after any ticked ones.
+  const create = () => {
+    const a = typed();
+    if (!a) return;
+    if (st.ticked.length >= free) { toast(free === 1 ? 'Only one place free' : `Only ${free} places free`); return; }
+    remember({ source: st.source, sub: st.sub });
+    close();
+    onCreate(a, [...st.ticked]);
   };
   const toggle = (id) => {
     const t = byId(db.tasks, id);
@@ -286,6 +315,7 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     if (el('[data-sp-copy]')) { copyTitle(el('[data-sp-copy]').dataset.spCopy); return; }
     if (el('[data-sp-edit]')) { editCard(el('[data-sp-edit]').dataset.spEdit); return; }
     if (el('[data-sp-tick]')) { toggle(el('[data-sp-tick]').dataset.spTick); return; }
+    if (el('[data-sp-new]')) { create(); return; }
     const r = el('[data-sp-row]'); if (r) toggle(r.dataset.spRow);
   };
   // Hold a card for half a second (without moving) to edit it; a right-click does the same.
@@ -307,7 +337,7 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     if (e.key === 'Tab') { e.preventDefault(); const i = SOURCES.findIndex(([k]) => k === st.source); setSource(SOURCES[(i + (e.shiftKey ? SOURCES.length - 1 : 1)) % SOURCES.length][0]); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = st.rows.length; if (n) { st.active = (st.active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; draw(); } return; }
     if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && treeSource() && !search.value) { e.preventDefault(); act(st.rows[st.active], e.key === 'ArrowRight' ? 'open' : 'close'); return; }
-    if (e.key === 'Enter') { e.preventDefault(); const r = st.rows[st.active]; if (r && (r.node || r.sec)) act(r); else add(); return; }
+    if (e.key === 'Enter') { e.preventDefault(); const r = st.rows[st.active]; if (r && (r.node || r.sec)) act(r); else if (r && r.create) create(); else add(); return; }
     if (e.key === ' ' && !search.value) { e.preventDefault(); act(st.rows[st.active]); }
   };
   draw();
