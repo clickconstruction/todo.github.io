@@ -32,6 +32,7 @@ import { noticeEmailPeople } from './views/capture.js';
 import { checklistAction, checklistChange } from './views/checklists.js';
 import { dailyAction, dailySubmit } from './views/daily.js';
 import { sixAction, sixKey } from './views/six.js';
+import { sheetsAction, sheetsChange, sheetsSubmit } from './views/sheets.js';
 import { settleAction, settleKey } from './views/settle.js';
 import { fullReviewAction, fullReviewChange, fullReviewKey, startFullReview, activeSession, quickReview } from './views/fullreview.js';
 import { moreSheetHtml, openCustomize } from './sidebar.js';
@@ -208,6 +209,7 @@ const CLICKS = [
   ['[data-ck]', (el, e) => { e.stopPropagation(); checklistAction(el); }],
   ['[data-daily]', (el, e) => { e.stopPropagation(); dailyAction(el); }],
   ['[data-six]', (el, e) => { e.stopPropagation(); sixAction(el); }],
+  ['[data-sheet], [data-debrief]', (el, e) => { e.stopPropagation(); sheetsAction(el, e); }],
   ['[data-settle]', (el, e) => { e.stopPropagation(); if (!el.disabled) settleAction(el); }],
   ['[data-fr]', (el, e) => { if (e.target.closest && e.target.closest('a[href]')) return; e.stopPropagation(); fullReviewAction(el, e); }], // a link inside a row is just a link
   ['[data-slip]', (el, e) => { e.stopPropagation(); slipAction(el); }],
@@ -263,6 +265,7 @@ document.addEventListener('click', (e) => {
 });
 
 view.addEventListener('submit', async (e) => {
+  if (sheetsSubmit(e)) return; // answers at once: a native submit must be stopped before any await
   if (onClarifySubmit(e) || gtdSubmit(e) || weeklySubmit(e) || sweepSubmit(e) || somedaySubmit(e) || planSubmit(e) || dailySubmit(e) || slipSubmit(e) || readingSubmit(e)) return;
   const senderForm = e.target.closest('[data-add-sender]');
   if (senderForm) { e.preventDefault(); await addSender(senderForm); return; }
@@ -283,6 +286,7 @@ view.addEventListener('change', (e) => {
   if (e.target.closest('[data-hz-link-area], [data-hz-link-goal], [data-hz-tick]')) { horizonsChange(e); return; }
   if (planChange(e)) return;
   if (e.target.closest('[data-fr-ahead]')) { fullReviewChange(e); return; }
+  if (sheetsChange(e)) return;
   if (matrixChange(e)) return;
   if (e.target.closest('[data-cl-tick], [data-cl-note]') && location.hash.startsWith('#checklist/')) { checklistChange(e); return; }
   const doneCtl = e.target.closest('[data-done]');

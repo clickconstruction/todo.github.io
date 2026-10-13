@@ -28,6 +28,7 @@ import { viewShare, mountShare } from './views/capture.js';
 import { viewChecklists, viewChecklist } from './views/checklists.js';
 import { viewDaily } from './views/daily.js';
 import { viewSix } from './views/six.js';
+import { viewSheets, viewDebrief } from './views/sheets.js';
 import { viewSettle } from './views/settle.js';
 import { viewSlipbox } from './views/slipbox.js';
 import { viewReading } from './views/reading.js';
@@ -40,12 +41,12 @@ import { somedayCount } from './views/someday.js';
 import { rowFor } from './views/daily.js';
 import { bigDue } from './views/horizons.js';
 
-const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person', 'weekly', 'sweep', 'someday', 'horizons', 'area', 'goal', 'share', 'checklists', 'checklist', 'daily', 'settle', 'full', 'slipbox', 'reading', 'matrix', 'events', 'six']);
+const UNFOCUSED = new Set(['inbox', 'search', 'settings', 'import', 'alerts', 'places', 'template', 'done', 'clarify', 'tickler', 'reference', 'person', 'weekly', 'sweep', 'someday', 'horizons', 'area', 'goal', 'share', 'checklists', 'checklist', 'daily', 'settle', 'full', 'slipbox', 'reading', 'matrix', 'events', 'six', 'sheets']);
 const VIEWS = {
   search: viewSearch, inbox: viewInbox, forecast: viewForecast, projects: viewProjects, project: viewProject,
   tags: viewTags, tag: viewTag, settings: viewSettings, done: viewDone, flagged: viewFlagged, review: viewReview,
   nearby: viewNearby, places: viewPlaces, alerts: viewAlerts, perspective: viewPerspective, perspectives: viewPerspectives, import: viewImport, template: viewTemplate,
-  clarify: viewClarify, tickler: viewTickler, reference: viewReference, waiting: viewWaiting, person: viewPerson,
+  clarify: viewClarify, tickler: viewTickler, reference: viewReference, waiting: viewWaiting, person: (id, sub) => (sub === 'debrief' ? viewDebrief(id) : viewPerson(id)), sheets: viewSheets,
   weekly: viewWeekly, sweep: viewSweep, someday: viewSomeday,
   horizons: viewHorizons, area: viewArea, goal: viewGoal, now: viewNow, plan: viewPlan, share: viewShare, checklists: viewChecklists, checklist: viewChecklist, daily: viewDaily, six: viewSix, settle: viewSettle, full: viewFullReview, slipbox: viewSlipbox, reading: viewReading, matrix: viewMatrix, events: viewEvents,
 };
@@ -73,6 +74,7 @@ export function render() {
     <span><button class="link-btn" data-act="focus">Change</button><button class="link-btn" data-act="unfocus">Unfocus</button></span></div>` : '';
   $('#view').innerHTML = banner + html;
   document.body.classList.toggle('fr-mode', view === 'full'); // Full Review: one card, nothing else
+  document.body.classList.toggle('sheets-view', view === 'sheets'); // printing: the sheets and nothing else
   document.body.classList.toggle('wide-view', view === 'horizons' && args[0] === 'tree' && args[1] !== 'review'); // the tech tree runs wide
   if (view !== 'full') stopListening();
   document.body.classList.toggle('is-focused', !!getFocus());

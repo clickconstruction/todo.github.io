@@ -126,7 +126,7 @@ export function viewWaiting() {
   const late = all.filter(followUpDue).length;
   const agendas = people.map((p) => [p, agendaFor(p).length]).filter(([, n]) => n);
   const waitingTagKids = db.tags.filter((g) => g.parent_id && /^waiting/i.test((byId(db.tags, g.parent_id) || {}).name || '') && !people.some((p) => p.tag_id === g.id));
-  return `<div class="view-head"><h1 class="waiting">Waiting For</h1><button class="btn small" data-gtd="new-person">+ Person</button></div>
+  return `<div class="view-head"><h1 class="waiting">Waiting For</h1><span>${all.length ? '<a class="btn small" href="#sheets/all" title="A printed page for each person: what they owe you, with boxes to tick and room to write">Print sheets</a> ' : ''}<button class="btn small" data-gtd="new-person">+ Person</button></span></div>
     <p class="view-sub">${all.length} open${late ? ` · <b class="late">${late} to follow up</b>` : ''} · delegate from Clarify or any item</p>
     ${[...groups.entries()].map(([pid, list]) => {
       const p = pid && byId(db.people, pid);
@@ -154,7 +154,7 @@ export function viewPerson(id) {
   const meet = nextMeeting(p);
   const contact = [p.email && `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>`, p.phone && `<a href="tel:${esc(p.phone.replace(/[^\d+]/g, ''))}">${esc(p.phone)}</a>`].filter(Boolean).join(' · ');
   return `<a class="back" href="#waiting">‹ Waiting For</a>
-    <div class="view-head"><h1 class="person-title">${avatar(p)}${esc(p.name)}${p.archived_at ? ' <span class="chip">archived</span>' : ''}</h1><button class="btn small" data-gtd="edit-person" data-id="${p.id}">Edit</button></div>
+    <div class="view-head"><h1 class="person-title">${avatar(p)}${esc(p.name)}${p.archived_at ? ' <span class="chip">archived</span>' : ''}</h1><span>${waiting.length || agenda.length ? `<a class="btn small" href="#sheets/${p.id}">Print the sheet</a> <a class="btn small" href="#person/${p.id}/debrief">Debrief</a> ` : ''}<button class="btn small" data-gtd="edit-person" data-id="${p.id}">Edit</button></span></div>
     ${contact ? `<p class="view-sub">${contact}</p>` : ''}${p.notes ? `<p class="view-sub" style="white-space:pre-wrap">${esc(p.notes)}</p>` : ''}
     ${meet ? `<p class="meet-note">Next: <b>${esc(meet.title)}</b> · ${esc(new Date(meet.allDay ? `${meet.days[0]}T12:00:00` : meet.start).toLocaleDateString(undefined, { weekday: 'short' }))} ${esc(fmtEventTime(meet))} <span class="hint">(from your calendar)</span></p>` : ''}
     <h2 class="section-title">Agenda · ${agenda.filter(isOpen).length}</h2>

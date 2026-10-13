@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -352,6 +352,48 @@ async function slipboxReading(check) {
   check('Up next: priority (flagged) first, marked ⚑, counted', rows.findIndex((x) => x.includes('High Output')) < rows.findIndex((x) => x.includes('Newer unflagged')) && rows.find((x) => x.includes('High Output')).includes('⚑') && has(undefined, '1 priority'));
   const { isFlaggedTask } = await import('/js/views/basic.js');
   check('flagged but waiting on the list: not in Flagged', !isFlaggedTask(db.tasks.find((x) => x.id === 'rdP1')));
+}
+
+// Waiting sheets: a printed page per person (what they owe, oldest first, boxes and lines, their agenda),
+// and the debrief that goes down the same list when the sheet comes back.
+async function waitingSheets(check) {
+  const t = T();
+  const hasEl = (el, ...needles) => !!el && needles.every((n) => el.innerText.replace(/\s+/g, ' ').toLowerCase().includes(n.toLowerCase()));
+  const now = new Date().toISOString();
+  const dayAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
+  t.people.push({ id: 'pT', user_id: 'u1', name: 'Taunya Reyes', email: 't@x.com', phone: null, notes: '', tag_id: null, sort: 5, archived_at: null, added_via: 'app', created_at: now });
+  const base = { ...t.tasks[0], notes: '', project_id: 'p1', parent_id: null, in_inbox: false, flagged: false, due_at: null, defer_at: null, planned_at: null, repeat_rule: null, daily: null, completed_at: null, dropped_at: null, gain: '', agenda_for: null, scheduled_at: null, checklist_id: null, created_at: now, updated_at: now };
+  t.tasks.push({ ...base, id: 'wS1', title: 'Send the signed change order', notes: 'The Hendersons signed Thursday.\nSecond line.', waiting_on: 'pT', delegated_at: dayAgo(9), follow_up_at: dayAgo(5) });
+  t.tasks.push({ ...base, id: 'wS2', title: 'Photos of the water heater install', waiting_on: 'pT', delegated_at: dayAgo(3), follow_up_at: new Date(Date.now() + 2 * 86400000).toISOString() });
+  t.tasks.push({ ...base, id: 'wS3', title: 'Crew schedule for next week', waiting_on: null, agenda_for: 'pT' });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  try { localStorage.setItem('todo.sheets.from', 'Todd · Click Plumbing'); } catch { /* ignore */ }
+  await go('#waiting');
+  check('Waiting For offers Print sheets', !!$('a[href="#sheets/all"]'));
+  await go('#sheets/all');
+  const sheet = $('.psheet[data-sheet-for="pT"]');
+  check('one sheet per person who owes something, with the name, the date and who it is with', !!sheet && $$('.psheet').length >= 1 && has('.psheet[data-sheet-for="pT"] .sh-head', 'taunya reyes', 'with todd · click plumbing') && document.body.classList.contains('sheets-view'));
+  const items = $$('.psheet[data-sheet-for="pT"] .sh-item');
+  check('items oldest first, numbered, with the day agreed and how far past it', items.length === 2 && hasEl(items[0], 'send the signed change order', 'agreed', '▲ 5 days') && hasEl(items[1], 'photos of the water heater') && !hasEl(items[1], '▲'));
+  check('a context line from the notes, Done and Not yet boxes, a line for why and by when', hasEl(items[0], 'the hendersons signed thursday', 'done', 'not yet', 'why, and by when?') && !hasEl(items[0], 'second line') && $$('.sh-box', items[0]).length === 2);
+  check('their agenda to talk about, and a footer to date and initial', has('.psheet[data-sheet-for="pT"]', 'let’s talk about', 'crew schedule for next week', 'went through it together', 'sheet tau-'));
+  check('a Print button, and the From line is yours', !!$('[data-sheet="print"]') && $('[data-sheet-from]').value === 'Todd · Click Plumbing');
+  await go('#sheets/pT');
+  check('one person: just their sheet', $$('.psheet').length === 1 && !!$('.psheet[data-sheet-for="pT"]'));
+  await go('#person/pT');
+  check('the person page offers the sheet and the debrief', !!$('a[href="#sheets/pT"]') && !!$('a[href="#person/pT/debrief"]'));
+  await go('#person/pT/debrief');
+  check('debrief: the same items in the same order, Done and Not yet', $$('.db-row').length === 3 && hasEl($$('.db-row')[0], 'send the signed change order') && !!$('[data-debrief="done"][data-id="wS1"]') && !!$('[data-debrief="notyet"][data-id="wS2"]'));
+  $('[data-debrief="done"][data-id="wS1"]').click(); await wait(300);
+  check('Done completes the card', !!t.tasks.find((x) => x.id === 'wS1').completed_at);
+  $('[data-debrief="notyet"][data-id="wS2"]').click(); await wait(100);
+  check('Not yet opens why and by when', !!$('[data-debrief-form="wS2"] [name=why]') && document.activeElement === $('[data-debrief-form="wS2"] [name=why]'));
+  const inTen = new Date(Date.now() + 10 * 86400000); const dk = `${inTen.getFullYear()}-${String(inTen.getMonth() + 1).padStart(2, '0')}-${String(inTen.getDate()).padStart(2, '0')}`;
+  $('[data-debrief-form="wS2"] [name=why]').value = 'Phone died on site'; $('[data-debrief-form="wS2"] [name=when]').value = dk; $('[data-debrief-form="wS2"]').requestSubmit(); await wait(300);
+  const w2 = t.tasks.find((x) => x.id === 'wS2');
+  check('saved: the reason in the notes, the follow-up on the day agreed', /Debrief .*: Phone died on site/.test(w2.notes) && new Date(w2.follow_up_at).toDateString() === inTen.toDateString() && has('#toast', 'noted'), `${w2.notes} / ${w2.follow_up_at}`);
+  $('[data-debrief-note="wS3"] [name=note]').value = 'Tue and Thu crews swap'; $('[data-debrief-note="wS3"]').requestSubmit(); await wait(300);
+  check('an agenda note is saved to the item', /Talked .*: Tue and Thu crews swap/.test(t.tasks.find((x) => x.id === 'wS3').notes));
 }
 
 // A person's own tag is "Waiting : their name": offered as it is typed, made on save, and renamed with them.
