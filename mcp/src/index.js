@@ -2126,11 +2126,12 @@ const TOOLS = [
       const [{ tags, tagLabel }, links, open] = await Promise.all([
         api.lookups(),
         api.q(`task_tags?${api.u}&select=task_id,tag_id`),
-        api.q(`tasks?${api.u}&${OPEN}&select=*`),
+        api.q(`tasks?${api.u}&${OPEN}&select=id`),
       ]);
       const openIds = new Set(open.map((t) => t.id));
+      const counts = new Map(); links.forEach((l) => { if (openIds.has(l.task_id)) counts.set(l.tag_id, (counts.get(l.tag_id) || 0) + 1); }); // one pass, not one per tag
       const statusOf = (t) => { let st = 'active'; for (let g = t, i = 0; g && i < 8; i++) { if (g.status === 'dropped') return 'dropped'; if (g.status === 'on_hold') st = 'on_hold'; g = tags.find((x) => x.id === g.parent_id); } return st; };
-      return tags.map((t) => ({ id: t.id, label: tagLabel(t), status: statusOf(t), open_tasks: links.filter((l) => l.tag_id === t.id && openIds.has(l.task_id)).length }))
+      return tags.map((t) => ({ id: t.id, label: tagLabel(t), status: statusOf(t), open_tasks: counts.get(t.id) || 0 }))
         .filter((t) => include_dropped || t.status !== 'dropped')
         .sort((a, b) => a.label.localeCompare(b.label));
     },
