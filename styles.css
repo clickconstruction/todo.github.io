@@ -1854,3 +1854,14 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .sp-box .sp-row { padding-left: 22px; }
 .sp-none { padding: 4px 22px 8px; }
 @media (max-width: 767px) { .sp-folder { display: none; } .sp-box { margin-left: 10px; } .sp-box .sp-row { padding-left: 6px; } }
+
+/* Sidebar footer: Customize on the left, Refresh and the version on the right. */
+@media (min-width: 900px) {
+  .nav-foot-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .nav-foot-right { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+  .nav-refresh { white-space: nowrap; padding-right: 4px; }
+  .nav-version { color: var(--muted); font-size: 12px; padding: 4px 10px 4px 2px; font-variant-numeric: tabular-nums; }
+  .nav-refresh-glyph { display: inline-block; }
+  .nav-refresh.busy .nav-refresh-glyph { animation: nav-spin .9s linear infinite; }
+  @keyframes nav-spin { to { transform: rotate(360deg); } }
+}

@@ -125,6 +125,15 @@ export async function checkNow() {
   return found ? apply() : { version, result: 'up_to_date' };
 }
 
+// The version in the sidebar footer: what the worker says it is; with no worker (localhost, a first
+// visit) the version sw.js carries.
+export function showVersion() {
+  const el = $('#nav-version');
+  if (el) el.textContent = app.appVersion || '';
+}
+async function readVersionFromFile() {
+  try { const m = /const VERSION = '([^']+)'/.exec(await (await fetch('sw.js', { cache: 'no-store' })).text()); if (m && !app.appVersion) { app.appVersion = m[1]; showVersion(); } } catch { /* offline: no version to show */ }
+}
 // ---------- wiring ----------
 export function initUpdates({ importBusy } = {}) {
   U.importBusy = importBusy;
@@ -148,9 +157,9 @@ export function initUpdates({ importBusy } = {}) {
   }, 10000);
 
   const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-  if (!('serviceWorker' in navigator) || isLocal) return;
+  if (!('serviceWorker' in navigator) || isLocal) { readVersionFromFile(); return; }
   U.hadController = !!navigator.serviceWorker.controller;
-  ask(controller()).then((i) => { if (i && i.version) app.appVersion = i.version; }); // shown in Settings → App
+  ask(controller()).then((i) => { if (i && i.version) { app.appVersion = i.version; showVersion(); } else readVersionFromFile(); }); // shown in Settings → App and the sidebar
   navigator.serviceWorker.register('sw.js').then((reg) => {
     U.reg = reg;
     U.lastCheck = Date.now();

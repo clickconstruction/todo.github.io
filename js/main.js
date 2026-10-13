@@ -34,7 +34,7 @@ import { sixAction, sixKey } from './views/six.js';
 import { settleAction, settleKey } from './views/settle.js';
 import { fullReviewAction, fullReviewChange, fullReviewKey, startFullReview, activeSession, quickReview } from './views/fullreview.js';
 import { moreSheetHtml, openCustomize } from './sidebar.js';
-import { initUpdates, resumeAfterUpdate, tryApply, checkNow } from './updates.js';
+import { initUpdates, resumeAfterUpdate, tryApply, checkNow, showVersion } from './updates.js';
 import { initPullToRefresh } from './pull.js';
 import { slipAction, slipSubmit, slipInput } from './views/slipbox.js';
 import { readingAction, readingSubmit } from './views/reading.js';
@@ -98,6 +98,18 @@ const ACTIONS = {
   'hide-nudge': hideNudge,
   'test-alert': testAlert,
   'toggle-archived-places': () => { app.showArchivedPlaces = !app.showArchivedPlaces; render(); },
+  // Sidebar → Refresh: everything again from the database, then a look for a new version (which switches
+  // right away if one is ready).
+  refresh: async () => {
+    if (!app.user) return;
+    const b = $('[data-act="refresh"]'); if (b) b.classList.add('busy');
+    try {
+      await keepSession(sb); await flushOutbox(); await loadAll(); render();
+      const r = await checkNow();
+      if (r.version) { app.appVersion = r.version; showVersion(); }
+      toast(r.result === 'updated' ? 'Refreshed · updating…' : r.result === 'waiting' ? 'Refreshed · an update is ready and switches in a moment' : `Refreshed${r.version ? ` · ${r.version}` : ''}`);
+    } finally { const b2 = $('[data-act="refresh"]'); if (b2) b2.classList.remove('busy'); }
+  },
   'check-updates': async () => {
     app.updateChecking = true; app.updateNote = ''; render();
     const r = await checkNow();
@@ -344,6 +356,8 @@ Object.assign(H, {
   tickle: (t) => openTickle(t),
 });
 // Pick up changes made on another device when the app comes back to the foreground.
+// The sidebar's Refresh sits outside #view, where [data-act] buttons are otherwise wired.
+document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('.nav-foot [data-act="refresh"]'); if (b) { e.preventDefault(); ACTIONS.refresh(); } });
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible' && app.user && !window.__noRefresh) { await keepSession(sb); await flushOutbox(); await loadAll(); render(); } // tests pause this
 });

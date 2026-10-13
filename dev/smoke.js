@@ -1647,6 +1647,12 @@ async function sidebar(check) {
   await go('#forecast'); await go('#inbox');
   const heads = $$('.tabs .nav-head').map((h) => h.textContent.replace(/[▾•\d]/g, '').trim());
   check('four groups by GTD step', heads.join('|') === 'Do|Organize|Lists|Reflect', heads.join('|'));
+  await until(() => /^v\d+$/.test(($('#nav-version') || {}).textContent || ''));
+  check('the footer shows the version, across from Customize', /^v\d+$/.test($('#nav-version').textContent) && !!$('.nav-foot-row [data-act="customize-sidebar"]') && !!$('.nav-foot-row [data-act="refresh"]'), ($('#nav-version') || {}).textContent);
+  (await import('/js/updates.js')).__resetUpdates(); // an earlier suite may have left an update waiting
+  const inboxed = T().tasks.find((x) => x.in_inbox && !x.completed_at && !x.dropped_at && !x.parent_id); inboxed.title = 'Renamed in the database meanwhile';
+  $('[data-act="refresh"]').click(); await until(() => has(undefined, 'renamed in the database meanwhile'));
+  check('Refresh reads everything again from the database, and says so', has(undefined, 'renamed in the database meanwhile') && /refreshed|update/i.test(text('#toast')), text('#toast')); // an earlier suite may have left an update waiting
   const order = $$('.tabs [data-nav]').map((a) => a.dataset.nav);
   check('Inbox first; Search and Focus as tools; Done and Settings in the footer', order[0] === 'inbox' && !!$('.nav-tools [data-view="search"]') && !!$('.nav-tools .nav-focus') && !!$('.nav-foot [data-nav="done"]') && !!$('.nav-foot [data-nav="settings"]'));
   check('grouped: Do, Organize, Lists, Reflect in order', ['forecast', 'now', 'flagged', 'nearby', 'projects', 'tags', 'perspectives', 'checklists', 'waiting', 'someday', 'tickler', 'reference', 'daily', 'weekly', 'horizons'].every((k, i, a) => i === 0 || order.indexOf(a[i - 1]) < order.indexOf(k)), order.join());
