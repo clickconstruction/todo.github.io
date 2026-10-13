@@ -527,7 +527,16 @@ async function six(check) {
   check('Esc closes without adding', !$('#sheet2').open && today.focus.length === beforeN + 1);
   key('a'); await wait(100);
   check('reopens on Forecast › This week', !!$('#sheet2 [data-sp-source="forecast"].on') && !!$('#sheet2 [data-sp-sub="week"].on'));
-  $('#sheet2 [data-sp-source="suggested"]').click(); await wait(30); $('[data-sp-cancel]').click(); await wait(80);
+  $('#sheet2 [data-sp-source="suggested"]').click(); await wait(30);
+  // Hold a row: the card's editor opens over the picker; a save redraws the list.
+  const heldRow = $('#sheet2 [data-sp-row]'); const heldId = heldRow.dataset.spRow;
+  heldRow.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 })); await wait(650);
+  check('holding a row opens the card’s editor over the picker', $('#sheet').open && !!$('#sheet #editor') && $('#sheet #editor [name=title]').value === task(heldId).title && $('#sheet2').open);
+  heldRow.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0 })); heldRow.click(); await wait(30);
+  check('the click that ends the hold is not a tick', !$(`#sheet2 [data-sp-tick="${heldId}"]`).classList.contains('on'));
+  $('#sheet #editor [name=title]').value = 'Renamed while adding'; $('#sheet #editor').requestSubmit(); await wait(400);
+  check('saved: the editor closes, the picker stays and shows the new title', !$('#sheet').open && $('#sheet2').open && has(`#sheet2 [data-sp-row="${heldId}"]`, 'renamed while adding') && task(heldId).title === 'Renamed while adding');
+  $('[data-sp-cancel]').click(); await wait(80);
   // A change made elsewhere (Claude's six tool, another device) shows without a reload.
   const elsewhere = open.find((x) => !today.focus.includes(x.id) && !task(x.id).completed_at) || open[0];
   today.focus = [elsewhere.id, ...today.focus.filter((id) => id !== elsewhere.id)].slice(0, 5); today.updated_at = new Date(Date.now() + 1000).toISOString();

@@ -3,7 +3,9 @@
 // several and add once, up to the free places; a card already on the day is shown but can't be ticked.
 // The last place looked is remembered on this device, with the last projects and tags opened.
 // Keys: ↑ ↓ move, space ticks (with the search empty), ⏎ adds the ticked ones (else the lit row),
-// Tab the next place to look, ⌫ back out of a project or tag (with the search empty), Esc closes.
+// Tab the next place to look, ⌫ back out of a project or tag (with the search empty), e edits the lit
+// row, Esc closes. Holding a row (or right-clicking it) opens the card's editor over the picker; the
+// list redraws when it saves.
 import { db, esc, byId, isOpen, toast, $, taskSort, tagsFor, tagLabel, sortedTags } from './state.js';
 import { isAvailable, cardBlockers, isSequenceBlocked, sequentialHead, projectOf } from './availability.js';
 import { rankNow } from './whatnow.js';
@@ -11,6 +13,7 @@ import { BOXES } from './matrix.js';
 import { matrixBoxes } from './views/matrix.js';
 import { startOfToday, addDays, isDeferred, fmtDate } from './dates.js';
 import { dayKey, isWaiting, waitingPerson } from './gtd.js';
+import { openEditor } from './editors/task.js';
 
 const SOURCES = [['suggested', 'Suggested'], ['matrix', 'Matrix'], ['forecast', 'Forecast'], ['projects', 'Projects'], ['tags', 'Tags'], ['flagged', 'Flagged']];
 const FORECAST = [['overdue', 'Overdue'], ['today', 'Today'], ['tomorrow', 'Tomorrow'], ['week', 'This week']];
@@ -54,7 +57,7 @@ function nextLater(list) {
 export function openSixPicker({ key, which, free, listed, other, onAdd, onClose = () => {} }) {
   const dlg = $('#sheet2');
   const saved = pref();
-  const st = { source: SOURCES.some(([k]) => k === saved.source) ? saved.source : 'suggested', sub: saved.sub || {}, projectId: null, tagId: null, q: '', ticked: [], active: 0, everywhere: false };
+  const st = { source: SOURCES.some(([k]) => k === saved.source) ? saved.source : 'suggested', sub: saved.sub || {}, projectId: null, tagId: null, q: '', ticked: [], active: 0, everywhere: false, held: false };
   const end = { today: (() => { const d = startOfToday(); d.setHours(23, 59, 59, 999); return d; })() };
   end.day = which === 'tomorrow' ? addDays(end.today, 1) : end.today;
   const onDay = (t) => (listed.has(t.id) ? which : other.ids.includes(t.id) ? other.which : null);
@@ -171,7 +174,7 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
   };
   const footHtml = () => {
     const n = st.ticked.length;
-    const keys = `<span class="sp-keys"> · <kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>space</kbd> tick · <kbd>⏎</kbd> add · <kbd>tab</kbd> next place</span>`;
+    const keys = `<span class="sp-keys"> · <kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>space</kbd> tick · <kbd>⏎</kbd> add · <kbd>e</kbd> edit · <kbd>tab</kbd> next place</span><span class="sp-hold"> · hold a card to edit it</span>`;
     const wide = words(st.q).length && st.source !== 'suggested' ? (st.everywhere ? `<button type="button" class="link-btn" data-sp-narrow>Back to ${esc(placeName())}</button>` : '<button type="button" class="link-btn" data-sp-wide>Search everywhere instead</button>') : '';
     return `${wide ? `<p class="sp-wide">${wide}</p>` : ''}<div class="sp-foot"><span class="hint">${n ? `${n} ticked · ` : ''}${free} place${free === 1 ? '' : 's'} free${keys}</span><button type="button" class="btn" data-sp-cancel>Cancel</button><button type="button" class="btn primary" data-sp-add ${n ? '' : 'disabled'}>Add${n ? ` ${n}` : ''} to ${which}</button></div>`;
   };
@@ -203,6 +206,13 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     draw();
   };
   const open = (id) => { if (st.source === 'projects') { st.projectId = id; recent('projects', id); } else { st.tagId = id; recent('tags', id); } st.q = ''; $('[data-sp-search]', dlg).value = ''; st.active = 0; st.everywhere = false; draw(); };
+  // The card's editor over the picker: on save the list is drawn again (a title, flag or project may have
+  // changed, or the card may no longer belong here); either way focus comes back to the search.
+  const editCard = (id) => {
+    const t = byId(db.tasks, id);
+    if (!t) return;
+    openEditor(t, {}, { onSaved: () => { st.ticked = st.ticked.filter((x) => byId(db.tasks, x) && isOpen(byId(db.tasks, x))); draw(); setTimeout(() => search.focus(), 0); }, onClose: () => setTimeout(() => search.focus(), 0) });
+  };
   const setSource = (k) => { st.source = k; st.projectId = null; st.tagId = null; st.everywhere = false; st.active = 0; remember({ source: k, sub: st.sub }); draw(); };
 
   dlg.innerHTML = `<form method="dialog" class="part-of-picker six-pick">
@@ -217,6 +227,7 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
   search.oninput = () => { st.q = search.value; st.active = 0; draw(); };
   const form = dlg.querySelector('form');
   form.onclick = (e) => {
+    if (st.held) { st.held = false; return; } // the click that ends a hold is not a tick
     const el = (sel) => e.target.closest(sel);
     if (el('[data-sp-cancel]')) { close(); return; }
     if (el('[data-sp-add]')) { add(); return; }
@@ -229,8 +240,22 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     if (el('[data-sp-tick]')) { toggle(el('[data-sp-tick]').dataset.spTick); return; }
     const r = el('[data-sp-row]'); if (r) toggle(r.dataset.spRow);
   };
+  // Hold a row for half a second (without moving) to edit the card; a right-click does the same.
+  let hold = null;
+  const endHold = () => { if (hold) { clearTimeout(hold.timer); hold = null; } };
+  form.addEventListener('pointerdown', (e) => {
+    const r = e.target.closest('[data-sp-row]');
+    if (!r || e.button !== 0) return;
+    endHold();
+    hold = { id: r.dataset.spRow, x: e.clientX, y: e.clientY, timer: setTimeout(() => { hold = null; st.held = true; editCard(r.dataset.spRow); }, 500) };
+  });
+  form.addEventListener('pointermove', (e) => { if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 8) endHold(); });
+  form.addEventListener('pointerup', endHold);
+  form.addEventListener('pointercancel', endHold);
+  form.addEventListener('contextmenu', (e) => { const r = e.target.closest('[data-sp-row]'); if (r) { e.preventDefault(); endHold(); editCard(r.dataset.spRow); } });
   form.onkeydown = (e) => {
     if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    if (e.key === 'e' && !search.value && !choosing()) { e.preventDefault(); const r = st.rows[st.active]; if (r && r.t) editCard(r.t.id); return; }
     if (e.key === 'Tab') { e.preventDefault(); const i = SOURCES.findIndex(([k]) => k === st.source); setSource(SOURCES[(i + (e.shiftKey ? SOURCES.length - 1 : 1)) % SOURCES.length][0]); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = st.rows.length; if (n) { st.active = (st.active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; draw(); } return; }
     if (e.key === 'Enter') { e.preventDefault(); if (choosing()) { const x = st.rows[st.active]; if (x) open(x.id); } else add(); return; }

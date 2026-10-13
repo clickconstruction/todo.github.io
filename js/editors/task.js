@@ -199,7 +199,9 @@ async function saveWithDropUndo(task, fields, tagIds) {
 }
 
 
-export function openEditor(task, defaults = {}) {
+// opts.onSaved(row) runs after a save, opts.onClose() after Cancel: a screen that opened the editor over
+// itself (the Six Add picker) redraws or takes focus back.
+export function openEditor(task, defaults = {}, opts = {}) {
   const t = task || { title: '', notes: '', project_id: null, flagged: false, defer_at: null, due_at: null, ...defaults };
   const sheet = openSheet(`<form method="dialog" id="editor">
     <h2>${task ? 'Edit item' : 'New item'}</h2>
@@ -211,7 +213,7 @@ export function openEditor(task, defaults = {}) {
   const form = $('#editor', sheet);
   // A new item can be broken down right away: save it first, then open the steps sheet.
   const collect = wireTaskForm(form, t, task, undefined, { onBeforeBreakdown: () => { form.dataset.thenBreakdown = '1'; form.requestSubmit(); } });
-  $('[data-cancel]', sheet).onclick = () => sheet.close();
+  $('[data-cancel]', sheet).onclick = () => { sheet.close(); if (opts.onClose) opts.onClose(); };
   // Items are dropped, never deleted: Drop saves the form with status "dropped" (restore via Status → Open).
   const drop = $('[data-drop]', sheet);
   if (drop) drop.onclick = () => { form.elements.status.value = 'dropped'; form.requestSubmit(); };
@@ -221,6 +223,7 @@ export function openEditor(task, defaults = {}) {
     if (!data) return;
     sheet.close();
     const row = await saveWithDropUndo(task, data.fields, data.tagIds);
+    if (opts.onSaved) opts.onSaved(row);
     if (form.dataset.thenBreakdown && row) openBreakdown(byId(db.tasks, row.id) || row);
   };
   // Long notes (e.g. a forwarded email) earn the whole screen; re-check as the user types.

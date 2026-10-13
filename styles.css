@@ -1827,3 +1827,8 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .qe-chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .qe-chip.on.red { background: color-mix(in srgb, var(--due) 16%, transparent); border-color: var(--due); color: var(--due); }
 .qe-chips .hint { font-size: 12px; }
+
+/* Holding a picker row opens the card's editor: no text selection or callout while held. */
+.sp-row { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.sp-hold { display: none; }
+@media (max-width: 767px) { .sp-hold { display: inline; } }
