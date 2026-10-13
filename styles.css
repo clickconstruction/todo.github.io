@@ -1786,3 +1786,35 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .six-busy .check { background: var(--ok); border-color: var(--ok); color: #fff; }
 .six-busy .row-title, .six-busy .six-now-title { color: var(--muted); text-decoration: line-through; }
 @media (prefers-reduced-motion: reduce) { .six-row.six-lit, .six-now.six-lit, .six-carried { animation: none; } }
+
+/* The Six Add picker: a wider sheet, chips for where to look, rows you tick, a footer that adds them. */
+.sheet.sp-wide { max-width: 760px; }
+@media (min-width: 900px) { .sheet.sp-wide { inset: 50% auto auto 50%; transform: translate(-50%, -50%); margin: 0; width: min(760px, calc(100% - 32px)); } } /* centred, whatever the auto margins do */
+.sp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.sp-head h2 { margin: 0; }
+.sp-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 0; }
+.sp-chips.sub { margin-top: 6px; }
+.sp-chip { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; min-height: 36px; }
+.sp-chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.sp-chips.sub .sp-chip { font-size: 13px; min-height: 32px; padding: 4px 10px; }
+.sp-crumb { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; flex-wrap: wrap; }
+.sp-proj { margin-top: 6px; padding: 8px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; color: var(--muted); }
+.sp-proj b { color: var(--text); }
+.sp-list { max-height: 46vh; gap: 0; }
+.sp-group { display: flex; justify-content: space-between; gap: 8px; }
+.sp-group .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.sp-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 6px; border-bottom: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.sp-row.act, .po-item.act { background: var(--surface-2); }
+.sp-row.off { opacity: .5; cursor: default; }
+.sp-row.later { opacity: .65; }
+.sp-tick { flex: none; width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--muted); background: none; margin-top: 2px; padding: 0; display: grid; place-items: center; color: transparent; font-size: 13px; cursor: pointer; }
+.sp-tick.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sp-tick:disabled { border-style: dashed; cursor: default; }
+.sp-main { flex: 1; min-width: 0; }
+.sp-title { font-size: 15px; overflow-wrap: anywhere; }
+.sp-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; font-size: 12px; color: var(--muted); align-items: center; }
+.sp-wide { margin: 0; }
+.sp-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sp-foot .hint { flex: 1; }
+.sp-foot kbd { font: inherit; font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); }
+@media (max-width: 767px) { .sp-chips { flex-wrap: nowrap; overflow-x: auto; margin-left: -16px; margin-right: -16px; padding: 0 16px; scrollbar-width: none; } .sp-chip { flex: none; } .sp-foot .hint { flex: 1 1 100%; } .sp-keys { display: none; } .sp-foot .btn { flex: 1; } .sp-list { max-height: 44vh; } }

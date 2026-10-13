@@ -2,21 +2,20 @@
 // wait under Then, and finished ones stay in place, crossed out. Today's and tomorrow's lists are the
 // Daily review's focus rows (daily_reviews.focus), so both screens show the same list. What was left of
 // the day before comes over to the top of today once (six_carry in the database; Undo is six_uncarry),
-// and from the evening hour (Settings → Weekly and daily review) the view opens on tomorrow. Add offers
-// suggestions first (overdue and due, flagged, what What now? would pick) and searches every open card.
+// and from the evening hour (Settings → Weekly and daily review) the view opens on tomorrow. Add is the
+// picker in js/six-picker.js: suggestions, or a place to look, and a search; several cards at once.
 // Keys: d done, n not now, t tomorrow, a add.
 // The screen answers at once: a move changes the list here and redraws, and the write follows; if the
 // write fails the rows are read back and the toast says why. While the view is open it listens for
 // changes made elsewhere (Claude's six tool, another device): live updates when available, a poll either way.
-import { db, app, sb, run, syncRow, esc, byId, isOpen, toast, $, taskSort } from '../state.js';
+import { db, app, sb, run, syncRow, esc, byId, isOpen, toast, $ } from '../state.js';
 import { setCompleted, refreshTasks } from '../data.js';
 import { startOfToday, addDays, atDefaultTime, isOverdue, fmtDate } from '../dates.js';
-import { isAvailable } from '../availability.js';
-import { rankNow } from '../whatnow.js';
 import { dayKey } from '../gtd.js';
 import { gainOf } from '../gain.js';
 import { titleHtml } from '../rows.js';
 import { rowFor } from './daily.js';
+import { openSixPicker } from '../six-picker.js';
 
 export const SIX = 6;
 const ORD = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'];
@@ -225,64 +224,21 @@ export function viewSix(arg) {
 }
 
 // ---------- adding ----------
-// Suggestions first (overdue and due, flagged, then what What now? would pick), and typing searches
-// every open card, grouped by project, like the "waits for" picker.
-function openAddPicker(key, which) {
-  const dlg = $('#sheet2');
-  const listed = new Set(listOf(key));
-  const end = endOfDay(key);
-  const all = db.tasks.filter((t) => isOpen(t) && !t.daily && !listed.has(t.id));
-  const avail = all.filter((t) => isAvailable(t) && !t.in_inbox);
-  const due = avail.filter((t) => t.due_at && new Date(t.due_at) <= end).sort((a, b) => a.due_at.localeCompare(b.due_at));
-  const dueIds = new Set(due.map((t) => t.id));
-  const flagged = avail.filter((t) => t.flagged && !dueIds.has(t.id));
-  const flagIds = new Set(flagged.map((t) => t.id));
-  const next = rankNow(avail.filter((t) => !dueIds.has(t.id) && !flagIds.has(t.id)), { projects: db.projects, goals: db.goals || [], endOfToday: end, limit: 5 }).items.map((x) => x.t);
-  const item = (t) => `<li><button type="button" class="po-item" data-six-pick="${t.id}">${esc(t.title)}${projName(t) ? `<span class="hint"> · ${esc(projName(t))}</span>` : ''}</button></li>`;
-  const group = (label, list) => (list.length ? `<li class="po-group">${label}</li>${list.slice(0, 8).map(item).join('')}` : '');
-  const draw = (q) => {
-    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    let html;
-    if (!words.length) {
-      html = group(which === 'today' ? 'Overdue and due today' : 'Overdue and due by tomorrow', due) + group('Flagged', flagged) + group('What now? would pick next', next);
-      if (!html) html = '<li class="hint">Nothing to suggest. Type to search every open card.</li>';
-    } else {
-      const hits = all.filter((t) => words.every((w) => `${t.title} ${projName(t)}`.toLowerCase().includes(w))).sort(taskSort);
-      const groups = new Map();
-      hits.slice(0, 80).forEach((t) => { const k = projName(t); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); });
-      html = [...groups.entries()].map(([name, list]) => `<li class="po-group">${name ? `🗂️ ${esc(name)}` : '📥 Loose cards'}</li>${list.map(item).join('')}`).join('')
-        + (hits.length ? (hits.length > 80 ? '<li class="hint">Keep typing to narrow it down…</li>' : '') : '<li class="hint">No matching cards.</li>');
-    }
-    $('[data-six-list]', dlg).innerHTML = html;
-  };
-  dlg.innerHTML = `<form method="dialog" class="part-of-picker six-pick"><h2>Add to ${which === 'today' ? 'today' : 'tomorrow'}</h2>
-    <p class="hint" style="margin:0">Suggestions first. Type to search every open card.</p>
-    <input type="search" data-six-search placeholder="Search anything…" aria-label="Search cards" autocomplete="off">
-    <ul class="po-list" data-six-list></ul>
-    <div class="actions"><div class="right"><button type="button" class="btn" data-six-cancel>Cancel</button></div></div></form>`;
-  draw('');
-  const search = $('[data-six-search]', dlg);
-  search.oninput = () => draw(search.value);
-  dlg.querySelector('form').onclick = async (e) => {
-    if (e.target.closest('[data-six-cancel]')) { dlg.close(); drawIfDirty(); return; }
-    const b = e.target.closest('[data-six-pick]');
-    if (!b) return;
-    dlg.close();
-    await addTo(key, byId(db.tasks, b.dataset.sixPick));
-  };
-  dlg.showModal();
-  search.focus();
-}
-async function addTo(key, t) {
-  if (!t) return;
+// The picker (js/six-picker.js) hands back one or more ids: onto the end of the day's list in that order,
+// off the other day's list if they were there, planned for the day.
+async function addMany(key, ids) {
   const list = listOf(key);
-  if (list.length >= SIX) { toast('Six is the limit'); return; }
-  if (list.includes(t.id)) return;
-  put(key, [...list, t.id]);
-  flash(t.id);
-  toast(`Added as the ${ORD[list.length]}`);
+  const fresh = ids.filter((id) => byId(db.tasks, id) && !list.includes(id)).slice(0, Math.max(0, SIX - list.length));
+  if (!fresh.length) { if (list.length >= SIX) toast('Six is the limit'); return; }
+  const otherKey = keyOf(key === keyOf('today') ? 'tomorrow' : 'today');
+  const other = listOf(otherKey);
+  const moved = fresh.filter((id) => other.includes(id));
+  put(key, [...list, ...fresh]);
+  if (moved.length) put(otherKey, other.filter((id) => !moved.includes(id)));
+  flash(...fresh);
+  toast(fresh.length === 1 ? `Added as the ${ORD[list.length]}` : `Added ${fresh.length}${moved.length ? ` · ${moved.length} moved from ${otherKey === keyOf('today') ? 'today' : 'tomorrow'}` : ''}`);
   app.render();
-  await Promise.all([save(key), planFor(t, key)]);
+  await Promise.all([save(key), moved.length ? save(otherKey) : null, ...fresh.map((id) => planFor(byId(db.tasks, id), key))]);
 }
 
 // ---------- actions and keys ----------
@@ -293,7 +249,11 @@ export async function sixAction(el) {
   const t = el.dataset.id && byId(db.tasks, el.dataset.id);
   const list = listOf(key);
   const i = t ? list.indexOf(t.id) : -1;
-  if (a === 'add') { openAddPicker(key, which); return; }
+  if (a === 'add') {
+    const otherWhich = which === 'today' ? 'tomorrow' : 'today';
+    openSixPicker({ key, which, free: SIX - list.length, listed: new Set(list), other: { which: otherWhich, ids: listOf(keyOf(otherWhich)) }, onAdd: (ids) => addMany(key, ids), onClose: drawIfDirty });
+    return;
+  }
   if (a === 'uncarry') {
     const r = rowFor(key);
     if (!r) return;

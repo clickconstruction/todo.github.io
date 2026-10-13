@@ -368,6 +368,9 @@ async function six(check) {
   t.daily_reviews.push({ id: 'dy', user_id: 'u1', day: dk(yesterday), started_at: null, shutdown_at: null, focus: [open[0].id, doneOne.id, open[1].id], carried: [], carried_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
   const { loadAll } = await import('/js/data.js'); await loadAll();
   app.six = null; app.settings.six_evening_minutes = 1439; window.__sixPollMs = 150;
+  try { localStorage.removeItem('todo.six.pick'); } catch { /* ignore */ }
+  const pk = (k, opts = {}) => $('[data-sp-search]').dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...opts }));
+  const tickAdd = async (id) => { $(`#sheet2 [data-sp-tick="${id}"]`).click(); await wait(30); $('[data-sp-add]').click(); await wait(300); };
   const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
   const task = (id) => t.tasks.find((x) => x.id === id);
   const sameDay = (iso, d) => !!iso && new Date(iso).toDateString() === d.toDateString();
@@ -380,10 +383,12 @@ async function six(check) {
   check('carried cards are planned today', sameDay(task(open[0].id).planned_at, new Date()));
   check('gain line: not written yet, with a way to write it', has('.six-now .six-gain', 'not written yet') && !!$(`.six-now .link-btn[data-task="${open[0].id}"]`));
   key('a'); await wait(100);
-  check('a opens Add: suggestions grouped, then search', $('#sheet2').open && has('#sheet2', 'add to today') && $$('#sheet2 .po-group').length >= 1 && $$('#sheet2 [data-six-pick]').length >= 1);
-  const s = $('[data-six-search]'); s.value = open[3].title; s.dispatchEvent(new Event('input')); await wait(50);
-  check('typing searches every open card', !!$(`#sheet2 [data-six-pick="${open[3].id}"]`));
-  $(`#sheet2 [data-six-pick="${open[3].id}"]`).click(); await wait(300);
+  check('a opens Add: suggestions grouped, places to look, then search', $('#sheet2').open && has('#sheet2', 'add to today', '4 places free') && $$('#sheet2 .po-group').length >= 1 && $$('#sheet2 [data-sp-tick]').length >= 1 && $$('#sheet2 [data-sp-source]').length === 6 && !!$('#sheet2 [data-sp-source="suggested"].on'));
+  const s = $('[data-sp-search]'); s.value = open[3].title; s.dispatchEvent(new Event('input')); await wait(50);
+  check('typing searches every open card', !!$(`#sheet2 [data-sp-row="${open[3].id}"]`) && $('[data-sp-add]').disabled);
+  $(`#sheet2 [data-sp-tick="${open[3].id}"]`).click(); await wait(30);
+  check('a tick counts, and the button says what it will add', has('#sheet2', '1 ticked') && !$('[data-sp-add]').disabled && /add 1 to today/i.test($('[data-sp-add]').textContent));
+  $('[data-sp-add]').click(); await wait(300);
   check('picked: added as the third, planned today, with a toast', today.focus.length === 3 && today.focus[2] === open[3].id && has('#toast', 'added as the third') && sameDay(task(open[3].id).planned_at, new Date()), text('#toast'));
   const focusWas = `${document.activeElement.tagName}.${document.activeElement.className} sheet2:${$('#sheet2').open}`;
   key('n'); await wait(300);
@@ -405,22 +410,61 @@ async function six(check) {
   for (const x of open.slice(4)) {
     if (today.focus.length >= 6) break;
     key('a'); await wait(100);
-    const q = $('[data-six-search]'); q.value = x.title; q.dispatchEvent(new Event('input')); await wait(50);
-    const b = $(`#sheet2 [data-six-pick="${x.id}"]`); if (b) b.click(); else $('[data-six-cancel]').click();
-    await wait(300);
+    const q = $('[data-sp-search]'); q.value = x.title; q.dispatchEvent(new Event('input')); await wait(50);
+    const b = $(`#sheet2 [data-sp-tick="${x.id}"]`); if (b && !b.disabled) await tickAdd(x.id); else { $('[data-sp-cancel]').click(); await wait(100); }
   }
   check('six is the limit: Add is off and says so', today.focus.length === 6 && $('[data-six="add"]').disabled && has('.six-foot', 'six is the limit'), String(today.focus.length));
   $('[data-six="uncarry"]').click(); await wait(300);
   check('Undo takes yesterday’s leftovers off today; the day stays marked', !today.focus.includes(open[0].id) && today.carried.length === 0 && !!today.carried_at && !$('.six-carried'));
+  // Places to look: a project (next and later, with why), the Matrix (its boxes), Forecast (its days); search
+  // stays, scoped to the place, with a way to widen it; the last place is remembered.
+  const proj = t.projects.find((p) => p.status === 'active' && t.tasks.some((x) => x.project_id === p.id && !x.completed_at && !x.dropped_at && !x.daily && !today.focus.includes(x.id)));
+  key('a'); await wait(100);
+  $('#sheet2 [data-sp-source="projects"]').click(); await wait(50);
+  check('Projects: a list of projects to choose from, filtered as you type', !!$('#sheet2 [data-sp-source="projects"].on') && $$('#sheet2 [data-sp-open]').length >= 2 && /find a project/i.test($('[data-sp-search]').placeholder));
+  const ps = $('[data-sp-search]'); ps.value = proj.name; ps.dispatchEvent(new Event('input')); await wait(50);
+  $(`#sheet2 [data-sp-open="${proj.id}"]`).click(); await wait(50);
+  check('inside a project: a crumb, what is open, Next first', has('#sheet2 .sp-crumb', proj.name) && has('#sheet2 .sp-proj', 'open') && has('#sheet2', 'next') && $$('#sheet2 [data-sp-tick]:not([disabled])').length >= 1 && new RegExp(`search in ${proj.name}`, 'i').test($('[data-sp-search]').placeholder));
+  const pickedId = $('#sheet2 [data-sp-tick]:not([disabled])').dataset.spTick;
+  const beforeN = today.focus.length;
+  await tickAdd(pickedId);
+  check('ticked and added: on the list, from that project', today.focus.length === beforeN + 1 && today.focus[beforeN] === pickedId && t.tasks.find((x) => x.id === pickedId).project_id === proj.id);
+  key('a'); await wait(100);
+  check('reopens where you last looked, with the project under Recent', !!$('#sheet2 [data-sp-source="projects"].on') && has('#sheet2', 'recent', proj.name) && !$('#sheet2 .sp-proj'));
+  $('#sheet2 [data-sp-source="matrix"]').click(); await wait(50);
+  check('Matrix: its four boxes as chips, Do first', !!$('#sheet2 [data-sp-sub="do"].on') && $$('#sheet2 [data-sp-sub]').length === 4 && /matrix › do/i.test($('[data-sp-search]').placeholder));
+  $('#sheet2 [data-sp-sub="schedule"]').click(); await wait(50);
+  check('a box chip switches the list', !!$('#sheet2 [data-sp-sub="schedule"].on') && /schedule/i.test($('[data-sp-search]').placeholder));
+  pk('Tab'); await wait(50);
+  check('Tab moves to the next place: Forecast, with its days', !!$('#sheet2 [data-sp-source="forecast"].on') && $$('#sheet2 [data-sp-sub]').length === 4 && !!$('#sheet2 [data-sp-sub="today"].on'));
+  $('#sheet2 [data-sp-sub="week"]').click(); await wait(50);
+  const fs = $('[data-sp-search]'); fs.value = 'zzqx-nothing'; fs.dispatchEvent(new Event('input')); await wait(50);
+  check('a search with nothing here offers to search everywhere', has('#sheet2', 'no matching cards here') && !!$('#sheet2 [data-sp-wide]'));
+  const findMe = open.find((x) => !task(x.id).completed_at && !today.focus.includes(x.id)) || open[5];
+  fs.value = findMe.title; fs.dispatchEvent(new Event('input')); await wait(50);
+  if ($('#sheet2 [data-sp-wide]')) { $('#sheet2 [data-sp-wide]').click(); await wait(50); }
+  check('everywhere: the card is found, grouped by project, with a way back', !!$(`#sheet2 [data-sp-row="${findMe.id}"]`) && !!$('#sheet2 [data-sp-narrow]'));
+  fs.value = ''; fs.dispatchEvent(new Event('input')); await wait(30);
+  $('#sheet2 [data-sp-source="suggested"]').click(); await wait(30);
+  pk('ArrowDown'); await wait(30);
+  check('↑ ↓ light a row', $$('#sheet2 .sp-row.act').length === 1 && $$('#sheet2 .sp-row')[1].classList.contains('act'), String($$('#sheet2 .sp-row').length));
+  pk(' '); await wait(30);
+  check('space ticks the lit row when the search is empty', $$('#sheet2 .sp-tick.on').length === 1 && has('#sheet2', '1 ticked'));
+  $('#sheet2 [data-sp-source="forecast"]').click(); await wait(30);
+  pk('Escape'); await wait(80);
+  check('Esc closes without adding', !$('#sheet2').open && today.focus.length === beforeN + 1);
+  key('a'); await wait(100);
+  check('reopens on Forecast › This week', !!$('#sheet2 [data-sp-source="forecast"].on') && !!$('#sheet2 [data-sp-sub="week"].on'));
+  $('#sheet2 [data-sp-source="suggested"]').click(); await wait(30); $('[data-sp-cancel]').click(); await wait(80);
   // A change made elsewhere (Claude's six tool, another device) shows without a reload.
   const elsewhere = open.find((x) => !today.focus.includes(x.id) && !task(x.id).completed_at) || open[0];
-  today.focus = [elsewhere.id, ...today.focus.filter((id) => id !== elsewhere.id)].slice(0, 6); today.updated_at = new Date(Date.now() + 1000).toISOString();
+  today.focus = [elsewhere.id, ...today.focus.filter((id) => id !== elsewhere.id)].slice(0, 5); today.updated_at = new Date(Date.now() + 1000).toISOString();
   await until(() => has('.six-now', elsewhere.title) && $$('.six-row, .six-now').length === today.focus.length, 2500);
   check('a change made elsewhere shows within a poll, without a reload', has('.six-now', elsewhere.title) && $$('.six-row, .six-now').length === today.focus.length, text('.six-now'));
   const q2 = $('[data-six="add"]'); q2.click(); await wait(80);
   today.focus = today.focus.slice(1); today.updated_at = new Date(Date.now() + 2000).toISOString(); await wait(400);
   check('but never while the Add sheet is open', $('#sheet2').open && $$('.six-row, .six-now').length === today.focus.length + 1);
-  $('[data-six-cancel]').click(); await wait(80);
+  $('[data-sp-cancel]').click(); await wait(80);
   check('and it shows as soon as the sheet closes', !$('#sheet2').open && $$('.six-row, .six-now').length === today.focus.length);
   window.__sixPollMs = 0;
   app.settings.six_evening_minutes = 0;
