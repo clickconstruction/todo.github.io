@@ -210,8 +210,18 @@ async function refreshCard(it) {
   }
 }
 // Re-render unless you're typing somewhere (a field left focused in a sheet that has closed isn't typing).
+// A live update (Claude drafting ahead, the poll) replaces the whole screen. While a finger or the mouse is
+// down on it, that would pull the button out from under the press and the click would never fire, so the
+// redraw waits for the press to end; while a decision is being saved it waits for that to finish.
+const press = { held: false, waiting: false };
+const pressEnd = () => { press.held = false; if (press.waiting) { press.waiting = false; setTimeout(redraw, 0); } }; // after the click has been handled
+addEventListener('pointerdown', () => { press.held = true; }, true);
+addEventListener('pointerup', pressEnd, true);
+addEventListener('pointercancel', pressEnd, true);
+addEventListener('blur', pressEnd); // the mouse let go outside the window
 function redraw() {
   if (editing()) return; // a row open for editing holds its text until Save or Esc
+  if (press.held || F().busy) { press.waiting = true; return; }
   const el = document.activeElement || {};
   const sheet = el.closest && el.closest('dialog');
   if (!/INPUT|TEXTAREA|SELECT/.test(el.tagName || '') || (sheet && !sheet.open)) app.render();
@@ -726,8 +736,12 @@ export async function fullReviewAction(el, e) {
     await loadSession(s.id);
     return;
   }
-  if (['undo', 'decide', 'submit'].includes(a) && f.busy) return; // one decision at a time (fast key presses)
-  if (['undo', 'decide', 'submit'].includes(a)) { f.busy = true; try { await act(a, el); } finally { f.busy = false; } }
+  if (['undo', 'decide', 'submit'].includes(a) && f.busy) { if (a === 'undo') toast('One moment: still saving the last one'); return; } // one decision at a time (fast key presses)
+  if (['undo', 'decide', 'submit'].includes(a)) {
+    if (a === 'undo') { el.disabled = true; el.textContent = '↶ Undoing…'; } // say so at once: an undo is several reads and can take a few seconds
+    f.busy = a;
+    try { await act(a, el); } finally { f.busy = false; if (press.waiting) { press.waiting = false; setTimeout(redraw, 0); } }
+  }
   if (a === 'dismiss' || a === 'edit-suggestion') {
     const cur = s && f.byId.get(s.current_item);
     if (!cur) return;
