@@ -5,8 +5,11 @@
 // and from the evening hour (Settings → Weekly and daily review) the view opens on tomorrow. Add offers
 // suggestions first (overdue and due, flagged, what What now? would pick) and searches every open card.
 // Keys: d done, n not now, t tomorrow, a add.
+// The screen answers at once: a move changes the list here and redraws, and the write follows; if the
+// write fails the rows are read back and the toast says why. While the view is open it listens for
+// changes made elsewhere (Claude's six tool, another device): live updates when available, a poll either way.
 import { db, app, sb, run, syncRow, esc, byId, isOpen, toast, $, taskSort } from '../state.js';
-import { setCompleted } from '../data.js';
+import { setCompleted, refreshTasks } from '../data.js';
 import { startOfToday, addDays, atDefaultTime, isOverdue, fmtDate } from '../dates.js';
 import { isAvailable } from '../availability.js';
 import { rankNow } from '../whatnow.js';
@@ -17,7 +20,8 @@ import { rowFor } from './daily.js';
 
 export const SIX = 6;
 const ORD = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'];
-const S = () => (app.six ||= { carried: null });
+const S = () => (app.six ||= { carried: null, flash: new Set(), inserting: {} });
+const L = { poll: null, channel: null }; // the live connection lives outside app.six, so it is always stopped
 const dayOf = (key) => new Date(`${key}T12:00:00`);
 const endOfDay = (key) => { const d = dayOf(key); d.setHours(23, 59, 59, 999); return d; };
 const keyOf = (which) => dayKey(which === 'tomorrow' ? addDays(startOfToday(), 1) : startOfToday());
@@ -31,26 +35,36 @@ const fmtHM = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'nume
 export const listOf = (key) => ((rowFor(key) || {}).focus || []).filter((id) => byId(db.tasks, id));
 const tasksOf = (key) => listOf(key).map((id) => byId(db.tasks, id));
 const projName = (t) => (t.project_id ? (byId(db.projects, t.project_id) || {}).name || '' : t.in_inbox ? 'Inbox' : '');
+const move = (arr, from, to) => { const x = [...arr]; const [v] = x.splice(from, 1); x.splice(to, 0, v); return x; };
 
-async function ensureRow(key) {
-  const cur = rowFor(key);
-  if (cur) return cur;
-  const [row] = await run(sb.from('daily_reviews').insert({ day: key }).select());
-  (db.dailyReviews = db.dailyReviews || []).unshift(row);
-  return row;
-}
-function syncReview(row) {
-  const r = Array.isArray(row) ? row[0] : row;
-  if (!r) return null;
-  const old = rowFor(r.day);
-  if (old) return syncRow('dailyReviews', old, r);
-  (db.dailyReviews = db.dailyReviews || []).unshift(r);
+// ---------- the list, here first, then in the database ----------
+// put() changes a day's list in memory (a day with no row yet gets one, written on the first save);
+// save() writes what the list is now. A failed write reads the rows back, so the screen is honest.
+function put(key, focus) {
+  let r = rowFor(key);
+  if (!r) { r = { id: null, day: key, focus: [], carried: [], carried_at: null, started_at: null, shutdown_at: null }; (db.dailyReviews = db.dailyReviews || []).unshift(r); }
+  r.focus = focus;
   return r;
 }
-async function setList(key, focus) {
-  const r = await ensureRow(key);
-  const [row] = await run(sb.from('daily_reviews').update({ focus }).eq('id', r.id).select());
-  return syncRow('dailyReviews', r, row);
+async function save(key) {
+  const s = S();
+  const r = rowFor(key);
+  if (!r) return;
+  try {
+    if (!r.id) {
+      s.inserting[key] ||= run(sb.from('daily_reviews').insert({ day: key, focus: r.focus }).select()).then(([row]) => { Object.assign(r, row); delete s.inserting[key]; }).catch((e) => { delete s.inserting[key]; throw e; });
+      await s.inserting[key];
+    }
+    const [row] = await run(sb.from('daily_reviews').update({ focus: r.focus }).eq('id', r.id).select());
+    syncRow('dailyReviews', r, row);
+  } catch {
+    await reload([key]);
+    app.render();
+  }
+}
+async function reload(keys) {
+  const rows = await run(sb.from('daily_reviews').select('*').in('day', keys));
+  keys.forEach((key) => { const have = rows.find((x) => x.day === key); const local = rowFor(key); if (have) { if (local) Object.assign(local, have); else db.dailyReviews.unshift(have); } else if (local && !local.id) db.dailyReviews.splice(db.dailyReviews.indexOf(local), 1); });
 }
 // On a day's list means planned for that day, so Forecast and Today agree with it.
 async function planFor(t, key) {
@@ -58,6 +72,8 @@ async function planFor(t, key) {
   const [row] = await run(sb.from('tasks').update({ planned_at: atDefaultTime(dayOf(key), 'planned_at').toISOString() }).eq('id', t.id).select());
   syncRow('tasks', t, row);
 }
+// A card that just moved, landed or arrived lights up briefly on the next draw.
+const flash = (...ids) => { const s = S(); ids.forEach((id) => s.flash.add(id)); };
 // What was left of the day before comes to the top of today, once: asked of the database the first
 // time today's list is shown. The carried cards are then planned today.
 function carryToday(key) {
@@ -67,10 +83,74 @@ function carryToday(key) {
   run(sb.rpc('six_carry', { p_day: key })).then(async (row) => {
     const r = syncReview(row);
     if (!r) return;
+    flash(...(r.carried || []));
     for (const id of r.carried || []) { const t = byId(db.tasks, id); if (t) await planFor(t, key); }
     app.render();
   }).catch(() => {});
 }
+function syncReview(row) {
+  const r = Array.isArray(row) ? row[0] : row;
+  if (!r) return null;
+  const old = rowFor(r.day);
+  if (old) return Object.assign(old, r);
+  (db.dailyReviews = db.dailyReviews || []).unshift(r);
+  return r;
+}
+
+// ---------- changes made elsewhere ----------
+// Claude's six tool and another device write the same rows. Live updates when the client has them, and a
+// poll either way (two rows and the cards on them), while the view is open.
+function listen() {
+  if (L.poll) return;
+  L.poll = setInterval(poll, window.__sixPollMs || 20000);
+  if (sb.channel && app.user) {
+    try {
+      L.channel = sb.channel('six').on('postgres_changes', { event: '*', schema: 'public', table: 'daily_reviews', filter: `user_id=eq.${app.user.id}` }, (p) => { if (onRow(p.new)) redraw(); }).subscribe();
+    } catch { L.channel = null; }
+  }
+}
+function stopListening() {
+  if (L.channel) { try { sb.removeChannel(L.channel); } catch { /* ignore */ } L.channel = null; }
+  if (L.poll) { clearInterval(L.poll); L.poll = null; }
+}
+// A row from elsewhere: taken if newer; cards it names that aren't loaded are fetched. True when it changed anything.
+function onRow(r) {
+  if (!r || !r.day) return false;
+  const old = rowFor(r.day);
+  if (old && old.id && old.updated_at === r.updated_at) return false;
+  if (old) Object.assign(old, r); else (db.dailyReviews = db.dailyReviews || []).unshift(r);
+  const missing = (r.focus || []).filter((id) => !byId(db.tasks, id));
+  if (missing.length) refreshTasks(missing).then(redraw).catch(() => {});
+  return true;
+}
+async function poll() {
+  if (!location.hash.startsWith('#six')) { stopListening(); return; }
+  const keys = [keyOf('today'), keyOf('tomorrow')];
+  const stamp = () => keys.flatMap((k) => [((rowFor(k) || {}).updated_at || ''), ...tasksOf(k).map((t) => t.updated_at || '')]).join('|');
+  const before = stamp();
+  try {
+    const rows = await run(sb.from('daily_reviews').select('*').in('day', keys));
+    rows.forEach(onRow);
+    const ids = [...new Set(keys.flatMap(listOf))];
+    if (ids.length) await refreshTasks(ids);
+  } catch { return; }
+  if (stamp() !== before || S().dirty) redraw(); // dirty: a change that arrived while a sheet was open
+}
+// Typing somewhere: a field with focus, unless it is left behind in a sheet that has closed.
+function typing() {
+  const el = document.activeElement;
+  if (!el || !el.tagName) return false;
+  if (el.closest && el.closest('dialog') && !el.closest('dialog').open) return false;
+  return /INPUT|TEXTAREA|SELECT/.test(el.tagName) || !!el.isContentEditable;
+}
+// Redraw unless a sheet is open or you're typing (a live update never pulls the screen out from under
+// you); what arrived then is drawn as soon as the sheet closes.
+function redraw() {
+  if (!location.hash.startsWith('#six')) return;
+  if ($('#sheet').open || $('#sheet2').open || typing()) { S().dirty = true; return; }
+  app.render();
+}
+const drawIfDirty = () => { if (S().dirty && location.hash.startsWith('#six')) app.render(); };
 
 // ---------- the screen ----------
 function chips(t, carriedIn) {
@@ -91,8 +171,9 @@ function gainLine(t) {
   if (g.suggested) return `<span class="chip sug">Claude suggested</span> ${esc(g.text)} <button type="button" class="link-btn" data-six="keep-gain" data-id="${t.id}">Keep</button>`;
   return `→ ${esc(g.text)}${g.own ? '' : ` <span class="hint">· from ${esc(g.project)}</span>`}`;
 }
+const lit = (id) => (S().flash.has(id) ? ' six-lit' : '');
 function nowCard(t, i, n, carriedIn) {
-  return `<section class="six-now" aria-label="Now">
+  return `<section class="six-now${lit(t.id)}" aria-label="Now" data-six-card="${t.id}">
     <div class="six-now-head"><span class="six-label">Now · ${i + 1} of ${n}</span><span class="row-meta">${chips(t, carriedIn)}</span></div>
     <h2 class="six-now-title" data-task="${t.id}">${titleHtml(t.title)}</h2>
     <p class="six-gain">${gainLine(t)}</p>
@@ -103,7 +184,7 @@ function rowHtml(t, i, n, which, carriedIn) {
   const open = isOpen(t);
   const other = which === 'today' ? 'tomorrow' : 'today';
   const state = open ? '' : t.dropped_at ? '<span class="chip">dropped</span>' : `<span class="chip ok">done${t.completed_at ? ` ${esc(fmtHM(t.completed_at))}` : ''}</span>`;
-  return `<div class="six-row ${open ? '' : 'done'}">
+  return `<div class="six-row ${open ? '' : 'done'}${lit(t.id)}" data-six-card="${t.id}">
     <button type="button" class="check ${open ? (isOverdue(t) ? 'overdue' : t.flagged ? 'flagged' : '') : 'done'}" data-six="${open ? 'done' : 'reopen'}" data-id="${t.id}" aria-label="${open ? 'Done' : 'Done; tap to reopen'}">✓</button>
     <span class="six-num">${i + 1}</span>
     <div class="row-main" data-task="${t.id}"><div class="row-title">${titleHtml(t.title)}</div><div class="row-meta">${chips(t, carriedIn)}${state}</div>${open ? `<p class="six-gain">${gainLine(t)}</p>` : ''}</div>
@@ -116,6 +197,7 @@ export function viewSix(arg) {
   const key = keyOf(which);
   const r = rowFor(key);
   if (which === 'today' && !(r && r.carried_at)) carryToday(key);
+  listen();
   const items = tasksOf(key);
   const open = items.filter(isOpen);
   const now = which === 'today' ? open[0] : null;
@@ -128,11 +210,14 @@ export function viewSix(arg) {
     if (now && isOpen(t) && !thenShown) { thenShown = true; head = '<p class="six-then">Then</p>'; }
     return head + rowHtml(t, i, items.length, which, carried.has(t.id));
   }).join('');
+  const s = S();
+  s.dirty = false;
+  if (s.flash.size) setTimeout(() => s.flash.clear(), 50); // lit on this draw only
   const full = items.length >= SIX;
   const tab = (w, label) => `<a href="#six/${w}" role="tab" class="${which === w ? 'on' : ''}" aria-selected="${which === w}">${label}</a>`;
   return `<div class="view-head"><h1 class="six">Six</h1><span class="six-seg" role="tablist" aria-label="Which day">${tab('today', 'Today')}${tab('tomorrow', 'Tomorrow')}</span></div>
     <p class="view-sub">${esc(dayOf(key).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }))} · ${items.length ? `${doneN} of ${items.length} done` : 'nothing picked yet'} <span class="hint">· from ${esc(eveningLabel())}, Tomorrow opens first</span></p>
-    ${carried.size ? `<div class="six-carried" role="status"><span>${carried.size === 1 ? 'One came over from yesterday and sits' : `${carried.size} came over from yesterday and sit`} at the top.</span><button type="button" class="link-btn" data-six="uncarry">Undo</button></div>` : ''}
+    ${carried.size ? `<div class="six-carried${[...carried].some((id) => s.flash.has(id)) ? ' six-in' : ''}" role="status"><span>${carried.size === 1 ? 'One came over from yesterday and sits' : `${carried.size} came over from yesterday and sit`} at the top.</span><button type="button" class="link-btn" data-six="uncarry">Undo</button></div>` : ''}
     ${items.length ? body : '<div class="six-empty">Six things, in order. Work the first until it is finished, then the second. What is left tonight goes to the top of tomorrow.</div>'}
     ${which === 'today' && items.length && !open.length ? '<p class="six-all">All done ✓</p>' : ''}
     <div class="cl-bar six-foot"><button type="button" class="btn" data-six="add" ${full ? 'disabled' : ''}>＋ Add${full ? '' : ` the ${ORD[items.length]}`}</button><span class="hint">${full ? 'Six is the limit. Finish one, or send one to tomorrow.' : `${items.length} of ${SIX}`}</span></div>
@@ -179,7 +264,7 @@ function openAddPicker(key, which) {
   const search = $('[data-six-search]', dlg);
   search.oninput = () => draw(search.value);
   dlg.querySelector('form').onclick = async (e) => {
-    if (e.target.closest('[data-six-cancel]')) { dlg.close(); return; }
+    if (e.target.closest('[data-six-cancel]')) { dlg.close(); drawIfDirty(); return; }
     const b = e.target.closest('[data-six-pick]');
     if (!b) return;
     dlg.close();
@@ -193,10 +278,11 @@ async function addTo(key, t) {
   const list = listOf(key);
   if (list.length >= SIX) { toast('Six is the limit'); return; }
   if (list.includes(t.id)) return;
-  await setList(key, [...list, t.id]);
-  await planFor(t, key);
+  put(key, [...list, t.id]);
+  flash(t.id);
   toast(`Added as the ${ORD[list.length]}`);
   app.render();
+  await Promise.all([save(key), planFor(t, key)]);
 }
 
 // ---------- actions and keys ----------
@@ -207,36 +293,51 @@ export async function sixAction(el) {
   const t = el.dataset.id && byId(db.tasks, el.dataset.id);
   const list = listOf(key);
   const i = t ? list.indexOf(t.id) : -1;
-  const move = (arr, from, to) => { const x = [...arr]; const [v] = x.splice(from, 1); x.splice(to, 0, v); return x; };
   if (a === 'add') { openAddPicker(key, which); return; }
-  if (a === 'uncarry') { syncReview(await run(sb.rpc('six_uncarry', { p_day: key }))); toast('Yesterday’s leftovers are off today’s list'); app.render(); return; }
+  if (a === 'uncarry') {
+    const r = rowFor(key);
+    if (!r) return;
+    const gone = r.carried || [];
+    put(key, list.filter((id) => !gone.includes(id))); r.carried = []; // here first; the database follows
+    toast('Yesterday’s leftovers are off today’s list');
+    app.render();
+    try { syncReview(await run(sb.rpc('six_uncarry', { p_day: key }))); } catch { await reload([key]); }
+    app.render();
+    return;
+  }
   if (!t) return;
-  if (a === 'done') { await setCompleted(t, true); return; } // it redraws and says so
-  if (a === 'reopen') { await setCompleted(t, false); return; }
+  if (a === 'done' || a === 'reopen') { // the card shows it is on its way while the write runs; it redraws and says so
+    const card = el.closest('.six-now, .six-row'); if (card) card.classList.add('six-busy');
+    await setCompleted(t, a === 'done');
+    return;
+  }
   if (a === 'keep-gain') { const [row] = await run(sb.from('tasks').update({ gain_by: null }).eq('id', t.id).select()); syncRow('tasks', t, row); toast('Gain kept'); app.render(); return; }
-  if (a === 'up' && i > 0) await setList(key, move(list, i, i - 1));
-  else if (a === 'down' && i >= 0 && i < list.length - 1) await setList(key, move(list, i, i + 1));
-  else if (a === 'bottom' && i >= 0) await setList(key, move(list, i, list.length - 1));
-  else if (a === 'remove' && i >= 0) await setList(key, list.filter((id) => id !== t.id));
-  else if ((a === 'tomorrow' || a === 'today') && i >= 0) {
+  if (i < 0) return;
+  if (a === 'up' && i > 0) put(key, move(list, i, i - 1));
+  else if (a === 'down' && i < list.length - 1) put(key, move(list, i, i + 1));
+  else if (a === 'bottom') put(key, move(list, i, list.length - 1));
+  else if (a === 'remove') put(key, list.filter((id) => id !== t.id));
+  else if (a === 'tomorrow' || a === 'today') {
     const toKey = keyOf(a);
     if (toKey === key) return;
     const target = listOf(toKey);
     if (target.length >= SIX) { toast(`${a === 'tomorrow' ? 'Tomorrow' : 'Today'} already has six`); return; }
-    await setList(key, list.filter((id) => id !== t.id));
-    await setList(toKey, [...target, t.id]);
-    await planFor(t, toKey);
+    put(key, list.filter((id) => id !== t.id));
+    put(toKey, [...target, t.id]);
+    flash(t.id);
     toast(`Moved to ${a}`);
-  }
+    app.render();
+    await Promise.all([save(key), save(toKey), planFor(t, toKey)]);
+    return;
+  } else return;
+  flash(t.id);
   app.render();
+  await save(key);
 }
 export function sixKey(e) {
   if (!location.hash.startsWith('#six')) return false;
   if ($('#sheet2') && $('#sheet2').open) return false;
-  const el = document.activeElement;
-  const inClosedSheet = el && el.closest && el.closest('dialog') && !el.closest('dialog').open; // focus left behind in a sheet that has closed isn't typing
-  if (el && !inClosedSheet && (/INPUT|TEXTAREA|SELECT/.test(el.tagName) || el.isContentEditable)) return false;
-  if (e.metaKey || e.ctrlKey || e.altKey) return false;
+  if (typing() || e.metaKey || e.ctrlKey || e.altKey) return false;
   const press = (sel) => { const b = document.querySelector(sel); if (b && !b.disabled) { e.preventDefault(); b.click(); return true; } return false; };
   if (e.key === 'a') return press('[data-six="add"]');
   if (e.key === 'd') return press('.six-now [data-six="done"]');

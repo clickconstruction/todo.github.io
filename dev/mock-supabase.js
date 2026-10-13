@@ -408,7 +408,8 @@
       lte(k, v) { st.filters.push((r) => r[k] != null && r[k] <= v); return b; },
       in(k, vs) { st.filters.push((r) => vs.includes(r[k])); return b; },
       or(expr) { const parts = splitTop(expr).map(cond); st.filters.push((r) => parts.some((f) => f(r))); return b; },
-      then(res, rej) { return Promise.resolve(exec()).then(res, rej); },
+      // window.__mockDelay (ms) imitates a slow network, to see what the app shows while a write is on its way.
+      then(res, rej) { const out = exec(); return (window.__mockDelay ? new Promise((r) => setTimeout(() => r(out), window.__mockDelay)) : Promise.resolve(out)).then(res, rej); },
     };
     return b;
   }
@@ -636,11 +637,11 @@
               const fit = left.slice(0, Math.max(0, 6 - r.focus.length));
               r.focus = [...fit, ...r.focus]; r.carried = fit; r.carried_at = now(); r.updated_at = now();
             }
-            return { data: r, error: null };
+            return { data: JSON.parse(JSON.stringify(r)), error: null }; // a fresh object, as the server sends
           }
           if (!r) return { data: null, error: { message: 'No list for that day.' } };
           r.focus = r.focus.filter((tid) => !(r.carried || []).includes(tid)); r.carried = []; r.updated_at = now();
-          return { data: r, error: null };
+          return { data: JSON.parse(JSON.stringify(r)), error: null };
         }
         // Mirrors review_apply() (migration 20261016000001): apply the suggestion's fields, then decide.
         if (name === 'review_apply') {

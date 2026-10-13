@@ -367,7 +367,7 @@ async function six(check) {
   if (!doneOne.completed_at) doneOne.completed_at = new Date().toISOString();
   t.daily_reviews.push({ id: 'dy', user_id: 'u1', day: dk(yesterday), started_at: null, shutdown_at: null, focus: [open[0].id, doneOne.id, open[1].id], carried: [], carried_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
   const { loadAll } = await import('/js/data.js'); await loadAll();
-  app.six = null; app.settings.six_evening_minutes = 1439;
+  app.six = null; app.settings.six_evening_minutes = 1439; window.__sixPollMs = 150;
   const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
   const task = (id) => t.tasks.find((x) => x.id === id);
   const sameDay = (iso, d) => !!iso && new Date(iso).toDateString() === d.toDateString();
@@ -376,6 +376,7 @@ async function six(check) {
   const today = t.daily_reviews.find((r) => r.day === dk(new Date()));
   check('yesterday’s open leftovers come to the top, once, in order; the done one stays behind', !!today && today.focus.join() === [open[0].id, open[1].id].join() && today.carried.length === 2 && !!today.carried_at && has('.six-carried', '2 came over from yesterday'), today && today.focus.join());
   check('the first open one is Now, the rest wait under Then', has('.six-now', 'now · 1 of 2', open[0].title) && has('.six-then', 'then') && $$('.six-row').length === 1);
+  await until(() => sameDay(task(open[0].id).planned_at, new Date()));
   check('carried cards are planned today', sameDay(task(open[0].id).planned_at, new Date()));
   check('gain line: not written yet, with a way to write it', has('.six-now .six-gain', 'not written yet') && !!$(`.six-now .link-btn[data-task="${open[0].id}"]`));
   key('a'); await wait(100);
@@ -411,6 +412,17 @@ async function six(check) {
   check('six is the limit: Add is off and says so', today.focus.length === 6 && $('[data-six="add"]').disabled && has('.six-foot', 'six is the limit'), String(today.focus.length));
   $('[data-six="uncarry"]').click(); await wait(300);
   check('Undo takes yesterday’s leftovers off today; the day stays marked', !today.focus.includes(open[0].id) && today.carried.length === 0 && !!today.carried_at && !$('.six-carried'));
+  // A change made elsewhere (Claude's six tool, another device) shows without a reload.
+  const elsewhere = open.find((x) => !today.focus.includes(x.id) && !task(x.id).completed_at) || open[0];
+  today.focus = [elsewhere.id, ...today.focus.filter((id) => id !== elsewhere.id)].slice(0, 6); today.updated_at = new Date(Date.now() + 1000).toISOString();
+  await until(() => has('.six-now', elsewhere.title) && $$('.six-row, .six-now').length === today.focus.length, 2500);
+  check('a change made elsewhere shows within a poll, without a reload', has('.six-now', elsewhere.title) && $$('.six-row, .six-now').length === today.focus.length, text('.six-now'));
+  const q2 = $('[data-six="add"]'); q2.click(); await wait(80);
+  today.focus = today.focus.slice(1); today.updated_at = new Date(Date.now() + 2000).toISOString(); await wait(400);
+  check('but never while the Add sheet is open', $('#sheet2').open && $$('.six-row, .six-now').length === today.focus.length + 1);
+  $('[data-six-cancel]').click(); await wait(80);
+  check('and it shows as soon as the sheet closes', !$('#sheet2').open && $$('.six-row, .six-now').length === today.focus.length);
+  window.__sixPollMs = 0;
   app.settings.six_evening_minutes = 0;
   await go('#six');
   check('from the evening hour, Tomorrow opens first', ($('.six-seg a.on') || {}).getAttribute && $('.six-seg a.on').getAttribute('href') === '#six/tomorrow');
