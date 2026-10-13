@@ -119,8 +119,9 @@ function shutdownHtml() {
     ${r && r.shutdown_at ? '<div class="dv-ready"><b>Done for today 🌙</b><span class="hint">Everything is captured and carried over.</span></div>' : ''}
     <h2 class="section-title dv-sec">Anything on your mind?</h2>
     <form class="capture" data-daily-capture><input type="text" name="title" placeholder="Capture it before you stop…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
-    <h2 class="section-title dv-sec">Today’s focus <span class="hint">${focus.length ? `${done} of ${focus.length} done` : 'none picked'}</span></h2>
-    ${focus.map((t) => (t.completed_at || t.dropped_at ? `<div class="dv-row"><span class="ok">✓</span><span class="dv-x done">${esc(t.title)}</span></div>`
+    <h2 class="section-title dv-sec">Today’s focus <span class="hint">${focus.length ? `${done} of ${focus.length} done${focus.some((t) => t.dropped_at && !t.completed_at) ? ` · ${focus.filter((t) => t.dropped_at && !t.completed_at).length} dropped` : ''}` : 'none picked'}</span></h2>
+    ${focus.map((t) => (t.completed_at ? `<div class="dv-row"><span class="ok">✓</span><span class="dv-x done">${esc(t.title)}</span></div>`
+      : t.dropped_at ? `<div class="dv-row"><span class="hint">✕</span><span class="dv-x done">${esc(t.title)}</span><span class="chip">dropped</span></div>`
       : `<div class="dv-row" data-task="${t.id}"><span>○</span><span class="dv-x">${esc(t.title)}</span><span class="dv-carry"><button class="btn small primary" data-daily="tomorrow" data-id="${t.id}">Tomorrow</button><button class="btn small" data-daily="nextweek" data-id="${t.id}">Next week</button><button class="btn small" data-daily="drop" data-id="${t.id}">Drop</button></span></div>`)).join('') || '<p class="hint">Tomorrow morning, pick up to six.</p>'}
     <h2 class="section-title dv-sec">Tomorrow <span class="hint">${esc(new Date(`${tmr}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long' }))}${dueTmr.length ? ` · ${dueTmr.length} due` : ''}</span></h2>
     <div class="dv-day">${day.html}</div>

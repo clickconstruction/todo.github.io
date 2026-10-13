@@ -179,12 +179,15 @@ function nowCard(t, i, n, carriedIn) {
     <div class="six-now-btns"><button type="button" class="btn primary" data-six="done" data-id="${t.id}">Done</button><button type="button" class="btn" data-six="bottom" data-id="${t.id}">Not now, to the bottom</button><button type="button" class="btn" data-six="tomorrow" data-id="${t.id}">Tomorrow</button><button type="button" class="btn link" data-task="${t.id}">Edit details</button></div>
   </section>`;
 }
+// A dropped card stays in its place but isn't done: a grey ✕, and a tap brings it back.
+const isDropped = (t) => !!t.dropped_at && !t.completed_at;
 function rowHtml(t, i, n, which, carriedIn) {
   const open = isOpen(t);
+  const dropped = isDropped(t);
   const other = which === 'today' ? 'tomorrow' : 'today';
-  const state = open ? '' : t.dropped_at ? '<span class="chip">dropped</span>' : `<span class="chip ok">done${t.completed_at ? ` ${esc(fmtHM(t.completed_at))}` : ''}</span>`;
+  const state = open ? '' : dropped ? '<span class="chip">dropped</span>' : `<span class="chip ok">done${t.completed_at ? ` ${esc(fmtHM(t.completed_at))}` : ''}</span>`;
   return `<div class="six-row ${open ? '' : 'done'}${lit(t.id)}" data-six-card="${t.id}">
-    <button type="button" class="check ${open ? (isOverdue(t) ? 'overdue' : t.flagged ? 'flagged' : '') : 'done'}" data-six="${open ? 'done' : 'reopen'}" data-id="${t.id}" aria-label="${open ? 'Done' : 'Done; tap to reopen'}">✓</button>
+    <button type="button" class="check ${open ? (isOverdue(t) ? 'overdue' : t.flagged ? 'flagged' : '') : dropped ? 'dropped' : 'done'}" data-six="${open ? 'done' : dropped ? 'undrop' : 'reopen'}" data-id="${t.id}" aria-label="${open ? 'Done' : dropped ? 'Dropped; tap to bring it back' : 'Done; tap to reopen'}">${dropped ? '✕' : '✓'}</button>
     <span class="six-num">${i + 1}</span>
     <div class="row-main" data-task="${t.id}"><div class="row-title">${titleHtml(t.title)}</div><div class="row-meta">${chips(t, carriedIn)}${state}</div>${open ? `<p class="six-gain">${gainLine(t)}</p>` : ''}</div>
     ${open ? `<span class="six-ctl"><button type="button" class="six-ib" data-six="up" data-id="${t.id}" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="six-ib" data-six="down" data-id="${t.id}" aria-label="Move down" ${i === n - 1 ? 'disabled' : ''}>↓</button><button type="button" class="btn small" data-six="${other}" data-id="${t.id}">${other === 'tomorrow' ? 'Tomorrow' : 'Today'}</button><button type="button" class="six-ib" data-six="remove" data-id="${t.id}" aria-label="Take off the list">×</button></span>` : ''}
@@ -201,7 +204,8 @@ export function viewSix(arg) {
   const open = items.filter(isOpen);
   const now = which === 'today' ? open[0] : null;
   const carried = new Set(which === 'today' && r ? (r.carried || []).filter((id) => items.some((t) => t.id === id)) : []);
-  const doneN = items.length - open.length;
+  const doneN = items.filter((t) => t.completed_at).length; // dropped isn't done
+  const droppedN = items.filter(isDropped).length;
   let thenShown = false;
   const body = items.map((t, i) => {
     if (t === now) return nowCard(t, i, items.length, carried.has(t.id));
@@ -215,10 +219,10 @@ export function viewSix(arg) {
   const full = items.length >= SIX;
   const tab = (w, label) => `<a href="#six/${w}" role="tab" class="${which === w ? 'on' : ''}" aria-selected="${which === w}">${label}</a>`;
   return `<div class="view-head"><h1 class="six">Six</h1><span class="six-seg" role="tablist" aria-label="Which day">${tab('today', 'Today')}${tab('tomorrow', 'Tomorrow')}</span></div>
-    <p class="view-sub">${esc(dayOf(key).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }))} · ${items.length ? `${doneN} of ${items.length} done` : 'nothing picked yet'} <span class="hint">· from ${esc(eveningLabel())}, Tomorrow opens first</span></p>
+    <p class="view-sub">${esc(dayOf(key).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }))} · ${items.length ? `${doneN} of ${items.length} done${droppedN ? ` · ${droppedN} dropped` : ''}` : 'nothing picked yet'} <span class="hint">· from ${esc(eveningLabel())}, Tomorrow opens first</span></p>
     ${carried.size ? `<div class="six-carried${[...carried].some((id) => s.flash.has(id)) ? ' six-in' : ''}" role="status"><span>${carried.size === 1 ? 'One came over from yesterday and sits' : `${carried.size} came over from yesterday and sit`} at the top.</span><button type="button" class="link-btn" data-six="uncarry">Undo</button></div>` : ''}
     ${items.length ? body : '<div class="six-empty">Six things, in order. Work the first until it is finished, then the second. What is left tonight goes to the top of tomorrow.</div>'}
-    ${which === 'today' && items.length && !open.length ? '<p class="six-all">All done ✓</p>' : ''}
+    ${which === 'today' && items.length && !open.length ? (droppedN ? '<p class="six-all quiet">Nothing left open</p>' : '<p class="six-all">All done ✓</p>') : ''}
     <div class="cl-bar six-foot"><button type="button" class="btn" data-six="add" ${full ? 'disabled' : ''}>＋ Add${full ? '' : ` the ${ORD[items.length]}`}</button><span class="hint">${full ? 'Six is the limit. Finish one, or send one to tomorrow.' : `${items.length} of ${SIX}`}</span></div>
     <p class="hint six-keys"><kbd>d</kbd> done · <kbd>n</kbd> not now · <kbd>t</kbd> tomorrow · <kbd>a</kbd> add</p>`;
 }
@@ -282,6 +286,10 @@ export async function sixAction(el) {
     const card = el.closest('.six-now, .six-row'); if (card) card.classList.add('six-busy');
     await setCompleted(t, a === 'done');
     return;
+  }
+  if (a === 'undrop') { // back to open, where it was on the list
+    const [row] = await run(sb.from('tasks').update({ dropped_at: null }).eq('id', t.id).select());
+    syncRow('tasks', t, row); flash(t.id); toast(`“${t.title}” is back`); app.render(); return;
   }
   if (a === 'keep-gain') { const [row] = await run(sb.from('tasks').update({ gain_by: null }).eq('id', t.id).select()); syncRow('tasks', t, row); toast('Gain kept'); app.render(); return; }
   if (i < 0) return;

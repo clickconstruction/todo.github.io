@@ -7,7 +7,7 @@ const SIX = 6;
 export function sixTools({ localDate, zonedToIso, availableTasks }) {
   return [{
     name: 'six',
-    description: 'Six, the Ivy Lee list: up to six cards for a day, in order. The first open one is "now"; finished ones stay in place. action: status (default; day today|tomorrow: the list with ranks, gains and what is done, plus suggestions: overdue and due, flagged, what What now? would pick next) · add (ids, day: to the end, planned for that day) · remove (id, day) · move (id, day, to: top|bottom|up|down or a position 1–6) · tomorrow (id: from today\'s list to the end of tomorrow\'s) · today (id: from tomorrow\'s to today\'s) · carry (what was left of the day before comes to the top of today, once a day; the app does this when today is first opened) · undo_carry. Finishing one is complete_task. Six is the limit on each day.',
+    description: 'Six, the Ivy Lee list: up to six cards for a day, in order. The first open one is "now"; finished ones stay in place. action: status (default; day today|tomorrow: the list with ranks, gains and what is done, plus suggestions: overdue and due, flagged, what What now? would pick next) · add (ids, day: to the end, planned for that day) · remove (id, day) · move (id, day, to: top|bottom|up|down or a position 1–6) · tomorrow (id: from today\'s list to the end of tomorrow\'s) · today (id: from tomorrow\'s to today\'s) · carry (what was left of the day before comes to the top of today, once a day; the app does this when today is first opened) · undo_carry. Finishing one is complete_task; a dropped one stays in its place as dropped, not done. Six is the limit on each day.',
     inputSchema: { type: 'object', properties: {
       action: { type: 'string', enum: ['status', 'add', 'remove', 'move', 'tomorrow', 'today', 'carry', 'undo_carry'], default: 'status' },
       day: { type: 'string', enum: ['today', 'tomorrow'], default: 'today' },
@@ -104,7 +104,7 @@ export function sixTools({ localDate, zonedToIso, availableTasks }) {
         day: outKey, which: dayName(outKey), count: items.length, limit: SIX,
         carried_over: carried.size ? [...carried] : undefined,
         now: nowT ? nowT.id : undefined,
-        items: items.map((t, i) => ({ rank: i + 1, ...shaped.get(t.id), now: t === nowT || undefined, carried_over: carried.has(t.id) || undefined, done: !!(t.completed_at || t.dropped_at) })),
+        items: items.map((t, i) => ({ rank: i + 1, ...shaped.get(t.id), now: t === nowT || undefined, carried_over: carried.has(t.id) || undefined, done: !!t.completed_at, dropped: (!!t.dropped_at && !t.completed_at) || undefined })), // dropped isn't done
         suggestions: free > 0 ? { due: due.slice(0, 8).map(brief), flagged: flagged.slice(0, 8).map(brief), next: next.map(({ t, reasons }) => ({ ...brief(t), why: reasons.map((x) => x.text) })) } : undefined,
         note: free > 0 ? `${free} place${free === 1 ? '' : 's'} free. Adding plans the card for that day.` : 'Six is the limit. Finish one, send one to the other day, or remove one before adding.',
       };

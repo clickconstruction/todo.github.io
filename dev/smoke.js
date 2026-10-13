@@ -752,6 +752,14 @@ async function six(check) {
   key('a'); await wait(100); await typeIn('order spare glass');
   check('an open card with that exact title: no offer to make another', !$('#sheet2 [data-sp-new]') && !!$(`#sheet2 [data-sp-row="${made2.id}"]`));
   $('[data-sp-cancel]').click(); await wait(80);
+  // Dropped isn't done: it keeps its place with a grey ✕, the count says so, and a tap brings it back.
+  const doneBefore = today.focus.filter((id) => task(id).completed_at).length;
+  task(made.id).dropped_at = new Date().toISOString(); task(made.id).updated_at = new Date(Date.now() + 3000).toISOString(); today.updated_at = new Date(Date.now() + 3000).toISOString();
+  await until(() => !!$(`.six-row.dropped [data-six="undrop"][data-id="${made.id}"]`), 2500);
+  check('a dropped card shows ✕ and “dropped”, and isn’t counted as done', !!$(`.check.dropped[data-id="${made.id}"]`) && $(`.check.dropped[data-id="${made.id}"]`).textContent === '✕' && has(`[data-six-card="${made.id}"]`, 'dropped') && has('.view-sub', `${doneBefore} of ${today.focus.length} done · 1 dropped`), text('.view-sub'));
+  $(`[data-six="undrop"][data-id="${made.id}"]`).click();
+  await until(() => !task(made.id).dropped_at && !$(`.six-row.dropped [data-id="${made.id}"]`));
+  check('a tap on the ✕ brings it back, open, in its place', !task(made.id).dropped_at && today.focus.includes(made.id) && has('#toast', 'is back') && !has('.view-sub', 'dropped'), text('.view-sub'));
   // A change made elsewhere (Claude's six tool, another device) shows without a reload.
   const elsewhere = open.find((x) => !today.focus.includes(x.id) && !task(x.id).completed_at) || open[0];
   today.focus = [elsewhere.id, ...today.focus.filter((id) => id !== elsewhere.id)].slice(0, 5); today.updated_at = new Date(Date.now() + 1000).toISOString();

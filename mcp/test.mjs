@@ -1276,6 +1276,11 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(chi(db.tasks.find((t) => t.id === pick[0]).planned_at) === tmr, 'planned tomorrow');
   const bk = await tool('six', { action: 'today', id: pick[0] });
   assert(bk.which === 'today' && bk.count === 6 && bk.items[5].id === pick[0], 'today: back on today\'s list, at the end');
+  const dropT = db.tasks.find((t) => t.id === pick[1]); dropT.dropped_at = new Date().toISOString();
+  const dr = await tool('six', {});
+  const dItem = dr.items.find((x) => x.id === pick[1]);
+  assert(dItem && dItem.dropped === true && dItem.done === false && dr.now !== pick[1], 'a dropped card stays on the list as dropped, not done, and is never now');
+  dropT.dropped_at = null;
   const rm = await tool('six', { action: 'remove', id: pick[0] });
   assert(rm.count === 5 && rm.suggestions && !rm.items.some((x) => x.id === pick[0]), 'remove: off the list, suggestions back');
   const st = await tool('settings', { action: 'set', six_evening_time: '17:30' });

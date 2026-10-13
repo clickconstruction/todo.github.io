@@ -153,6 +153,7 @@ textarea { min-height: 80px; resize: vertical; }
 .check.flagged { border-color: var(--flag); }
 .check.overdue { border-color: var(--due); }
 .check.done { background: var(--ok); border-color: var(--ok); color: #fff; }
+.check.dropped { border-style: dashed; color: var(--muted); }
 .row-main { flex: 1; min-width: 0; }
 .row-title { overflow-wrap: anywhere; }
 .row.completed .row-title { color: var(--muted); text-decoration: line-through; }
@@ -1774,6 +1775,7 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .six-ib:disabled { opacity: .4; cursor: default; }
 .six-empty { padding: 20px; border-radius: 14px; background: var(--surface); border: 1px dashed var(--line); color: var(--muted); }
 .six-all { margin: 12px 4px; color: var(--ok); font-weight: 600; }
+.six-all.quiet { color: var(--muted); font-weight: 500; }
 .six-foot { margin-top: 14px; }
 .six-keys { margin-top: 10px; }
 .six-keys kbd { font: inherit; font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); }
