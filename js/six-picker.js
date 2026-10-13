@@ -4,8 +4,8 @@
 // The last place looked is remembered on this device, with the last projects and tags opened.
 // Keys: ↑ ↓ move, space ticks (with the search empty), ⏎ adds the ticked ones (else the lit row),
 // Tab the next place to look, ⌫ back out of a project or tag (with the search empty), e edits the lit
-// row, Esc closes. Holding a row (or right-clicking it) opens the card's editor over the picker; the
-// list redraws when it saves.
+// row, Esc closes. The gear at the end of a row (or holding it, or right-clicking it) opens the card's
+// editor over the picker; the list redraws when it saves.
 import { db, esc, byId, isOpen, toast, $, taskSort, tagsFor, tagLabel, sortedTags } from './state.js';
 import { isAvailable, cardBlockers, isSequenceBlocked, sequentialHead, projectOf } from './availability.js';
 import { rankNow } from './whatnow.js';
@@ -169,12 +169,13 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
       const on = st.ticked.includes(r.t.id);
       return `<li class="sp-row ${day ? 'off' : ''} ${r.later ? 'later' : ''} ${i === st.active ? 'act' : ''}" data-sp-row="${r.t.id}">
         <button type="button" class="sp-tick ${on ? 'on' : ''}" data-sp-tick="${r.t.id}" aria-label="${on ? 'Ticked' : 'Tick'}" ${day ? 'disabled' : ''}>✓</button>
-        <div class="sp-main"><div class="sp-title">${esc(r.t.title)}</div><div class="sp-meta">${r.chips.join('')}${day ? chip(`on ${day} already · ${ord(rank(r.t))}`) : ''}</div></div></li>`;
+        <div class="sp-main"><div class="sp-title">${esc(r.t.title)}</div><div class="sp-meta">${r.chips.join('')}${day ? chip(`on ${day} already · ${ord(rank(r.t))}`) : ''}</div></div>
+        <button type="button" class="sp-gear" data-sp-edit="${r.t.id}" aria-label="Edit this card" title="Edit">⚙</button></li>`;
     }).join('')}`).join('');
   };
   const footHtml = () => {
     const n = st.ticked.length;
-    const keys = `<span class="sp-keys"> · <kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>space</kbd> tick · <kbd>⏎</kbd> add · <kbd>e</kbd> edit · <kbd>tab</kbd> next place</span><span class="sp-hold"> · hold a card to edit it</span>`;
+    const keys = `<span class="sp-keys"> · <kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>space</kbd> tick · <kbd>⏎</kbd> add · <kbd>e</kbd> edit · <kbd>tab</kbd> next place</span>`;
     const wide = words(st.q).length && st.source !== 'suggested' ? (st.everywhere ? `<button type="button" class="link-btn" data-sp-narrow>Back to ${esc(placeName())}</button>` : '<button type="button" class="link-btn" data-sp-wide>Search everywhere instead</button>') : '';
     return `${wide ? `<p class="sp-wide">${wide}</p>` : ''}<div class="sp-foot"><span class="hint">${n ? `${n} ticked · ` : ''}${free} place${free === 1 ? '' : 's'} free${keys}</span><button type="button" class="btn" data-sp-cancel>Cancel</button><button type="button" class="btn primary" data-sp-add ${n ? '' : 'disabled'}>Add${n ? ` ${n}` : ''} to ${which}</button></div>`;
   };
@@ -237,6 +238,7 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     if (el('[data-sp-open]')) { open(el('[data-sp-open]').dataset.spOpen); search.focus(); return; }
     if (el('[data-sp-wide]')) { st.everywhere = true; st.active = 0; draw(); search.focus(); return; }
     if (el('[data-sp-narrow]')) { st.everywhere = false; st.active = 0; draw(); search.focus(); return; }
+    if (el('[data-sp-edit]')) { editCard(el('[data-sp-edit]').dataset.spEdit); return; }
     if (el('[data-sp-tick]')) { toggle(el('[data-sp-tick]').dataset.spTick); return; }
     const r = el('[data-sp-row]'); if (r) toggle(r.dataset.spRow);
   };
@@ -245,7 +247,7 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
   const endHold = () => { if (hold) { clearTimeout(hold.timer); hold = null; } };
   form.addEventListener('pointerdown', (e) => {
     const r = e.target.closest('[data-sp-row]');
-    if (!r || e.button !== 0) return;
+    if (!r || e.button !== 0 || e.target.closest('[data-sp-edit]')) return; // the gear is a plain click
     endHold();
     hold = { id: r.dataset.spRow, x: e.clientX, y: e.clientY, timer: setTimeout(() => { hold = null; st.held = true; editCard(r.dataset.spRow); }, 500) };
   });

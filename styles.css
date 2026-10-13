@@ -1832,3 +1832,8 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .sp-row { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .sp-hold { display: none; }
 @media (max-width: 767px) { .sp-hold { display: inline; } }
+
+/* The gear at the end of a picker row opens the card's editor. */
+.sp-gear { flex: none; width: 34px; height: 34px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--muted); font: inherit; font-size: 17px; line-height: 1; cursor: pointer; padding: 0; opacity: .6; }
+.sp-gear:hover, .sp-gear:focus-visible { opacity: 1; background: var(--surface-2); border-color: var(--line); }
+.sp-row.off .sp-gear { opacity: .6; pointer-events: auto; cursor: pointer; }

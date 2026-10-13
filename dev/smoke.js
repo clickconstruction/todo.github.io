@@ -536,6 +536,10 @@ async function six(check) {
   check('the click that ends the hold is not a tick', !$(`#sheet2 [data-sp-tick="${heldId}"]`).classList.contains('on'));
   $('#sheet #editor [name=title]').value = 'Renamed while adding'; $('#sheet #editor').requestSubmit(); await wait(400);
   check('saved: the editor closes, the picker stays and shows the new title', !$('#sheet').open && $('#sheet2').open && has(`#sheet2 [data-sp-row="${heldId}"]`, 'renamed while adding') && task(heldId).title === 'Renamed while adding');
+  $(`#sheet2 [data-sp-edit="${heldId}"]`).click(); await wait(100);
+  check('the gear at the end of a row opens the editor too', $('#sheet').open && $('#sheet #editor [name=title]').value === 'Renamed while adding' && !$(`#sheet2 [data-sp-tick="${heldId}"]`).classList.contains('on'));
+  $('#sheet [data-cancel]').click(); await wait(80);
+  check('Cancel: back to the picker, search focused', !$('#sheet').open && $('#sheet2').open && document.activeElement === $('[data-sp-search]'));
   $('[data-sp-cancel]').click(); await wait(80);
   // A change made elsewhere (Claude's six tool, another device) shows without a reload.
   const elsewhere = open.find((x) => !today.focus.includes(x.id) && !task(x.id).completed_at) || open[0];
