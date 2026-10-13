@@ -3267,7 +3267,8 @@ async function checkUpdates(check) {
   const U = await import('/js/updates.js');
   const { app } = await import('/js/state.js');
   const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
-  U.__resetUpdates(); U.updateState().reg = null; app.updateNote = ''; app.appVersion = 'v78';
+  const page0 = U.updateState().page;
+  U.__resetUpdates(); U.updateState().reg = null; app.updateNote = ''; app.appVersion = 'v78'; U.updateState().page = 'v78';
   let reloads = 0; window.__reload = () => { reloads++; };
   await go('#settings');
   check('App section: the version and Check for updates', has(undefined, 'app', 'version v78', 'check for updates') && !!$('[data-act="check-updates"]'), text());
@@ -3281,7 +3282,13 @@ async function checkUpdates(check) {
   U.updateState().reg = { update: async () => {} }; U.__resetUpdates(); app.updateNote = '';
   $('[data-act="check-updates"]').click(); await until(() => app.updateNote, 10000);
   check('nothing new: says you’re current', /latest version/.test(app.updateNote), app.updateNote);
-  U.__resetUpdates(); U.updateState().reg = null; window.__reload = undefined; app.updateNote = ''; app.appVersion = null;
+  // A newer worker already controls this older page (another tab switched, or the switch was missed): the page
+  // keeps saying its own version, and Check for updates switches instead of calling it current.
+  U.__resetUpdates(); reloads = 0; app.updateNote = '';
+  U.updateState().ctl = { postMessage: (m, ports) => { if (m.type === 'INFO' && ports && ports[0]) ports[0].postMessage({ version: 'v99', min: 'v1' }); } };
+  $('[data-act="check-updates"]').click(); await until(() => app.updateNote, 10000);
+  check('an older page under a newer worker: it switches, and still says its own version', reloads === 1 && app.appVersion === 'v78' && /Updating/.test(app.updateNote), `${reloads} ${app.appVersion} ${app.updateNote}`);
+  U.__resetUpdates(); U.updateState().reg = null; U.updateState().page = page0; window.__reload = undefined; app.updateNote = ''; app.appVersion = null;
 }
 
 // Pull to refresh (phones): drag down from the top past the title, let go, and the list reloads.

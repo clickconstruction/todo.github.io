@@ -17,7 +17,9 @@ const IDLE = 60000; // a minute with nothing happening
 const RESUME_KEY = 'todo.resume';
 const num = (v) => Number(String(v || '').replace(/^v/, '')) || 0;
 
-const U = { reg: null, waiting: null, force: false, applying: false, lastCheck: 0, lastInput: Date.now(), controllerChanged: false, hadController: false };
+// page: the version this page runs (the worker that served it, asked at load), which a newer worker taking
+// over later doesn't change; ctl: a stand-in worker for tests.
+const U = { reg: null, waiting: null, force: false, applying: false, lastCheck: 0, lastInput: Date.now(), controllerChanged: false, hadController: false, page: null, ctl: null };
 export const updateState = () => U;
 
 // ---------- is it safe right now? ----------
@@ -90,14 +92,22 @@ function showReady() {
 }
 // What version is a worker? ({ version, min } from sw.js, or null)
 const ask = (w) => new Promise((res) => { if (!w) return res(null); try { const ch = new MessageChannel(); ch.port1.onmessage = (e) => res(e.data); w.postMessage({ type: 'INFO' }, [ch.port2]); setTimeout(() => res(null), 3000); } catch { res(null); } });
-const controller = () => (navigator.serviceWorker && navigator.serviceWorker.controller) || null;
+const controller = () => U.ctl || (navigator.serviceWorker && navigator.serviceWorker.controller) || null;
+// A worker newer than this page controls it (another tab switched, or the switch was missed): the page is
+// stale and switches when it is safe, as after a controllerchange. It must never say it is that version.
+function noticeStale(cur) {
+  if (!cur || !cur.version || !U.page || cur.version === U.page || U.controllerChanged) return false;
+  U.controllerChanged = true;
+  showReady();
+  return true;
+}
 
 export function onWaiting(worker) {
   U.waiting = worker;
   showReady();
   // Must this page switch soon? (the new version's minimum vs the version running now)
   Promise.all([ask(worker), ask(controller())]).then(([next, cur]) => {
-    if (next && cur && num(cur.version) < num(next.min)) {
+    if (next && (U.page || cur) && num(U.page || cur.version) < num(next.min)) {
       U.force = true;
       toast('An important update is ready: switching in a moment');
     }
@@ -107,6 +117,7 @@ export function onWaiting(worker) {
 
 function check() {
   U.lastCheck = Date.now();
+  ask(controller()).then(noticeStale);
   if (U.reg) U.reg.update().catch(() => {});
 }
 
@@ -114,7 +125,8 @@ function check() {
 // → { version, result: 'updated' | 'waiting' | 'up_to_date' | 'unavailable' }
 export async function checkNow() {
   const cur = await ask(controller());
-  const version = (cur && cur.version) || app.appVersion || null;
+  const version = U.page || app.appVersion || (cur && cur.version) || null; // what this page runs, not the worker
+  noticeStale(cur);
   const apply = () => ({ version, result: tryApply('manual') ? 'updated' : 'waiting' });
   if (U.waiting || U.controllerChanged) return apply();
   if (!U.reg) return { version, result: 'unavailable' };
@@ -132,7 +144,7 @@ export function showVersion() {
   if (el) el.textContent = app.appVersion || '';
 }
 async function readVersionFromFile() {
-  try { const m = /const VERSION = '([^']+)'/.exec(await (await fetch('sw.js', { cache: 'no-store' })).text()); if (m && !app.appVersion) { app.appVersion = m[1]; showVersion(); } } catch { /* offline: no version to show */ }
+  try { const m = /const VERSION = '([^']+)'/.exec(await (await fetch('sw.js', { cache: 'no-store' })).text()); if (m && !app.appVersion) { U.page = U.page || m[1]; app.appVersion = m[1]; showVersion(); } } catch { /* offline: no version to show */ }
 }
 // ---------- wiring ----------
 export function initUpdates({ importBusy } = {}) {
@@ -159,7 +171,7 @@ export function initUpdates({ importBusy } = {}) {
   const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
   if (!('serviceWorker' in navigator) || isLocal) { readVersionFromFile(); return; }
   U.hadController = !!navigator.serviceWorker.controller;
-  ask(controller()).then((i) => { if (i && i.version) { app.appVersion = i.version; showVersion(); } else readVersionFromFile(); }); // shown in Settings → App and the sidebar
+  ask(controller()).then((i) => { if (i && i.version) { U.page = i.version; app.appVersion = i.version; showVersion(); } else readVersionFromFile(); }); // shown in Settings → App and the sidebar
   navigator.serviceWorker.register('sw.js').then((reg) => {
     U.reg = reg;
     U.lastCheck = Date.now();
@@ -182,7 +194,7 @@ export function initUpdates({ importBusy } = {}) {
 
 // Tests only: start over (dev/smoke.js).
 export function __resetUpdates() {
-  Object.assign(U, { waiting: null, force: false, applying: false, controllerChanged: false, reason: null, lastInput: Date.now() });
+  Object.assign(U, { waiting: null, force: false, applying: false, controllerChanged: false, reason: null, lastInput: Date.now(), ctl: null });
   document.body.classList.remove('update-ready');
   const b = $('#nav-update');
   if (b) b.hidden = true;
