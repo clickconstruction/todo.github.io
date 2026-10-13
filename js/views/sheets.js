@@ -9,7 +9,7 @@
 import { db, app, sb, run, syncRow, esc, byId, isOpen, toast, $, taskSort } from '../state.js';
 import { setCompleted } from '../data.js';
 import { startOfToday, atDefaultTime, fmtDate } from '../dates.js';
-import { livePeople, waitingFor, agendaFor } from '../gtd.js';
+import { livePeople, waitingFor, agendaFor, peopleOn } from '../gtd.js';
 
 const FROM_KEY = 'todo.sheets.from';
 const S = () => (app.debrief ||= { open: new Set() });
@@ -21,16 +21,17 @@ const shortDate = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday
 const daysPast = (iso) => (iso ? Math.floor((startOfToday() - new Date(iso).setHours(0, 0, 0, 0)) / 86400000) : 0);
 const context = (t) => String(t.notes || '').split(/\r?\n/).map((l) => l.trim()).find(Boolean) || '';
 const sheetCode = (p) => `${p.name.replace(/[^a-z]/gi, '').slice(0, 3).toUpperCase() || 'SHT'}-${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}`;
-// Open items waiting on the person, oldest agreed day first (none agreed last), then list order.
-export const sheetItems = (p) => waitingFor(p).sort((a, b) => String(a.follow_up_at || '9').localeCompare(String(b.follow_up_at || '9')) || taskSort(a, b));
+// Open items waiting on the person, oldest agreed day first (none agreed last), then list order; a
+// project's sheets show only the items filed in that project.
+export const sheetItems = (p, projectId = null) => waitingFor(p).filter((t) => !projectId || t.project_id === projectId).sort((a, b) => String(a.follow_up_at || '9').localeCompare(String(b.follow_up_at || '9')) || taskSort(a, b));
 const projName = (t) => (t.project_id ? (byId(db.projects, t.project_id) || {}).name || '' : '');
 
-function sheetHtml(p, from) {
-  const items = sheetItems(p);
-  const agenda = agendaFor(p).sort(taskSort);
+function sheetHtml(p, from, projectId = null, label = '') {
+  const items = sheetItems(p, projectId);
+  const agenda = agendaFor(p).filter((t) => !projectId || t.project_id === projectId).sort(taskSort);
   const late = items.filter((t) => daysPast(t.follow_up_at) > 0).length;
   return `<section class="psheet" data-sheet-for="${p.id}">
-    <header class="sh-head"><div><h1>${esc(p.name)}</h1><div class="sh-with">with ${esc(from || 'me')}</div></div>
+    <header class="sh-head"><div><h1>${esc(p.name)}</h1><div class="sh-with">with ${esc(from || 'me')}${projectId && label ? ` · ${esc(label)}` : ''}</div></div>
       <div class="sh-date">${esc(longDate(new Date()))}<br>${items.length} open${agenda.length ? ` · ${agenda.length} to talk about` : ''}</div></header>
     <div class="sh-sec"><span>Open with you</span><span>oldest first${late ? ' · ▲ past the day we agreed' : ''}</span></div>
     ${items.map((t, i) => { const past = daysPast(t.follow_up_at); const ctx = context(t); return `<div class="sh-item"><span class="sh-num">${i + 1}</span><div class="sh-main">
@@ -42,15 +43,20 @@ function sheetHtml(p, from) {
   </section>`;
 }
 
-export function viewSheets(who = 'all') {
+// #sheets/all, #sheets/group/<id>, #sheets/project/<id> or #sheets/<person>.
+export function viewSheets(who = 'all', id = null) {
   const from = fromLine();
-  const people = who === 'all' ? livePeople().filter((p) => sheetItems(p).length || agendaFor(p).length) : [byId(db.people || [], who)].filter(Boolean);
-  const back = who === 'all' ? '#waiting' : `#person/${who}`;
+  const hasAny = (p, projectId = null) => sheetItems(p, projectId).length || agendaFor(p).some((t) => !projectId || t.project_id === projectId);
+  let people; let back = '#waiting'; let label = ''; let projectId = null;
+  if (who === 'all') people = livePeople().filter((p) => hasAny(p));
+  else if (who === 'group') { const g = byId(db.peopleGroups || [], id); label = g ? g.name : ''; people = g ? livePeople().filter((p) => p.group_id === g.id && hasAny(p)) : []; }
+  else if (who === 'project') { const pr = byId(db.projects, id); projectId = pr ? pr.id : null; label = pr ? pr.name : ''; back = pr ? `#project/${pr.id}` : '#waiting'; people = pr ? peopleOn(pr.id).map((x) => x.person).filter((p) => hasAny(p, projectId)) : []; }
+  else { people = [byId(db.people || [], who)].filter(Boolean); back = `#person/${who}`; }
   return `<div class="sheets-bar"><a class="back" href="${back}">‹ Back</a>
       <label class="sheets-from">with <input type="text" data-sheet-from value="${esc(from)}" placeholder="your name · company" aria-label="Your name on the sheets" autocomplete="off"></label>
-      <span class="hint">${people.length} ${people.length === 1 ? 'sheet' : 'sheets'} · one page each</span>
+      <span class="hint">${label ? `${esc(label)} · ` : ''}${people.length} ${people.length === 1 ? 'sheet' : 'sheets'} · one page each</span>
       <button type="button" class="btn primary" data-sheet="print">Print</button></div>
-    <div class="sheets">${people.map((p) => sheetHtml(p, from)).join('') || '<p class="empty">Nobody owes you anything right now.</p>'}</div>`;
+    <div class="sheets">${people.map((p) => sheetHtml(p, from, projectId, label)).join('') || '<p class="empty">Nobody owes you anything right now.</p>'}</div>`;
 }
 
 // ---------- the debrief ----------

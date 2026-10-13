@@ -41,6 +41,50 @@ export async function archivePeople(list, archived = true) {
   rows.forEach((row) => { const p = (db.people || []).find((x) => x.id === row.id); if (p) syncRow('people', p, row); });
   return rows;
 }
+// ---------- groups (what someone is to you) and projects (what you're working on together) ----------
+// A person is in one group or none, like a project in a folder; a person can be on several projects, with
+// a role word. Groups are archived, never deleted; archiving one files its people under "no group" (the
+// database does the same). A project link is a link: it can be removed.
+export const liveGroups = () => (db.peopleGroups || []).filter((g) => !g.archived_at).sort((a, b) => ((a.sort ?? 0) - (b.sort ?? 0)) || a.name.localeCompare(b.name));
+export const groupOf = (p) => (p && p.group_id && byId(db.peopleGroups || [], p.group_id)) || null;
+export async function savePeopleGroup(g, fields) {
+  if (g && g.id) { const [row] = await run(sb.from('people_groups').update(fields).eq('id', g.id).select()); return syncRow('peopleGroups', g, row); }
+  const sort = Math.max(-1, ...(db.peopleGroups || []).map((x) => x.sort || 0)) + 1;
+  const [row] = await run(sb.from('people_groups').insert({ ...fields, sort }).select());
+  (db.peopleGroups = db.peopleGroups || []).push(row);
+  return row;
+}
+export async function archivePeopleGroup(g, archived = true) {
+  await savePeopleGroup(g, { archived_at: archived ? new Date().toISOString() : null });
+  if (archived) (db.people || []).forEach((p) => { if (p.group_id === g.id) p.group_id = null; });
+}
+export async function movePeopleGroup(g, dir) {
+  const list = liveGroups(); const i = list.indexOf(g); const j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  list.splice(i, 1); list.splice(j, 0, g);
+  await Promise.all(list.map((x, k) => (x.sort === k ? null : savePeopleGroup(x, { sort: k }))));
+}
+export const peopleOn = (projectId) => (db.projectPeople || []).filter((l) => l.project_id === projectId).map((l) => ({ link: l, person: byId(db.people || [], l.person_id) })).filter((x) => x.person && !x.person.archived_at).sort((a, b) => a.person.name.localeCompare(b.person.name));
+export const projectsOf = (p) => (db.projectPeople || []).filter((l) => l.person_id === p.id).map((l) => ({ link: l, project: byId(db.projects, l.project_id) })).filter((x) => x.project && ['active', 'on_hold'].includes(x.project.status)).sort((a, b) => a.project.name.localeCompare(b.project.name));
+export const onProject = (p, projectId) => (db.projectPeople || []).find((l) => l.person_id === p.id && l.project_id === projectId) || null;
+export async function putOnProject(p, projectId, role = '') {
+  const have = onProject(p, projectId);
+  if (have) return have;
+  const [row] = await run(sb.from('project_people').insert({ project_id: projectId, person_id: p.id, role }).select());
+  (db.projectPeople = db.projectPeople || []).push(row);
+  return row;
+}
+export async function takeOffProject(p, projectId) {
+  const l = onProject(p, projectId);
+  if (!l) return;
+  await run(sb.from('project_people').delete().eq('id', l.id));
+  db.projectPeople = db.projectPeople.filter((x) => x.id !== l.id);
+}
+export async function setProjectRole(link, role) { const [row] = await run(sb.from('project_people').update({ role }).eq('id', link.id).select()); return syncRow('projectPeople', link, row); }
+// A person's open items in a project: what you're waiting on them for there, and their agenda items filed there.
+export const itemsWith = (p, projectId) => [...waitingFor(p), ...agendaFor(p)].filter((t) => t.project_id === projectId);
+// People with open items in a project who aren't on it yet: offered with "Put on project".
+export const suggestedFor = (projectId) => livePeople().filter((p) => !onProject(p, projectId) && itemsWith(p, projectId).length);
 // Find a person by name, or create one (e.g. typed in the Delegate sheet).
 export async function personNamed(name, extra = {}) {
   const n = String(name || '').trim();

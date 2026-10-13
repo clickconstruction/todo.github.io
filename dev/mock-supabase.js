@@ -64,7 +64,7 @@
         { id: 'pl2', user_id: uid, name: 'Office', address: '200 Travis St', lat: 29.8000, lng: -95.3700, google_place_id: null, radius_m: 152, notes: '', archived_at: null, created_at: at(-9), updated_at: at(-9) },
         { id: 'pl3', user_id: uid, name: 'Old storage unit', address: '', lat: 29.9, lng: -95.5, google_place_id: null, radius_m: 402, notes: '', archived_at: at(-2), created_at: at(-30), updated_at: at(-2) },
       ],
-      daily_ticks: [], tree_links: [], task_waits: [], events: [], perspectives: [], imports: [], settle_ops: [], review_sessions: [], review_items: [], slipbox_notes: [], project_templates: [], user_settings: [], calendars: [], people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
+      daily_ticks: [], tree_links: [], task_waits: [], events: [], perspectives: [], imports: [], settle_ops: [], review_sessions: [], review_items: [], slipbox_notes: [], project_templates: [], user_settings: [], calendars: [], people: [], people_groups: [], project_people: [], reference_items: [], weekly_reviews: [], areas: [], goals: [], checklists: [], checklist_runs: [], daily_reviews: [], api_tokens: [], push_subscriptions: [], notifications: [], attachments: [], push_log: [], item_history: [], email_senders: [{ id: 'e1', user_id: uid, email: 'robert@douglasmining.com', created_at: at(-10) }],
     };
   }
 
@@ -305,11 +305,13 @@
     project_templates: () => ({ icon: '📋', folder_id: null, schedule: null, next_run_at: null, last_run_at: null, sort: 0, archived_at: null }),
     perspectives: () => ({ icon: '🔭', rules: { v: 1, match: 'all', rules: [] }, options: { show: 'available', group_by: 'project', sort_by: 'project', layout: 'tree' }, badge: false, pinned: true, sort: 0, archived_at: null }),
     notifications: () => ({ task_id: null, project_id: null, offset_minutes: 0, at: null, sent_at: null }),
-    people: () => ({ email: null, phone: null, notes: '', tag_id: null, sort: 0, archived_at: null, added_via: 'app' }),
+    people: () => ({ email: null, phone: null, notes: '', tag_id: null, group_id: null, sort: 0, archived_at: null, added_via: 'app' }),
+    people_groups: () => ({ sort: 0, archived_at: null }),
+    project_people: () => ({ role: '' }),
     reference_items: () => ({ body: '', topic: '', secret_value: null, project_id: null, archived_at: null }),
     attachments: () => ({ task_id: null, project_id: null, reference_id: null, size: 0, mime: 'application/octet-stream', archived_at: null }),
   };
-  const NO_DELETE = { tree_links: 'links are archived, not deleted.', daily_ticks: 'ticks are kept.', daily_reviews: 'daily reviews are kept.', checklists: 'checklists are archived, not deleted.', checklist_runs: 'runs are kept.', areas: 'areas are archived, not deleted.', goals: 'goals are achieved or dropped, not deleted.', weekly_reviews: 'reviews are kept.', people: 'people are archived, not deleted.', reference_items: 'reference items are archived, not deleted.', calendars: 'calendars are archived, not deleted.', events: 'events are archived, not deleted.', project_templates: 'templates are archived, not deleted.', imports: 'imports are kept.', perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
+  const NO_DELETE = { tree_links: 'links are archived, not deleted.', daily_ticks: 'ticks are kept.', daily_reviews: 'daily reviews are kept.', checklists: 'checklists are archived, not deleted.', checklist_runs: 'runs are kept.', areas: 'areas are archived, not deleted.', goals: 'goals are achieved or dropped, not deleted.', weekly_reviews: 'reviews are kept.', people: 'people are archived, not deleted.', people_groups: 'groups are archived, not deleted.', reference_items: 'reference items are archived, not deleted.', calendars: 'calendars are archived, not deleted.', events: 'events are archived, not deleted.', project_templates: 'templates are archived, not deleted.', imports: 'imports are kept.', perspectives: 'perspectives are archived, not deleted.', attachments: 'attachments are archived, not deleted.', places: 'places are archived, not deleted.', tasks: 'tasks are archived, not deleted.', projects: 'projects are archived, not deleted.', folders: 'folders are archived, not deleted.' };
 
   // ----- PostgREST-ish filter parsing for .or() strings -----
   function splitTop(s) {
@@ -371,6 +373,7 @@
           Object.assign(r, st.payload, { updated_at: now() });
           if (table === 'user_settings') ['purpose', 'vision'].forEach((k) => { if (r[`${k}_read_at`] && r[`${k}_read_at`] !== before[`${k}_read_at`]) r[k] = String(r[k] || '').replace(/^([ \t]*(?:[-*][ \t]+)?)\[[xX]\]/gm, '$1[ ]'); }); // mirrors user_settings_read_clears (20261102000001)
           if (table === 'projects') { reviewSchedule(r, before); projectStatusChange(r, before.status); }
+          if (table === 'people_groups' && r.archived_at && !before.archived_at) tables.people.forEach((p) => { if (p.group_id === r.id) p.group_id = null; }); // people_groups_archive
           if (table === 'tasks') taskRules(r, before);
           if (table === 'tasks' && r.project_id !== before.project_id) follow(r);
           if (table === 'notifications') fireAt(r, before);

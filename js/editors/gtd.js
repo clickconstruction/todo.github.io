@@ -4,7 +4,7 @@
 import { db, app, $, esc, byId, openSheet, toast, tagLabel, sortedTags } from '../state.js';
 import { waitingTagFor, renamePersonTag } from '../gtd.js';
 import { startOfToday, addDays, addMonths } from '../dates.js';
-import { livePeople, personNamed, savePerson, delegate, draftMessage, messageLink, tickle, tickleNew, dayKey, topics, saveReference, initials } from '../gtd.js';
+import { livePeople, personNamed, savePerson, delegate, draftMessage, messageLink, tickle, tickleNew, dayKey, topics, saveReference, initials, liveGroups, projectsOf, putOnProject, takeOffProject } from '../gtd.js';
 import { attachFieldHtml, wireAttachField, uploadFiles } from './attachField.js';
 
 // Opening mail/messages (tests capture the link instead).
@@ -118,6 +118,11 @@ export function openPersonEditor(p, { onDone = () => {} } = {}) {
       <label>Phone<input type="tel" name="phone" value="${esc((p && p.phone) || '')}" autocomplete="off"></label></div>
     <label>Tag <span class="hint">items with this tag count as waiting on them; their own tag is “Waiting : their name”</span>
       <select name="tag_id" data-create="tag"><option value="auto" data-auto ${p && p.tag_id ? '' : 'selected'}>Waiting : ${esc(p ? p.name : '…')} · made for them</option><option value="">None</option>${tags.map((g) => `<option value="${g.id}" ${p && p.tag_id === g.id ? 'selected' : ''}>${esc(tagLabel(g))}</option>`).join('')}</select></label>
+    <label>Group <span class="hint">shown together on Waiting For; one group each</span>
+      <select name="group_id" data-create="people-group"><option value="">None</option>${liveGroups().map((g) => `<option value="${g.id}" ${p && p.group_id === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>
+    <div class="field"><span class="field-label">On projects <span class="hint">as many as they’re part of</span></span>
+      <div class="proj-chips" data-proj-chips></div>
+      <select name="project_add" class="pick" data-create="project" aria-label="Put them on a project"><option value="">+ Project…</option>${db.projects.filter((pr) => ['active', 'on_hold'].includes(pr.status)).sort((a, b) => a.name.localeCompare(b.name)).map((pr) => `<option value="${pr.id}">${esc(pr.name)}</option>`).join('')}</select></div>
     <label>Notes<textarea name="notes" rows="3" placeholder="Prefers texts after 5pm…">${esc((p && p.notes) || '')}</textarea></label>
     <div class="actions">${p ? `<button type="button" class="btn danger" data-archive>${p.archived_at ? 'Restore' : 'Archive'}</button>` : ''}
       <div class="right"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Save</button></div></div>
@@ -126,6 +131,14 @@ export function openPersonEditor(p, { onDone = () => {} } = {}) {
   $('[data-cancel]', form).onclick = () => sheet.close();
   // The made-for-them option follows the name as it is typed.
   form.elements.name.addEventListener('input', () => { const o = $('[data-auto]', form); if (o) o.textContent = `Waiting : ${form.elements.name.value.trim() || '…'} · made for them`; });
+  // The projects they're on: chips, added from the select (which can also make a project), removed with ×.
+  const initialProjects = p ? projectsOf(p).map((x) => x.project.id) : [];
+  const chosen = new Set(initialProjects);
+  const chips = $('[data-proj-chips]', form);
+  const drawChips = () => { chips.innerHTML = [...chosen].map((id) => byId(db.projects, id)).filter(Boolean).map((pr) => `<span class="chip on-proj">${esc(pr.name)} <button type="button" data-chip-remove="${pr.id}" aria-label="Take off ${esc(pr.name)}">×</button></span>`).join('') || '<span class="hint">none yet</span>'; };
+  drawChips();
+  form.elements.project_add.addEventListener('change', () => { const v = form.elements.project_add.value; form.elements.project_add.value = ''; if (v) { chosen.add(v); drawChips(); } });
+  chips.addEventListener('click', (e) => { const b = e.target.closest('[data-chip-remove]'); if (b) { chosen.delete(b.dataset.chipRemove); drawChips(); } });
   const archive = $('[data-archive]', form);
   if (archive) archive.onclick = async () => {
     sheet.close();
@@ -138,12 +151,13 @@ export function openPersonEditor(p, { onDone = () => {} } = {}) {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(form);
-    const fields = { name: f.get('name').trim(), email: f.get('email').trim() || null, phone: f.get('phone').trim() || null, tag_id: f.get('tag_id') || null, notes: f.get('notes') };
+    const fields = { name: f.get('name').trim(), email: f.get('email').trim() || null, phone: f.get('phone').trim() || null, tag_id: f.get('tag_id') || null, notes: f.get('notes'), group_id: f.get('group_id') || null };
     if (!fields.name) return;
     sheet.close();
     if (fields.tag_id === 'auto') { const g = await waitingTagFor(fields.name); fields.tag_id = g ? g.id : null; }
     else if (p) await renamePersonTag(p, fields.name); // their own tag follows a rename
     const row = await savePerson(p, fields);
+    await Promise.all([...[...chosen].filter((id) => !initialProjects.includes(id)).map((id) => putOnProject(row, id)), ...initialProjects.filter((id) => !chosen.has(id)).map((id) => takeOffProject(row, id))]);
     app.render();
     onDone(row);
   };

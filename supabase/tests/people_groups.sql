@@ -1,0 +1,32 @@
+-- People groups and project_people (migration 20261113000001). One rolled-back transaction; every row should be ok = true.
+begin;
+insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','pg1@test.invalid'),('00000000-0000-0000-0000-0000000000e2','00000000-0000-0000-0000-000000000000','authenticated','authenticated','pg2@test.invalid');
+create temp table r (n int generated always as identity, test text, ok boolean, detail text); grant all on r to authenticated;
+-- Someone else's group and project.
+insert into public.people_groups (id, user_id, name) values ('00000000-0000-0000-0000-0000000e0009', '00000000-0000-0000-0000-0000000000e2', 'Their crew');
+insert into public.projects (id, user_id, name) values ('00000000-0000-0000-0000-0000000e0019', '00000000-0000-0000-0000-0000000000e2', 'Their job');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000e1","role":"authenticated"}', true);
+insert into public.people_groups (id, name) values ('00000000-0000-0000-0000-0000000e0001', 'Crew');
+insert into public.people (id, name, group_id) values ('00000000-0000-0000-0000-0000000e0002', 'Hiro', '00000000-0000-0000-0000-0000000e0001');
+insert into public.projects (id, name) values ('00000000-0000-0000-0000-0000000e0011', 'Overlook Dr');
+insert into r (test, ok, detail) select 'a person is in my group', group_id = '00000000-0000-0000-0000-0000000e0001', '' from public.people where id = '00000000-0000-0000-0000-0000000e0002';
+do $$ begin update public.people set group_id = '00000000-0000-0000-0000-0000000e0009' where id = '00000000-0000-0000-0000-0000000e0002'; insert into r (test, ok, detail) values ('never in someone else''s group', false, '');
+exception when foreign_key_violation then insert into r (test, ok, detail) values ('never in someone else''s group', true, sqlerrm); end $$;
+insert into public.project_people (project_id, person_id, role) values ('00000000-0000-0000-0000-0000000e0011', '00000000-0000-0000-0000-0000000e0002', 'crew');
+insert into r (test, ok, detail) select 'a person is on my project, with a role', count(*) = 1 and bool_and(role = 'crew'), '' from public.project_people where person_id = '00000000-0000-0000-0000-0000000e0002';
+do $$ begin insert into public.project_people (project_id, person_id) values ('00000000-0000-0000-0000-0000000e0011', '00000000-0000-0000-0000-0000000e0002'); insert into r (test, ok, detail) values ('once per project', false, '');
+exception when unique_violation then insert into r (test, ok, detail) values ('once per project', true, sqlerrm); end $$;
+do $$ begin insert into public.project_people (project_id, person_id) values ('00000000-0000-0000-0000-0000000e0019', '00000000-0000-0000-0000-0000000e0002'); insert into r (test, ok, detail) values ('never on someone else''s project', false, '');
+exception when foreign_key_violation then insert into r (test, ok, detail) values ('never on someone else''s project', true, sqlerrm); end $$;
+delete from public.project_people where person_id = '00000000-0000-0000-0000-0000000e0002';
+insert into r (test, ok, detail) select 'a link can be removed', count(*) = 0, '' from public.project_people where person_id = '00000000-0000-0000-0000-0000000e0002';
+update public.people_groups set archived_at = now() where id = '00000000-0000-0000-0000-0000000e0001';
+insert into r (test, ok, detail) select 'archiving a group files its people under no group', group_id is null, '' from public.people where id = '00000000-0000-0000-0000-0000000e0002';
+do $$ begin update public.people set group_id = '00000000-0000-0000-0000-0000000e0001' where id = '00000000-0000-0000-0000-0000000e0002'; insert into r (test, ok, detail) values ('never in an archived group', false, '');
+exception when foreign_key_violation then insert into r (test, ok, detail) values ('never in an archived group', true, sqlerrm); end $$;
+reset role;
+do $$ begin delete from public.people_groups where id = '00000000-0000-0000-0000-0000000e0001'; insert into r (test, ok, detail) values ('a group is never deleted', false, '');
+exception when insufficient_privilege then insert into r (test, ok, detail) values ('a group is never deleted', true, sqlerrm); end $$;
+select n, test, ok, detail from r order by n;
+rollback;

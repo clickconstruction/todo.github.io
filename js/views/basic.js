@@ -1,5 +1,6 @@
 // Inbox, Today, Tags and Tag views.
 import { db, esc, byId, isOpen, visible, taskSort, sortedTags, tagLabel, effectiveTagIds, tagStatus } from '../state.js';
+import { livePeople, liveGroups, groupOf } from '../gtd.js';
 import { isTickled, ticklerItems } from '../gtd.js';
 import { taskList, treeList } from '../rows.js';
 import { flattenTree, descendants } from '../tree.js';
@@ -31,7 +32,19 @@ export function viewTags() {
     const st = tagStatus(tag);
     return `<a class="group-row ${tag.parent_id ? 'tag-child' : ''} ${st !== 'active' ? 'muted' : ''}" href="#tag/${tag.id}"><span>🏷️ ${esc(tag.name)}${st === 'on_hold' ? ' <span class="chip hold">⏸ on hold</span>' : ''}</span><span class="count">${n || ''}</span></a>`;
   };
-  const rows = sortedTags().map(row).join('');
+  // Under a tag that holds people's own tags (Waiting), the people are arranged by their group on Waiting
+  // For, with a small label per group. The tags themselves are unchanged.
+  const personByTag = new Map(livePeople().filter((p) => p.tag_id).map((p) => [p.tag_id, p]));
+  const groups = liveGroups();
+  const all = sortedTags();
+  const rows = all.filter((t) => !t.parent_id).map((root) => {
+    const kids = all.filter((t) => t.parent_id === root.id);
+    if (!groups.length || !kids.some((t) => personByTag.has(t.id))) return [root, ...kids].map(row).join('');
+    const lab = (name) => `<div class="tag-lab">${esc(name)}</div>`;
+    const loose = kids.filter((t) => personByTag.has(t.id) && !groupOf(personByTag.get(t.id)));
+    const other = kids.filter((t) => !personByTag.has(t.id));
+    return row(root) + groups.map((g) => { const l = kids.filter((t) => personByTag.has(t.id) && personByTag.get(t.id).group_id === g.id); return l.length ? lab(g.name) + l.map(row).join('') : ''; }).join('') + (loose.length ? lab('No group') + loose.map(row).join('') : '') + other.map(row).join('');
+  }).join('');
   const dropped = sortedTags({ dropped: true }).filter((t) => tagStatus(t) === 'dropped');
   const held = sortedTags().filter((t) => t.status === 'on_hold').length;
   return `<div class="view-head"><h1 class="tags">Tags</h1><button class="btn small primary" data-act="new-tag">+ Tag</button></div>

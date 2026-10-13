@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -397,6 +397,66 @@ async function waitingSheets(check) {
 }
 
 // A person's own tag is "Waiting : their name": offered as it is typed, made on save, and renamed with them.
+// People in groups (one each) and on projects (any number, with a role): the People list arranged by
+// group, by project or A–Z; a group's menu; a project's People; the person editor; the Tags list's
+// labels; sheets for a group. Groups are archived, never deleted, and their people go under "no group".
+async function peopleGroups(check) {
+  const { db, app, sb, run } = await import('/js/state.js');
+  const { savePerson, savePeopleGroup, putOnProject, projectsOf, waitingTagFor } = await import('/js/gtd.js');
+  const crew = await savePeopleGroup(null, { name: 'Crew' });
+  const fam = await savePeopleGroup(null, { name: 'Family' });
+  const hiro = await savePerson(null, { name: 'Hiro K', group_id: crew.id, tag_id: (await waitingTagFor('Hiro K')).id });
+  const mum = await savePerson(null, { name: 'Mum', group_id: fam.id });
+  const tom = await savePerson(null, { name: 'Tom Free', tag_id: (await waitingTagFor('Tom Free')).id });
+  await putOnProject(hiro, 'p1', 'crew');
+  await run(sb.from('tasks').update({ waiting_on: tom.id, follow_up_at: new Date(Date.now() + 2 * 86400000).toISOString() }).eq('id', 't2').select()); // t2 is in p1
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  try { localStorage.setItem('todo.people.arrange', 'group'); } catch {}
+  await go('#waiting');
+  const heads = () => $$('#view .pgroup-head').map((h) => h.textContent.trim());
+  check('by group: Crew, Family, then No group, in order', heads()[0].startsWith('Crew · 1') && heads()[1].startsWith('Family · 1') && heads()[2].startsWith('No group · 1'), heads().join(' | '));
+  check('a member sits in their group; the loose one has a Group picker', has('#view [data-pgroup="' + crew.id + '"]', 'hiro k') && !!$('#view [data-pgroup="none"] [data-person-group="' + tom.id + '"]'));
+  const pick = $('#view [data-person-group="' + tom.id + '"]'); pick.value = crew.id; pick.dispatchEvent(new Event('change', { bubbles: true })); await wait(300);
+  check('picking a group files them there', T().people.find((p) => p.id === tom.id).group_id === crew.id && has('#view [data-pgroup="' + crew.id + '"]', 'tom free') && !$('#view [data-pgroup="none"]'));
+  const menu = $('#view [data-group-menu="' + crew.id + '"]'); menu.value = 'down'; menu.dispatchEvent(new Event('change', { bubbles: true })); await wait(300);
+  check('the group menu moves a group', heads()[0].startsWith('Family') && heads()[1].startsWith('Crew'), heads().join(' | '));
+  check('a group with items offers Print sheets', has('#view [data-pgroup="' + crew.id + '"] .pgroup-acts', 'print sheets'));
+  $('#view [data-people-arrange][value="project"]').click(); await wait(300);
+  check('by project: Click Plumbing with Hiro (crew)', heads()[0].startsWith('Click Plumbing · 1') && has('#view [data-pgroup="p1"]', 'hiro k', 'crew'), heads().join(' | '));
+  check('Tom, who has an item in the project but isn’t on it, is offered', has('#view [data-pgroup="p1"] .suggest', 'tom free has 1 open item', 'put on project'));
+  $('#view [data-pgroup="p1"] .suggest [data-gtd="put-on-project"]').click(); await wait(300);
+  check('Put on project links them, and their item shows on their row', projectsOf(db.people.find((p) => p.id === tom.id)).some((x) => x.project.id === 'p1') && heads()[0].startsWith('Click Plumbing · 2') && !$('#view .suggest') && has('#view [data-pgroup="p1"] .group-sub', 'order fittings'));
+  check('Not on a project lists the rest by name', has('#view [data-pgroup="none"]', 'not on a project · 1', 'mum'));
+  await go('#project/p1');
+  check('the project page: People · 2 with roles, items and Remove', has('#view .people-title', 'people · 2') && has('#view', 'hiro k', 'crew', 'tom free', 'order fittings') && $$('#view [data-gtd="take-off-project"]').length === 2);
+  $$('#view [data-gtd="take-off-project"]').find((b) => b.dataset.id === tom.id).click(); await wait(300);
+  check('Remove takes them off (a link, removed) and offers them again', !T().project_people.some((l) => l.person_id === tom.id) && has('#view .suggest', 'tom free'));
+  const addSel = $('#view [data-add-person="p1"]'); addSel.value = mum.id; addSel.dispatchEvent(new Event('change', { bubbles: true })); await wait(300);
+  check('+ Person puts someone on the project', T().project_people.some((l) => l.person_id === mum.id && l.project_id === 'p1'));
+  await go(`#person/${hiro.id}`);
+  check('the person page shows their group and projects', has('#view .person-ties', 'crew', 'click plumbing'));
+  // The editor: Group select and project chips.
+  const { openPersonEditor } = await import('/js/editors/gtd.js');
+  openPersonEditor(db.people.find((p) => p.id === hiro.id)); await wait(80);
+  check('the editor opens on their group with a chip per project', $('#sheet [name=group_id]').value === crew.id && has('#sheet [data-proj-chips]', 'click plumbing'));
+  $('#sheet [name=group_id]').value = fam.id;
+  $('#sheet [data-chip-remove="p1"]').click(); await wait(30);
+  $('#sheet form').requestSubmit(); await wait(400);
+  check('saving changes the group and takes them off the project', T().people.find((p) => p.id === hiro.id).group_id === fam.id && !T().project_people.some((l) => l.person_id === hiro.id));
+  await go('#tags');
+  check('the Tags list labels people’s tags by group under Waiting', $$('#view .tag-lab').map((l) => l.textContent.trim()).join('|') === 'Family|Crew', $$('#view .tag-lab').map((l) => l.textContent.trim()).join('|'));
+  await go(`#sheets/group/${crew.id}`);
+  check('sheets for a group: one page per member with something open', has('#view .sheets-bar', 'crew · 1 sheet') && $$('#view .psheet').length === 1 && has('#view .psheet', 'tom free'));
+  await go('#waiting');
+  $('#view [data-people-arrange][value="group"]').click(); await wait(200);
+  const m2 = $('#view [data-group-menu="' + crew.id + '"]'); m2.value = 'archive'; m2.dispatchEvent(new Event('change', { bubbles: true })); await wait(300);
+  check('archiving a group keeps it; its people go under no group', T().people_groups.find((g) => g.id === crew.id).archived_at && T().people.find((p) => p.id === tom.id).group_id === null && !$('#view [data-pgroup="' + crew.id + '"]') && has('#view [data-gtd="toggle-archived-people"]', '1 archived group'));
+  $$('#toast button').find((b) => b.textContent === 'Undo').click(); await wait(400);
+  check('Undo restores the group and puts its people back', !T().people_groups.find((g) => g.id === crew.id).archived_at && T().people.find((p) => p.id === tom.id).group_id === crew.id);
+  const del = await sb.from('people_groups').delete().eq('id', crew.id);
+  check('a group is never deleted', !!del.error && /archived, not deleted/.test(del.error.message));
+}
+
 // A library the size of a real one (145 tags, 8,000 open actions, 9,745 tag links): the Tags list, a
 // tag's page and What now? draw in well under a second, with the right counts. The per-tag scan of
 // every action and every link that this replaces took a minute.

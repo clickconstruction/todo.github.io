@@ -1923,3 +1923,29 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .people-row .btn.quiet:hover, .people-row .btn.quiet:focus-visible { color: inherit; border-color: var(--line); }
 .people-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .people-title .link-btn { text-transform: none; letter-spacing: 0; font-size: 13px; }
+
+/* People in groups and on projects: Waiting For's People list, a project's People, the person editor */
+.people-acts { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.segmented.small { display: inline-flex; padding: 2px; gap: 2px; }
+.segmented.small span { padding: 4px 10px; font-size: 13px; }
+.pgroup { margin-top: 14px; }
+.pgroup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 2px; font-size: 12px; }
+.pgroup-head > span:first-child { color: var(--text); opacity: .8; }
+.pgroup-acts { display: flex; gap: 12px; align-items: center; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.pgroup-names { margin: 6px 0 0; }
+.pick { appearance: none; -webkit-appearance: none; padding: 4px 10px; border-radius: 999px; border: 1px dashed var(--line); background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; min-height: 32px; max-width: 170px; }
+.pick.quiet { border-color: transparent; }
+.chip.role { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); margin-left: 6px; }
+.chip-btn { font: inherit; font-size: 12px; cursor: pointer; border: none; }
+.chip-btn.empty { background: none; border: 1px dashed var(--line); color: var(--muted); }
+.suggest { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+.suggest .btn { margin-left: auto; flex: none; }
+.people-row .row-actions { display: flex; gap: 6px; flex: none; }
+.person-ties a { text-decoration: none; }
+.person-ties .chip { margin-right: 8px; }
+.tag-lab { padding: 12px 4px 2px 26px; font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--muted); }
+.field-label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.proj-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 8px; align-items: center; }
+.chip.on-proj { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px 5px 12px; font-size: 14px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); }
+.chip.on-proj button { background: none; border: none; color: inherit; font: inherit; font-size: 16px; cursor: pointer; padding: 0 2px; line-height: 1; }
+.pgroup-acts .link-btn, .people-acts .link-btn { white-space: nowrap; }

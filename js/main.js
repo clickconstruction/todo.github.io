@@ -19,10 +19,12 @@ import { setTagStatus, insertProject } from './data.js';
 // A project picker can make the project typed into it ("+ New project").
 registerCreator('project', async (name) => { const p = await insertProject(name); return p ? { value: p.id, label: p.name } : null; });
 registerCreator('tag', async (label) => { const g = await ensureTag(label); return g ? { value: g.id, label: tagLabel(g) } : null; });
+registerCreator('people-group', async (name) => { const g = await savePeopleGroup(null, { name: String(name).trim().slice(0, 60) }); return g ? { value: g.id, label: g.name } : null; });
 import { openNewProject, openNewTemplate, openSaveAsTemplate } from './views/templates.js';
 import { openFocusPicker, unfocus, focusOn } from './editors/focus.js';
 import { handleKey, H } from './shortcuts.js';
 import { registerCreator } from './select-search.js';
+import { savePeopleGroup } from './gtd.js';
 import { openSheet, esc } from './state.js';
 import { openNewPerspective, openPerspectiveEditor, openPerspectiveMenu, saveCurrentViewAsPerspective } from './editors/perspective.js';
 import { livePerspectives, movePerspective, archivePerspective, badgeCount } from './perspectives.js';
@@ -54,7 +56,7 @@ import { eventsThisWeekCount } from './views/events.js';
 import { setWithin } from './views/nearby.js';
 import { openErrandPlanner } from './views/errands.js';
 import { hereNowCount } from './places.js';
-import { gtdAction, gtdSubmit, onRefSearch, waitingBadgeCount } from './views/gtd.js';
+import { gtdAction, gtdSubmit, gtdChange, onRefSearch, waitingBadgeCount } from './views/gtd.js';
 import { clarifyAction, onClarifySubmit, clarifyKey } from './views/clarify.js';
 import { openDelegate, openTickle } from './editors/gtd.js';
 import { weeklyAction, staleAction, weeklySubmit } from './views/weekly.js';
@@ -286,6 +288,7 @@ view.addEventListener('change', (e) => {
   if (e.target.closest('[data-hz-link-area], [data-hz-link-goal], [data-hz-tick]')) { horizonsChange(e); return; }
   if (planChange(e)) return;
   if (e.target.closest('[data-fr-ahead]')) { fullReviewChange(e); return; }
+  if (e.target.closest('[data-people-arrange], [data-person-group], [data-group-menu], [data-add-person]')) { gtdChange(e); return; }
   if (sheetsChange(e)) return;
   if (matrixChange(e)) return;
   if (e.target.closest('[data-cl-tick], [data-cl-note]') && location.hash.startsWith('#checklist/')) { checklistChange(e); return; }

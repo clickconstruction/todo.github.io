@@ -8,6 +8,7 @@ import { PROJECT_KINDS, nextAction } from '../availability.js';
 import { filterBar, applyFilter, closedFor, withClosed, filterNote } from '../filter.js';
 import { templatesSectionHtml } from './templates.js';
 import { folderButton } from '../folders.js';
+import { projectPeopleHtml } from './gtd.js';
 
 export function viewProjects() {
   const isLive = (p) => p.status === 'active' || p.status === 'on_hold';
@@ -76,5 +77,6 @@ export function viewProject(id) {
     ${filterBar()}${filterNote(local)}
     <form class="capture" data-capture data-project="${p.id}"><input type="text" name="title" placeholder="Add an action to ${esc(p.name)}…" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
     ${treeList(entries, { showProject: false, markNext: p.status === 'active' ? nextAction(p) : null, reorder: app.reorder === p.id }) || (local.some(isOpen) ? '<p class="empty">Nothing matches this filter.</p>' : '<p class="empty">No actions. What is the very next physical step?</p>')}
+    ${projectPeopleHtml(p)}
     <p class="view-sub" style="margin-top:20px"><a href="#done/all/${p.id}">✓ Completed in this project →</a></p>`;
 }
