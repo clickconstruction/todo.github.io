@@ -703,6 +703,11 @@ form label.prop-inline select { width: auto; max-width: 62%; padding: 7px 10px; 
 .steps-actions { gap: 16px; align-items: center; }
 .steps-field .flag-toggle { font-weight: 500; }
 .stamps { font-size: 12px; }
+/* The panel's own buttons (Drop, Tickle…, → Reading & watching): a row of small buttons that wraps with room
+   between them, with Drop set apart at the end. */
+.inspector-form .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.inspector-form .actions .btn { padding: 7px 12px; font-size: 14px; }
+.inspector-form .actions .btn.danger { order: 1; margin-left: auto; }
 .prop-note { margin: 2px 6px 6px; }
 form label.prop-inline.review-every .review-every { display: flex; gap: 6px; }
 form label.prop-inline.review-every input { width: 64px; padding: 7px 8px; }
