@@ -1837,3 +1837,20 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .sp-gear { flex: none; width: 34px; height: 34px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--muted); font: inherit; font-size: 17px; line-height: 1; cursor: pointer; padding: 0; opacity: .6; }
 .sp-gear:hover, .sp-gear:focus-visible { opacity: 1; background: var(--surface-2); border-color: var(--line); }
 .sp-row.off .sp-gear { opacity: .6; pointer-events: auto; cursor: pointer; }
+
+/* Projects and Tags in the picker are a tree: a row opens in place to Next and Later. */
+.sp-node { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 3px 6px; border-radius: 8px; cursor: pointer; border-bottom: 1px solid var(--line); font-size: 15px; }
+.sp-node:hover, .sp-node.act { background: var(--surface-2); }
+.sp-node.open { border-bottom-color: transparent; border-radius: 8px 8px 0 0; }
+.sp-node.hold .sp-node-name { color: var(--muted); }
+.sp-chev { flex: none; width: 18px; color: var(--muted); font-size: 12px; text-align: center; }
+.sp-node-name { overflow-wrap: anywhere; }
+.sp-folder { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; padding-left: 8px; }
+.sp-box { margin: 0 0 6px 24px; padding: 2px 6px 6px; border-left: 2px solid var(--accent-soft); }
+.sp-box ul { list-style: none; margin: 0; padding: 0; }
+.sp-sec { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 2px 4px; font-size: 12px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); cursor: pointer; border-radius: 6px; }
+.sp-sec:hover, .sp-sec.act { background: var(--surface-2); }
+.sp-sec .hint { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.sp-box .sp-row { padding-left: 22px; }
+.sp-none { padding: 4px 22px 8px; }
+@media (max-width: 767px) { .sp-folder { display: none; } .sp-box { margin-left: 10px; } .sp-box .sp-row { padding-left: 6px; } }

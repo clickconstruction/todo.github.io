@@ -1,11 +1,13 @@
-// The Add picker for Six: suggestions first, or a place to look (a Matrix box, Forecast days, a
-// project, a tag, Flagged). Typing searches there, and one link widens it to every open card. Tick
-// several and add once, up to the free places; a card already on the day is shown but can't be ticked.
-// The last place looked is remembered on this device, with the last projects and tags opened.
-// Keys: ↑ ↓ move, space ticks (with the search empty), ⏎ adds the ticked ones (else the lit row),
-// Tab the next place to look, ⌫ back out of a project or tag (with the search empty), e edits the lit
-// row, Esc closes. The gear at the end of a row (or holding it, or right-clicking it) opens the card's
-// editor over the picker; the list redraws when it saves.
+// The Add picker for Six: suggestions first, or a place to look (a Matrix box, Forecast days, Projects,
+// Tags, Flagged). Typing searches there, and one link widens it to every open card. Tick several and
+// add once, up to the free places; a card already on the day is shown but can't be ticked.
+// Projects and Tags are a tree: every project (or tag) is a row that opens in place to Next (what could
+// be done now) and Later (not yet, and why), with Later closed to start; a closed row still shows how many
+// of its cards are ticked. What is open is remembered on this device, as is the last place looked.
+// Keys: ↑ ↓ move, ← → close and open, space ticks (with the search empty; on a project it opens or
+// closes it), ⏎ adds the ticked ones (else the lit card; on a project it opens or closes it), Tab the
+// next place to look, e edits the lit card, Esc closes. The gear at the end of a card (or holding it,
+// or right-clicking it) opens the card's editor over the picker; the list redraws when it saves.
 import { db, esc, byId, isOpen, toast, $, taskSort, tagsFor, tagLabel, sortedTags } from './state.js';
 import { isAvailable, cardBlockers, isSequenceBlocked, sequentialHead, projectOf } from './availability.js';
 import { rankNow } from './whatnow.js';
@@ -18,14 +20,14 @@ import { openEditor } from './editors/task.js';
 const SOURCES = [['suggested', 'Suggested'], ['matrix', 'Matrix'], ['forecast', 'Forecast'], ['projects', 'Projects'], ['tags', 'Tags'], ['flagged', 'Flagged']];
 const FORECAST = [['overdue', 'Overdue'], ['today', 'Today'], ['tomorrow', 'Tomorrow'], ['week', 'This week']];
 const KEY = 'todo.six.pick';
-const DAY = 86400000;
 
 const pref = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch { return {}; } };
 const remember = (patch) => { try { localStorage.setItem(KEY, JSON.stringify({ ...pref(), ...patch })); } catch { /* private mode: this time only */ } };
-const recent = (kind, id) => { const p = pref(); const list = [id, ...(p[kind] || []).filter((x) => x !== id)].slice(0, 3); remember({ [kind]: list }); };
 const projName = (t) => (t.project_id ? (byId(db.projects, t.project_id) || {}).name || '' : t.in_inbox ? 'Inbox' : '');
+const folderName = (p) => (p.folder_id ? (byId(db.folders || [], p.folder_id) || {}).name || '' : '');
 const words = (q) => String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
-const hits = (list, q, text = (t) => `${t.title} ${projName(t)}`) => { const w = words(q); return w.length ? list.filter((t) => w.every((x) => text(t).toLowerCase().includes(x))) : list; };
+const matches = (text, w) => w.every((x) => String(text || '').toLowerCase().includes(x));
+const hits = (list, q, text = (t) => `${t.title} ${projName(t)}`) => { const w = words(q); return w.length ? list.filter((t) => matches(text(t), w)) : list; };
 const chip = (text, cls = '') => `<span class="chip ${cls}">${esc(text)}</span>`;
 const dayLabel = (d) => d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric' });
 const shortDay = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: 'short' });
@@ -57,12 +59,14 @@ function nextLater(list) {
 export function openSixPicker({ key, which, free, listed, other, onAdd, onClose = () => {} }) {
   const dlg = $('#sheet2');
   const saved = pref();
-  const st = { source: SOURCES.some(([k]) => k === saved.source) ? saved.source : 'suggested', sub: saved.sub || {}, projectId: null, tagId: null, q: '', ticked: [], active: 0, everywhere: false, held: false };
+  const st = { source: SOURCES.some(([k]) => k === saved.source) ? saved.source : 'suggested', sub: saved.sub || {}, q: '', ticked: [], active: 0, everywhere: false, held: false,
+    open: { projects: new Set(saved.openProjects || []), tags: new Set(saved.openTags || []) }, later: new Set(), rows: [] };
   const end = { today: (() => { const d = startOfToday(); d.setHours(23, 59, 59, 999); return d; })() };
   end.day = which === 'tomorrow' ? addDays(end.today, 1) : end.today;
   const onDay = (t) => (listed.has(t.id) ? which : other.ids.includes(t.id) ? other.which : null);
   const rank = (t) => (listed.has(t.id) ? [...listed].indexOf(t.id) + 1 : other.ids.indexOf(t.id) + 1);
   const ord = (n) => ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'][n - 1] || `${n}th`;
+  const treeSource = () => st.source === 'projects' || st.source === 'tags';
 
   // ---------- what each place shows: groups of rows ----------
   const row = (t, extra = []) => ({ t, chips: [projName(t) ? chip(projName(t)) : '', ...extra].filter(Boolean) });
@@ -100,88 +104,107 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     list.forEach((t) => { const k = dayKey(when(t)); if (!days.has(k)) days.set(k, []); days.get(k).push(t); });
     return [...days.entries()].map(([k, ts]) => ({ label: dayLabel(new Date(`${k}T12:00:00`)), hint: `${ts.filter((t) => within(t.due_at)).length} due · ${ts.filter((t) => !within(t.due_at)).length} planned`, rows: ts.map((t) => row(t, chips(t))) }));
   };
-  const inside = (list) => {
-    const { next, later } = nextLater(list.filter(pickable));
+  const flagged = () => {
+    const { next, later } = nextLater(db.tasks.filter((t) => t.flagged && !t.in_inbox && pickable(t)));
     return [
-      { label: 'Next', hint: 'what could be done now', rows: next.map((t) => row(t, [dueChip(t), flagChip(t), t.estimate_minutes ? chip(`${t.estimate_minutes} min`) : ''])) },
+      { label: 'Next', hint: 'what could be done now', rows: next.map((t) => row(t, [dueChip(t), t.estimate_minutes ? chip(`${t.estimate_minutes} min`) : ''])) },
       { label: 'Later', hint: 'not yet, and why', rows: later.map(({ t, why }) => ({ ...row(t, [chip(why)]), later: true })) },
     ].filter((g) => g.rows.length);
   };
-  const project = () => inside(db.tasks.filter((t) => t.project_id === st.projectId).sort(taskSort));
-  const tag = () => { const ids = new Set([st.tagId, ...db.tags.filter((g) => g.parent_id === st.tagId).map((g) => g.id)]); return inside(db.tasks.filter((t) => tagsFor(t.id).some((g) => ids.has(g.id))).sort(taskSort)); };
-  const flagged = () => inside(db.tasks.filter((t) => t.flagged && !t.in_inbox));
   const everywhere = () => {
-    const all = db.tasks.filter(pickable);
-    const found = hits(all, st.q).sort(taskSort).slice(0, 80);
+    const found = hits(db.tasks.filter(pickable), st.q).sort(taskSort).slice(0, 80);
     const groups = new Map();
     found.forEach((t) => { const k = projName(t) || 'Loose cards'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); });
     return [...groups.entries()].map(([name, ts]) => ({ label: name, rows: ts.map((t) => row(t, [dueChip(t), flagChip(t)])) }));
   };
   const groupsFor = () => {
     if (st.everywhere || (st.source === 'suggested' && words(st.q).length)) return everywhere();
-    const g = st.source === 'suggested' ? suggested() : st.source === 'matrix' ? matrix() : st.source === 'forecast' ? forecast() : st.source === 'projects' ? project() : st.source === 'tags' ? tag() : flagged();
+    const g = st.source === 'suggested' ? suggested() : st.source === 'matrix' ? matrix() : st.source === 'forecast' ? forecast() : flagged();
     if (!words(st.q).length) return g;
     return g.map((x) => ({ ...x, rows: x.rows.filter((r) => hits([r.t], st.q).length) })).filter((x) => x.rows.length);
   };
-  const choosing = () => (st.source === 'projects' && !st.projectId) || (st.source === 'tags' && !st.tagId);
-  const placeName = () => (st.source === 'suggested' ? '' : st.source === 'matrix' ? `Matrix › ${(BOXES.find((b) => b.key === (st.sub.matrix || 'do')) || BOXES[0]).label}` : st.source === 'forecast' ? FORECAST.find(([k]) => k === (st.sub.forecast || 'today'))[1].toLowerCase() : st.source === 'projects' ? (st.projectId ? (byId(db.projects, st.projectId) || {}).name : 'projects') : st.source === 'tags' ? (st.tagId ? tagLabel(byId(db.tags, st.tagId)) : 'tags') : 'flagged');
+  // The tree's nodes: every project (active first, A to Z, the folder beside it) or every tag (a tag's
+  // cards include its children's), each with its pickable cards in list order.
+  const nodes = () => {
+    if (st.source === 'projects') {
+      return db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold')
+        .sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name) : a.status === 'active' ? -1 : 1))
+        .map((p) => ({ id: p.id, name: p.name, side: folderName(p), onHold: p.status === 'on_hold', kind: p.kind === 'sequential' ? 'in order' : p.kind === 'single' ? 'single actions' : 'parallel', cards: db.tasks.filter((t) => t.project_id === p.id && pickable(t)).sort(taskSort) }));
+    }
+    return sortedTags().map((g) => {
+      const ids = new Set([g.id, ...db.tags.filter((x) => x.parent_id === g.id).map((x) => x.id)]);
+      return { id: g.id, name: tagLabel(g), side: '', cards: db.tasks.filter((t) => pickable(t) && tagsFor(t.id).some((x) => ids.has(x.id))).sort(taskSort) };
+    });
+  };
+  const placeName = () => (st.source === 'suggested' ? '' : st.source === 'matrix' ? `Matrix › ${(BOXES.find((b) => b.key === (st.sub.matrix || 'do')) || BOXES[0]).label}` : st.source === 'forecast' ? FORECAST.find(([k]) => k === (st.sub.forecast || 'today'))[1].toLowerCase() : st.source);
 
   // ---------- drawing ----------
+  const cardHtml = (r, i) => {
+    const day = onDay(r.t);
+    const on = st.ticked.includes(r.t.id);
+    return `<li class="sp-row ${day ? 'off' : ''} ${r.later ? 'later' : ''} ${i === st.active ? 'act' : ''}" data-sp-row="${r.t.id}">
+      <button type="button" class="sp-tick ${on ? 'on' : ''}" data-sp-tick="${r.t.id}" aria-label="${on ? 'Ticked' : 'Tick'}" ${day ? 'disabled' : ''}>✓</button>
+      <div class="sp-main"><div class="sp-title">${esc(r.t.title)}</div><div class="sp-meta">${r.chips.join('')}${day ? chip(`on ${day} already · ${ord(rank(r.t))}`) : ''}</div></div>
+      <button type="button" class="sp-gear" data-sp-edit="${r.t.id}" aria-label="Edit this card" title="Edit">⚙</button></li>`;
+  };
   const chipsHtml = () => {
     const main = `<div class="sp-chips" role="tablist" aria-label="Where to look">${SOURCES.map(([k, l]) => `<button type="button" class="sp-chip ${st.source === k ? 'on' : ''}" role="tab" aria-selected="${st.source === k}" data-sp-source="${k}">${l}</button>`).join('')}</div>`;
     const sub = st.source === 'matrix' ? BOXES.map((b) => [b.key, b.label]) : st.source === 'forecast' ? FORECAST : null;
     const cur = st.source === 'matrix' ? st.sub.matrix || 'do' : st.sub.forecast || 'today';
-    const subs = sub ? `<div class="sp-chips sub" role="tablist">${sub.map(([k, l]) => `<button type="button" class="sp-chip ${cur === k ? 'on' : ''}" role="tab" aria-selected="${cur === k}" data-sp-sub="${k}">${l}</button>`).join('')}</div>` : '';
-    let crumb = '';
-    if (st.source === 'projects' && st.projectId) {
-      const p = byId(db.projects, st.projectId) || {};
-      const open = db.tasks.filter((t) => t.project_id === p.id && isOpen(t) && !t.daily);
-      const kind = p.kind === 'sequential' ? 'in order' : p.kind === 'single' ? 'single actions' : 'parallel';
-      crumb = `<div class="sp-crumb"><button type="button" class="link-btn" data-sp-back>‹ All projects</button><span class="hint">·</span><b>${esc(p.name)}</b></div>
-        <div class="sp-proj">${p.outcome ? `<b>Done looks like:</b> ${esc(p.outcome)} · ` : ''}<b>${open.length} open</b> · ${kind}${open.filter(isWaiting).length ? ` · <b>${open.filter(isWaiting).length} waiting</b>` : ''}</div>`;
-    } else if (st.source === 'tags' && st.tagId) {
-      crumb = `<div class="sp-crumb"><button type="button" class="link-btn" data-sp-back>‹ All tags</button><span class="hint">·</span><b>${esc(tagLabel(byId(db.tags, st.tagId)))}</b></div>`;
-    } else if (choosing()) {
-      const kind = st.source === 'projects' ? 'projects' : 'tags';
-      const rec = (saved[kind] || []).map((id) => (kind === 'projects' ? byId(db.projects, id) : byId(db.tags, id))).filter(Boolean);
-      crumb = rec.length ? `<div class="sp-crumb"><span class="hint">Recent:</span>${rec.map((x) => `<button type="button" class="link-btn" data-sp-open="${x.id}">${esc(kind === 'projects' ? x.name : tagLabel(x))}</button>`).join('')}</div>` : '';
-    }
-    return main + subs + crumb;
+    return main + (sub ? `<div class="sp-chips sub" role="tablist">${sub.map(([k, l]) => `<button type="button" class="sp-chip ${cur === k ? 'on' : ''}" role="tab" aria-selected="${cur === k}" data-sp-sub="${k}">${l}</button>`).join('')}</div>` : '');
+  };
+  // The tree. With a search, only what matches: a node whose name matches shows all its cards; otherwise
+  // a node shows just its matching cards; either way it is open for the look.
+  const treeHtml = () => {
+    const w = words(st.q);
+    const opened = st.open[st.source];
+    const out = []; st.rows = [];
+    const push = (r) => { st.rows.push(r); return st.rows.length - 1; };
+    let shown = 0;
+    nodes().forEach((n) => {
+      const nameHit = w.length && matches(n.name, w);
+      const cards = w.length && !nameHit ? n.cards.filter((t) => matches(t.title, w)) : n.cards;
+      if (w.length && !nameHit && !cards.length) return;
+      shown += 1;
+      const isOpenNode = w.length ? true : opened.has(n.id);
+      const ticked = n.cards.filter((t) => st.ticked.includes(t.id)).length;
+      const i = push({ node: n.id });
+      out.push(`<li class="sp-node ${isOpenNode ? 'open' : ''} ${n.onHold ? 'hold' : ''} ${i === st.active ? 'act' : ''}" data-sp-node="${n.id}"><span class="sp-chev">${isOpenNode ? '▾' : '▸'}</span><span class="sp-node-name">${esc(n.name)}</span><span class="hint"> · ${n.cards.length} open${n.onHold ? ' · on hold' : ''}</span>${ticked ? chip(`${ticked} ticked`, 'acc') : ''}${n.side ? `<span class="sp-folder">${esc(n.side)}</span>` : ''}</li>`);
+      if (!isOpenNode) return;
+      const { next, later } = nextLater(cards);
+      const laterOpen = st.later.has(n.id) || (w.length && !next.length);
+      const parts = [];
+      const j = push({ sec: n.id, which: 'next' });
+      parts.push(`<li class="sp-sec ${j === st.active ? 'act' : ''}" data-sp-sec="next" data-id="${n.id}"><span class="sp-chev">▾</span>Next<span class="hint"> · ${next.length}${n.kind ? ` · ${n.kind}` : ''} · what could be done now</span></li>`);
+      next.forEach((t) => { const k = push({ t }); parts.push(cardHtml(row(t, [dueChip(t), flagChip(t), t.estimate_minutes ? chip(`${t.estimate_minutes} min`) : '']), k)); });
+      if (!next.length) parts.push('<li class="hint sp-none">Nothing could be done now.</li>');
+      if (later.length) {
+        const l = push({ sec: n.id, which: 'later' });
+        parts.push(`<li class="sp-sec ${l === st.active ? 'act' : ''}" data-sp-sec="later" data-id="${n.id}"><span class="sp-chev">${laterOpen ? '▾' : '▸'}</span>Later<span class="hint"> · ${later.length} · not yet, and why</span></li>`);
+        if (laterOpen) later.forEach(({ t, why }) => { const k = push({ t, later: true }); parts.push(cardHtml({ ...row(t, [chip(why)]), later: true }, k)); });
+      }
+      out.push(`<li class="sp-box"><ul>${parts.join('')}</ul></li>`);
+    });
+    if (!shown) return `<li class="hint">${w.length ? `No ${st.source} match.` : `No ${st.source} yet.`}</li>`;
+    return out.join('');
   };
   const listHtml = () => {
-    if (choosing()) {
-      const kind = st.source === 'projects' ? 'projects' : 'tags';
-      const items = kind === 'projects'
-        ? hits(db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold').sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name) : a.status === 'active' ? -1 : 1)), st.q, (p) => p.name)
-        : hits(sortedTags(), st.q, (g) => tagLabel(g));
-      const count = (x) => (kind === 'projects' ? db.tasks.filter((t) => t.project_id === x.id && isOpen(t) && !t.daily).length : db.taskTags.filter((l) => l.tag_id === x.id).map((l) => byId(db.tasks, l.task_id)).filter((t) => t && isOpen(t)).length);
-      st.rows = items.slice(0, 60);
-      return st.rows.map((x, i) => `<li><button type="button" class="po-item ${i === st.active ? 'act' : ''}" data-sp-open="${x.id}">${esc(kind === 'projects' ? x.name : tagLabel(x))}<span class="hint"> · ${count(x)} open${kind === 'projects' && x.status === 'on_hold' ? ' · on hold' : ''}</span></button></li>`).join('')
-        + (items.length ? (items.length > 60 ? '<li class="hint">Keep typing to narrow it down…</li>' : '') : `<li class="hint">No ${kind} match.</li>`);
-    }
+    if (treeSource() && !st.everywhere) return treeHtml();
     const groups = groupsFor();
     st.rows = groups.flatMap((g) => g.rows);
     if (!st.rows.length) return `<li class="hint">${words(st.q).length ? 'No matching cards here.' : st.source === 'suggested' ? 'Nothing to suggest. Type to search every open card.' : 'Nothing here right now.'}</li>`;
     let i = -1;
-    return groups.map((g) => `<li class="po-group sp-group">${esc(g.label)}${g.hint ? `<span class="hint">${esc(g.hint)}</span>` : ''}</li>${g.rows.map((r) => {
-      i += 1;
-      const day = onDay(r.t);
-      const on = st.ticked.includes(r.t.id);
-      return `<li class="sp-row ${day ? 'off' : ''} ${r.later ? 'later' : ''} ${i === st.active ? 'act' : ''}" data-sp-row="${r.t.id}">
-        <button type="button" class="sp-tick ${on ? 'on' : ''}" data-sp-tick="${r.t.id}" aria-label="${on ? 'Ticked' : 'Tick'}" ${day ? 'disabled' : ''}>✓</button>
-        <div class="sp-main"><div class="sp-title">${esc(r.t.title)}</div><div class="sp-meta">${r.chips.join('')}${day ? chip(`on ${day} already · ${ord(rank(r.t))}`) : ''}</div></div>
-        <button type="button" class="sp-gear" data-sp-edit="${r.t.id}" aria-label="Edit this card" title="Edit">⚙</button></li>`;
-    }).join('')}`).join('');
+    return groups.map((g) => `<li class="po-group sp-group">${esc(g.label)}${g.hint ? `<span class="hint">${esc(g.hint)}</span>` : ''}</li>${g.rows.map((r) => { i += 1; return cardHtml(r, i); }).join('')}`).join('');
   };
   const footHtml = () => {
     const n = st.ticked.length;
-    const keys = `<span class="sp-keys"> · <kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>space</kbd> tick · <kbd>⏎</kbd> add · <kbd>e</kbd> edit · <kbd>tab</kbd> next place</span>`;
+    const keys = `<span class="sp-keys"> · <kbd>↑</kbd> <kbd>↓</kbd> move${treeSource() ? ' · <kbd>←</kbd> <kbd>→</kbd> close, open' : ''} · <kbd>space</kbd> tick · <kbd>⏎</kbd> add · <kbd>e</kbd> edit · <kbd>tab</kbd> next place</span>`;
     const wide = words(st.q).length && st.source !== 'suggested' ? (st.everywhere ? `<button type="button" class="link-btn" data-sp-narrow>Back to ${esc(placeName())}</button>` : '<button type="button" class="link-btn" data-sp-wide>Search everywhere instead</button>') : '';
     return `${wide ? `<p class="sp-wide">${wide}</p>` : ''}<div class="sp-foot"><span class="hint">${n ? `${n} ticked · ` : ''}${free} place${free === 1 ? '' : 's'} free${keys}</span><button type="button" class="btn" data-sp-cancel>Cancel</button><button type="button" class="btn primary" data-sp-add ${n ? '' : 'disabled'}>Add${n ? ` ${n}` : ''} to ${which}</button></div>`;
   };
   const draw = () => {
     const search = $('[data-sp-search]', dlg);
-    search.placeholder = choosing() ? `Find a ${st.source === 'projects' ? 'project' : 'tag'}…` : st.everywhere ? 'Search everywhere…' : st.source === 'suggested' ? 'Search anything…' : `Search in ${placeName()}…`;
+    search.placeholder = st.everywhere ? 'Search everywhere…' : st.source === 'suggested' ? 'Search anything…' : treeSource() ? `Search in ${st.source}: a name or a card…` : `Search in ${placeName()}…`;
     $('[data-sp-chips]', dlg).innerHTML = chipsHtml();
     $('[data-sp-list]', dlg).innerHTML = listHtml();
     $('[data-sp-foot]', dlg).innerHTML = footHtml();
@@ -191,7 +214,8 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
   // ---------- doing ----------
   const close = () => { dlg.classList.remove('sp-wide'); dlg.close(); onClose(); };
   const add = () => {
-    const ids = st.ticked.length ? st.ticked : (st.rows[st.active] && st.rows[st.active].t && !onDay(st.rows[st.active].t) ? [st.rows[st.active].t.id] : []);
+    const lit = st.rows[st.active];
+    const ids = st.ticked.length ? st.ticked : (lit && lit.t && !onDay(lit.t) ? [lit.t.id] : []);
     if (!ids.length) return;
     remember({ source: st.source, sub: st.sub });
     close();
@@ -206,7 +230,10 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     st.active = Math.max(0, st.rows.findIndex((r) => r.t && r.t.id === id));
     draw();
   };
-  const open = (id) => { if (st.source === 'projects') { st.projectId = id; recent('projects', id); } else { st.tagId = id; recent('tags', id); } st.q = ''; $('[data-sp-search]', dlg).value = ''; st.active = 0; st.everywhere = false; draw(); };
+  const saveOpen = () => remember({ openProjects: [...st.open.projects].slice(-40), openTags: [...st.open.tags].slice(-40) });
+  const setNode = (id, open) => { const s = st.open[st.source]; if (open === undefined) open = !s.has(id); if (open) s.add(id); else s.delete(id); saveOpen(); st.active = Math.max(0, st.rows.findIndex((r) => r.node === id)); draw(); };
+  const setLater = (id, open) => { if (open === undefined) open = !st.later.has(id); if (open) st.later.add(id); else st.later.delete(id); st.active = Math.max(0, st.rows.findIndex((r) => r.sec === id && r.which === 'later')); draw(); };
+  const setSource = (k) => { st.source = k; st.everywhere = false; st.active = 0; remember({ source: k, sub: st.sub }); draw(); };
   // The card's editor over the picker: on save the list is drawn again (a title, flag or project may have
   // changed, or the card may no longer belong here); either way focus comes back to the search.
   const editCard = (id) => {
@@ -214,7 +241,15 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     if (!t) return;
     openEditor(t, {}, { onSaved: () => { st.ticked = st.ticked.filter((x) => byId(db.tasks, x) && isOpen(byId(db.tasks, x))); draw(); setTimeout(() => search.focus(), 0); }, onClose: () => setTimeout(() => search.focus(), 0) });
   };
-  const setSource = (k) => { st.source = k; st.projectId = null; st.tagId = null; st.everywhere = false; st.active = 0; remember({ source: k, sub: st.sub }); draw(); };
+  // The lit row, from the keys: a card ticks; a project or a section opens or closes (← from a card
+  // closes its project).
+  const act = (r, dir) => {
+    if (!r) return;
+    if (r.node) setNode(r.node, dir === undefined ? undefined : dir === 'open');
+    else if (r.sec) { if (r.which === 'later') setLater(r.sec, dir === undefined ? undefined : dir === 'open'); else if (dir === 'close') setNode(r.sec, false); }
+    else if (r.t && dir === 'close') { const p = projectOf(r.t); if (st.source === 'projects' && p) setNode(p.id, false); }
+    else if (r.t && dir === undefined) toggle(r.t.id);
+  };
 
   dlg.innerHTML = `<form method="dialog" class="part-of-picker six-pick">
     <div class="sp-head"><h2>Add to ${which}</h2><span class="hint">${free} place${free === 1 ? '' : 's'} free</span></div>
@@ -234,15 +269,15 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
     if (el('[data-sp-add]')) { add(); return; }
     if (el('[data-sp-source]')) { setSource(el('[data-sp-source]').dataset.spSource); return; }
     if (el('[data-sp-sub]')) { st.sub = { ...st.sub, [st.source]: el('[data-sp-sub]').dataset.spSub }; st.active = 0; remember({ sub: st.sub }); draw(); return; }
-    if (el('[data-sp-back]')) { st.projectId = null; st.tagId = null; st.q = ''; search.value = ''; st.active = 0; draw(); search.focus(); return; }
-    if (el('[data-sp-open]')) { open(el('[data-sp-open]').dataset.spOpen); search.focus(); return; }
+    if (el('[data-sp-node]')) { setNode(el('[data-sp-node]').dataset.spNode); return; }
+    if (el('[data-sp-sec]')) { const s = el('[data-sp-sec]'); if (s.dataset.spSec === 'later') setLater(s.dataset.id); else setNode(s.dataset.id, false); return; }
     if (el('[data-sp-wide]')) { st.everywhere = true; st.active = 0; draw(); search.focus(); return; }
     if (el('[data-sp-narrow]')) { st.everywhere = false; st.active = 0; draw(); search.focus(); return; }
     if (el('[data-sp-edit]')) { editCard(el('[data-sp-edit]').dataset.spEdit); return; }
     if (el('[data-sp-tick]')) { toggle(el('[data-sp-tick]').dataset.spTick); return; }
     const r = el('[data-sp-row]'); if (r) toggle(r.dataset.spRow);
   };
-  // Hold a row for half a second (without moving) to edit the card; a right-click does the same.
+  // Hold a card for half a second (without moving) to edit it; a right-click does the same.
   let hold = null;
   const endHold = () => { if (hold) { clearTimeout(hold.timer); hold = null; } };
   form.addEventListener('pointerdown', (e) => {
@@ -257,12 +292,12 @@ export function openSixPicker({ key, which, free, listed, other, onAdd, onClose 
   form.addEventListener('contextmenu', (e) => { const r = e.target.closest('[data-sp-row]'); if (r) { e.preventDefault(); endHold(); editCard(r.dataset.spRow); } });
   form.onkeydown = (e) => {
     if (e.key === 'Escape') { e.preventDefault(); close(); return; }
-    if (e.key === 'e' && !search.value && !choosing()) { e.preventDefault(); const r = st.rows[st.active]; if (r && r.t) editCard(r.t.id); return; }
+    if (e.key === 'e' && !search.value) { e.preventDefault(); const r = st.rows[st.active]; if (r && r.t) editCard(r.t.id); return; }
     if (e.key === 'Tab') { e.preventDefault(); const i = SOURCES.findIndex(([k]) => k === st.source); setSource(SOURCES[(i + (e.shiftKey ? SOURCES.length - 1 : 1)) % SOURCES.length][0]); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = st.rows.length; if (n) { st.active = (st.active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; draw(); } return; }
-    if (e.key === 'Enter') { e.preventDefault(); if (choosing()) { const x = st.rows[st.active]; if (x) open(x.id); } else add(); return; }
-    if (e.key === ' ' && !search.value && !choosing()) { e.preventDefault(); const r = st.rows[st.active]; if (r && r.t) toggle(r.t.id); return; }
-    if (e.key === 'Backspace' && !search.value && (st.projectId || st.tagId)) { e.preventDefault(); st.projectId = null; st.tagId = null; st.active = 0; draw(); }
+    if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && treeSource() && !search.value) { e.preventDefault(); act(st.rows[st.active], e.key === 'ArrowRight' ? 'open' : 'close'); return; }
+    if (e.key === 'Enter') { e.preventDefault(); const r = st.rows[st.active]; if (r && (r.node || r.sec)) act(r); else add(); return; }
+    if (e.key === ' ' && !search.value) { e.preventDefault(); act(st.rows[st.active]); }
   };
   draw();
   dlg.showModal();
