@@ -910,25 +910,46 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .waiting-field .btn { justify-self: start; }
 
 /* Clarify */
-.cl-count { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.cl-count { color: var(--text); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cl-sub { display: flex; align-items: center; gap: 10px; margin: 6px 0 14px; font-size: 14px; color: var(--muted); }
+.cl-sub .cl-progress { flex: 0 1 220px; margin: 0; }
 .cl-progress { height: 5px; border-radius: 3px; background: var(--surface-2); margin: 4px 0 14px; overflow: hidden; }
 .cl-progress i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .25s; }
 .cl-item { display: grid; gap: 4px; padding: 14px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); margin-bottom: 12px; }
 .cl-item b { font-size: 19px; overflow-wrap: anywhere; }
 .cl-meta { color: var(--muted); font-size: 13px; }
 .cl-notes { margin: 6px 0 0; white-space: pre-wrap; color: var(--muted); font-size: 14px; max-height: 9em; overflow: auto; overflow-wrap: anywhere; }
-.cl-item .link-btn { justify-self: start; font-size: 13px; }
-.cl-sug { display: block; width: 100%; text-align: left; border: none; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 14px; cursor: pointer; }
-.cl-q { margin: 4px 0 8px; color: var(--muted); font-size: 14px; font-weight: 600; }
-.cl-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-@media (max-width: 640px) { .cl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cl-item .cl-gain-row { display: flex; align-items: center; gap: 12px; margin-top: 6px; padding: 0 12px; height: 44px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.cl-item .cl-gain-row .gain-label { flex: none; margin: 0; font-size: 13px; color: var(--accent); white-space: nowrap; }
+.cl-item .cl-gain-row input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 0; font-size: 15px; outline: none; }
+.cl-acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+.cl-left { display: flex; flex-direction: column; gap: 12px; }
+.cl-left .cl-item { margin-bottom: 0; }
+.cl-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 900px) { .cl-cols { grid-template-columns: minmax(0, 11fr) minmax(0, 9fr); gap: 24px; align-items: start; } }
+.cl-sug { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; width: 100%; min-height: 52px; padding: 10px 16px; border: 0; border-radius: 12px; background: var(--accent); color: #fff; font: inherit; font-size: 15px; font-weight: 700; text-align: left; cursor: pointer; }
+.cl-sug:hover { filter: brightness(1.08); }
+.cl-sug .chip { background: rgba(255,255,255,.18); color: #fff; font-size: 13px; font-weight: 600; }
+.cl-sug kbd { margin-left: auto; font: 600 12px/18px -apple-system, system-ui, sans-serif; border: 1px solid rgba(255,255,255,.5); border-radius: 5px; padding: 0 6px; }
+.cl-sug-ok { font-size: 16px; }
+.cl-qrow { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 2px 0 2px; }
+.cl-qrow .cl-keys { flex: none; text-align: right; }
+.cl-q { margin: 0; color: var(--text); font-size: 15px; font-weight: 600; }
+.cl-glabel { margin: 10px 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.cl-glabel span { margin-left: 8px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.cl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .cl-choice, .ask-choice { position: relative; display: grid; gap: 2px; text-align: left; padding: 12px 12px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; min-height: 64px; }
 .cl-choice:hover, .ask-choice:hover { border-color: var(--accent); }
 .cl-choice b, .ask-choice b { font-size: 15px; }
 .cl-choice span, .ask-choice span { color: var(--muted); font-size: 12px; }
-.cl-choice kbd { position: absolute; top: 8px; right: 10px; font: 600 11px/1 ui-monospace, monospace; color: var(--muted); }
-.cl-choice.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
-.cl-choice.pri span, .cl-choice.pri kbd { color: rgba(255,255,255,.8); }
+/* The choice rows: a keycap, then the name and what it means. The default is outlined, so the suggestion stays the loudest. */
+.cl-choice { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 14px 0 12px; }
+.cl-choice kbd { position: static; flex: none; width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); font: 700 12px/1 -apple-system, system-ui, sans-serif; display: grid; place-items: center; }
+.cl-choice .cl-ct { display: grid; gap: 2px; min-width: 0; }
+.cl-choice .cl-ct b { line-height: 1.15; }
+.cl-choice.pri { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+.cl-choice.pri kbd { border-color: var(--accent); color: var(--text); }
+.cl-choice.warn:hover { border-color: var(--due); }
 .cl-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-top: 16px; }
 .cl-bar .btn { white-space: nowrap; flex: none; }
 .cl-keys { font-size: 12px; flex: 1 1 auto; min-width: 0; text-align: center; }
@@ -1387,8 +1408,7 @@ body.fr-mode .view { margin-left: auto !important; margin-right: auto !important
 .fr-prompt textarea { width: 100%; font-size: 14px; }
 /* Full Review: its own capture button (the app's is hidden there) */
 body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24px; bottom: calc(24px + env(safe-area-inset-bottom)); z-index: 12; }
-.cl-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-@media (max-width: 640px) { .cl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* (the grouped rows above set .cl-grid to two columns) */
 .fr-btns2 { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .fr-btns2 kbd { opacity: .6; font-size: .75rem; margin-right: 2px; }
 .fr-guide { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 8px; }

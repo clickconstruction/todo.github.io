@@ -1,5 +1,8 @@
 // Clarify (Process Inbox): one item at a time, one decision each. 1 Next action · 2 Do it now
-// (2-minute timer) · 3 Delegate · 4 Project · 5 Someday · 6 Tickler · 7 Trash · 8 Reference.
+// (2-minute timer) · 3 Delegate · 4 Project · 5 Someday · 6 Tickler · 7 Trash · 8 Reference · 9 Slipbox,
+// in three rows by the question they answer (do something · not now · not an action). On a wide screen
+// the item sits on the left and the decision on the right. A suggestion (a project and tags from similar
+// items) is one press: the button, or ⏎. c copies the item for Claude, C offers the asks.
 // Every decision can be undone (↶), and Skip leaves an item for later in this session.
 import { db, app, sb, run, syncRow, esc, byId, isOpen, taskSort, tagsFor, toast, tagLabel } from '../state.js';
 import { startOfToday, addDays, fmtDate, atDefaultTime } from '../dates.js';
@@ -16,12 +19,14 @@ export const CHOICES = [
   ['now', 'Do it now', 'under 2 min'],
   ['delegate', 'Delegate', 'someone else'],
   ['project', 'Project', 'several steps'],
-  ['someday', 'Someday', 'not now'],
-  ['tickler', 'Tickler', 'remind me later'],
+  ['someday', 'Someday', 'maybe later'],
+  ['tickler', 'Tickler', 'remind me on a day'],
   ['trash', 'Trash', 'not needed'],
-  ['reference', 'Reference', 'just info'],
+  ['reference', 'Reference', 'just information'],
   ['slipbox', 'Slipbox', 'an idea to think with'],
 ];
+// The choices by the question they answer; the keys stay 1–9 in CHOICES order.
+const GROUPS = [['Do something', 'it leads to an action', ['next', 'now', 'delegate', 'project']], ['Not now', 'keep it, out of the way', ['someday', 'tickler']], ['Not an action', 'nothing to do', ['trash', 'reference', 'slipbox']]];
 // Columns an undo puts back.
 const COLS = ['in_inbox', 'project_id', 'parent_id', 'completed_at', 'dropped_at', 'completion_note', 'planned_at', 'defer_at', 'flagged', 'energy', 'waiting_on', 'follow_up_at', 'delegated_at', 'agenda_for', 'tickler', 'reference_id'];
 
@@ -87,10 +92,10 @@ function itemCard(t) {
   return `<div class="cl-item"><b>${esc(t.title)}</b><span class="cl-meta">${meta}</span>
     ${pics.length ? `<div class="cl-pics">${pics.map((a) => `<img class="cl-thumb" data-cl-thumb="${esc(a.path)}" alt="${esc(a.name)}">`).join('')}</div>` : ''}
     ${t.notes ? `<p class="cl-notes">${esc(t.notes.slice(0, 400))}${t.notes.length > 400 ? '…' : ''}</p>` : ''}
-    <label class="gain-card"><span class="gain-label"><span aria-hidden="true">✦</span> What do I gain?</span>
+    <label class="gain-card cl-gain-row"><span class="gain-label"><span aria-hidden="true">✦</span> What do I gain?</span>
       <input type="text" data-cl-gain="${t.id}" value="${esc(t.gain || '')}" maxlength="500" placeholder="Say it in one line, or skip" autocomplete="off"></label>
     ${t.gain_by === 'agent' ? '<span class="chip sug">Claude suggested</span>' : ''}
-    <button class="link-btn" data-task="${t.id}">Edit details</button> <button class="link-btn" data-clarify="ask" title="Copy a prompt about this item for Claude (C)">Ask Claude…</button></div>
+    <div class="cl-acts"><button type="button" class="btn small" data-task="${t.id}">Edit details</button><button type="button" class="btn small" data-clarify="ask" title="Copy a prompt about this item for Claude: c copies the card, C offers the asks">Ask Claude…</button></div></div>
     ${isWeak(t) ? `<div class="gain-weak cl-gain"><p>No gain written, and you’ve skipped this ${t.clarify_skips} times.</p>
       <div class="st-btns"><button class="btn small" data-cl-gain-focus>Add a gain</button><button class="btn small" data-clarify="someday">Someday</button><button class="btn small" data-clarify="trash">Drop</button></div></div>` : ''}`;
 }
@@ -169,7 +174,8 @@ export function viewClarify() {
   const t = current();
   const remaining = clarifyQueue().filter((x) => !s.skipped.has(x.id)).length;
   const total = s.done + remaining + s.skipped.size;
-  const head = `${openReview() ? '<a class="back" href="#weekly/inbox">‹ Weekly Review</a>' : ''}<div class="view-head"><h1 class="inbox">Process Inbox</h1><span class="cl-count">${t ? `${s.done + 1} of ${total}` : ''}</span></div>${progressBar(s.done, total)}`;
+  const head = `${openReview() ? '<a class="back" href="#weekly/inbox">‹ Weekly Review</a>' : ''}<div class="view-head"><h1 class="inbox">Process Inbox</h1></div>
+    <div class="cl-sub">${t ? `<b class="cl-count">${s.done + 1} of ${total}</b><span>${remaining - 1 + s.skipped.size} to go</span>` : `<span class="cl-count">${s.done} of ${total}</span>`}${progressBar(s.done, total)}</div>`;
   if (!t) {
     const c = s.counts;
     const summary = CHOICES.filter(([k]) => c[k]).map(([k, l]) => `${c[k]} ${l.toLowerCase()}`).join(' · ');
@@ -184,13 +190,15 @@ export function viewClarify() {
   else if (s.mode === 'now') body = nowPanel();
   else if (s.mode === 'someday') body = somedayForm();
   else if (s.mode === 'slipbox') body = slipboxForm(t);
-  else {
-    const sug = suggestFor(t);
-    body = `${sug ? `<button class="cl-sug" data-clarify="suggested">Suggested: <b>${esc(sug.project.name)}</b>${sug.tags.map((g) => ` · ${esc(tagLabel(g))}`).join('')} ✓</button>` : ''}
-      <p class="cl-q">What is it?</p>
-      <div class="cl-grid">${CHOICES.map(([k, l, sub], i) => `<button class="cl-choice ${i === 0 ? 'pri' : ''}" data-clarify="${k}"><kbd>${i + 1}</kbd><b>${l}</b><span>${sub}</span></button>`).join('')}</div>`;
+  const sug = s.mode ? null : suggestFor(t);
+  if (!s.mode) {
+    const choice = (k) => { const i = CHOICES.findIndex(([x]) => x === k); const [, l, sub] = CHOICES[i]; return `<button class="cl-choice ${i === 0 ? 'pri' : ''} ${k === 'trash' ? 'warn' : ''}" data-clarify="${k}"><kbd>${i + 1}</kbd><span class="cl-ct"><b>${l}</b><span>${sub}</span></span></button>`; };
+    body = `<div class="cl-qrow"><p class="cl-q">${sug ? 'Or, what is it?' : 'What is it?'}</p><span class="hint cl-keys">1–9 choose</span></div>
+      ${GROUPS.map(([label, hint, keys]) => `<div class="cl-glabel">${label}<span>${hint}</span></div><div class="cl-grid">${keys.map(choice).join('')}</div>`).join('')}`;
   }
-  return `${head}${itemCard(t)}${body}
+  // The suggestion is one press: the button files it (⏎ does too) with the project and tags it names.
+  const sugBtn = sug ? `<button type="button" class="cl-sug" data-clarify="suggested" title="File it with this project and these tags (⏎)"><span class="cl-sug-ok" aria-hidden="true">✓</span>File it as suggested<span class="chip">${esc(sug.project.name)}</span>${sug.tags.map((g) => `<span class="chip">${esc(tagLabel(g))}</span>`).join('')}<kbd>⏎</kbd></button>` : '';
+  return `${head}<div class="cl-cols"><div class="cl-left">${itemCard(t)}${sugBtn}</div><div class="cl-right">${body}</div></div>
     <div class="cl-bar"><button class="btn small" data-clarify="undo" ${s.history.length ? '' : 'disabled'}>↶ Undo</button><span class="hint cl-keys">1–9 choose · ⏎ save · Esc back</span><button class="btn small" data-clarify="skip">Skip →</button></div>`;
 }
 
@@ -283,7 +291,14 @@ export async function clarifyAction(action) {
   const snap = snapshot(t);
   switch (action) {
     case 'next': s.mode = 'next'; break;
-    case 'suggested': s.mode = 'next'; break;
+    case 'suggested': { // one press: the project and tags the suggestion names
+      const sug = suggestFor(t);
+      if (!sug) { s.mode = 'next'; break; }
+      await saveTask(t, { project_id: sug.project.id, tickler: false }, sug.tags.map((g) => g.id));
+      record(snap, 'next');
+      toast(`Filed in ${sug.project.name}`);
+      return;
+    }
     case 'project': s.mode = 'project'; break;
     case 'reference': s.mode = 'reference'; break;
     case 'now': s.mode = 'now'; s.timerStart = Date.now(); stopTimer(); break;
@@ -330,6 +345,7 @@ export function clarifyKey(e) {
   if (e.key === 'Escape') { if (s.mode) { e.preventDefault(); clarifyAction('back'); return true; } return false; }
   if (e.key === 'Enter') {
     if (s.mode === 'now') { e.preventDefault(); clarifyAction('did-it'); return true; }
+    if (!s.mode && !typing) { const b = document.querySelector('.cl-sug'); if (b) { e.preventDefault(); b.click(); return true; } return false; }
     const form = document.querySelector('[data-clarify-form]');
     if (form && !typing && document.activeElement.tagName !== 'BUTTON') { e.preventDefault(); form.requestSubmit(); return true; }
     return false;
@@ -338,6 +354,7 @@ export function clarifyKey(e) {
   if (!s.mode && /^[1-9]$/.test(e.key)) { e.preventDefault(); clarifyAction(CHOICES[Number(e.key) - 1][0]); return true; }
   if (e.key === 's' || e.key === 'ArrowRight') { e.preventDefault(); clarifyAction('skip'); return true; }
   if (e.key === 'C') { e.preventDefault(); clarifyAction('ask'); return true; }
+  if (e.key === 'c') { e.preventDefault(); const t = current(); if (t) import('../ask-claude.js').then(({ copyAsk }) => copyAsk(t, 'card')); return true; } // the card, you write the ask
   if (e.key === 'z' || e.key === 'u') { e.preventDefault(); clarifyAction('undo'); return true; }
   return false;
 }

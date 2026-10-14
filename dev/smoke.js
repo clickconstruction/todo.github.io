@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, pageSearch, askClaude, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, pageSearch, askClaude, clarifyTwoCol, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -3342,6 +3342,37 @@ async function pullToRefresh(check) {
 }
 
 // Search covers everything: the Slipbox, reference (never the secret), events, people, places, checklists, areas, goals.
+// Process Inbox, two columns: the item left, the decision right; choices in three rows by their question;
+// the suggestion is one press (the button or ⏎); c copies the item for Claude.
+async function clarifyTwoCol(check) {
+  const { app } = await import('/js/state.js');
+  const keyS = (k, opts = {}) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...opts }));
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  // A filed item with the same words as the first Inbox item, so the Inbox item gets a suggestion (its project, its tag).
+  const now = new Date().toISOString();
+  T().tasks.push({ id: 'tSim', user_id: 'u1', title: 'Frog Pond EIN application form', in_inbox: false, project_id: 'p1', parent_id: null, notes: '', completed_at: null, dropped_at: null, created_at: now, updated_at: now, sort: 99 });
+  T().task_tags.push({ id: 'ttSim', user_id: 'u1', task_id: 'tSim', tag_id: 'g1', created_at: now });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  app.clarify = null;
+  await go('#inbox'); await go('#clarify'); await wait(80);
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  check('the item on the left, the decision on the right, the count under the title', !!$('.cl-cols .cl-left .cl-item') && !!$('.cl-cols .cl-right .cl-grid') && has('.cl-sub', '1 of', 'to go') && !!$('.cl-sub .cl-progress'));
+  check('nine choices in three rows by their question, each with a keycap', $$('.cl-glabel').length === 3 && has('.cl-right', 'do something', 'not now', 'not an action') && $$('.cl-choice kbd').length === 9 && $$('.cl-choice kbd').map((k) => k.textContent).join('') === '123456789' && $('.cl-choice.pri .cl-ct b').textContent === 'Next action');
+  check('the suggestion is a button that names the project and tags, with ⏎', !!$('.cl-left .cl-sug') && has('.cl-sug', 'file it as suggested', 'click plumbing') && $('.cl-sug kbd').textContent === '⏎');
+  const first = T().tasks.find((t) => t.id === 't12');
+  keyS('Enter'); await until(() => !first.in_inbox);
+  check('⏎ files it as suggested in one press: out of the Inbox, in the project, on to the next item', !first.in_inbox && first.project_id === 'p1' && has('#toast', 'filed in click plumbing') && has('.cl-sub', '2 of'), `${first.in_inbox} ${first.project_id} ${text('#toast')}`);
+  keyS('z'); await until(() => first.in_inbox);
+  check('…and Undo puts it back', first.in_inbox && !first.project_id && has('.cl-sub', '1 of'));
+  let clipped = ''; const hadClip = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (x) => { clipped = x; } } });
+  keyS('c'); await until(() => clipped);
+  check('c copies the item for Claude, the ask left for me', clipped.includes('“Frog Pond EIN”') && clipped.includes('Where I am: clarifying my Inbox.') && /What I want:\n\nIf you have/.test(clipped) && has('#toast', 'copied for claude') && !$('#sheet2').open, clipped.slice(0, 160));
+  if (hadClip) Object.defineProperty(navigator, 'clipboard', hadClip); else delete navigator.clipboard;
+  T().tasks.splice(T().tasks.findIndex((t) => t.id === 'tSim'), 1); T().task_tags.splice(T().task_tags.findIndex((x) => x.id === 'ttSim'), 1); await loadAll(); // leave the library as it was
+  app.clarify = null; await go('#inbox');
+}
+
 // Ask Claude about a card (js/ask-claude.js): a prompt on the clipboard with where you are, the card and the ask.
 async function askClaude(check) {
   const { app } = await import('/js/state.js');
