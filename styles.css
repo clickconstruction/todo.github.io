@@ -923,6 +923,7 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .cl-item .cl-gain-row .gain-label { flex: none; margin: 0; font-size: 13px; color: var(--accent); white-space: nowrap; }
 .cl-item .cl-gain-row input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 0; font-size: 15px; outline: none; }
 .cl-acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+.cl-acts kbd { margin-left: 8px; font: 700 11px/18px -apple-system, system-ui, sans-serif; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; background: var(--surface); }
 .cl-left { display: flex; flex-direction: column; gap: 12px; }
 .cl-left .cl-item { margin-bottom: 0; }
 .cl-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -957,7 +958,7 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
    own; the other bars do the same once the window is narrow. Back and Skip keep the first line. */
 .fr .cl-keys { order: 3; flex-basis: 100%; margin-top: 2px; }
 @media (max-width: 820px) { .cl-keys { order: 3; flex-basis: 100%; margin-top: 2px; } }
-@media (pointer: coarse) { .cl-keys, .cl-choice kbd { display: none; } }
+@media (pointer: coarse) { .cl-keys, .cl-choice kbd, .cl-sug kbd, .cl-acts kbd { display: none; } }
 .cl-form { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
 .cl-form label { display: grid; gap: 6px; font-size: 14px; font-weight: 600; color: var(--muted); }
 .cl-form .segmented { flex-wrap: wrap; }

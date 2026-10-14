@@ -95,7 +95,7 @@ function itemCard(t) {
     <label class="gain-card cl-gain-row"><span class="gain-label"><span aria-hidden="true">✦</span> What do I gain?</span>
       <input type="text" data-cl-gain="${t.id}" value="${esc(t.gain || '')}" maxlength="500" placeholder="Say it in one line, or skip" autocomplete="off"></label>
     ${t.gain_by === 'agent' ? '<span class="chip sug">Claude suggested</span>' : ''}
-    <div class="cl-acts"><button type="button" class="btn small" data-task="${t.id}">Edit details</button><button type="button" class="btn small" data-clarify="ask" title="Copy a prompt about this item for Claude: c copies the card, C offers the asks">Ask Claude…</button></div></div>
+    <div class="cl-acts"><button type="button" class="btn small" data-task="${t.id}">Edit details</button><button type="button" class="btn small" data-clarify="ask" title="Copy this item for Claude, to paste into a chat (c). C offers the usual asks.">Ask Claude…<kbd>c</kbd></button></div></div>
     ${isWeak(t) ? `<div class="gain-weak cl-gain"><p>No gain written, and you’ve skipped this ${t.clarify_skips} times.</p>
       <div class="st-btns"><button class="btn small" data-cl-gain-focus>Add a gain</button><button class="btn small" data-clarify="someday">Someday</button><button class="btn small" data-clarify="trash">Drop</button></div></div>` : ''}`;
 }
@@ -282,7 +282,11 @@ async function submitForm(form) {
 }
 
 export async function clarifyAction(action) {
-  if (action === 'ask') { const t = current(); if (t) { const { openAskClaude } = await import('../ask-claude.js'); openAskClaude(t); } return; }
+  if (action === 'ask' || action === 'asks') { // ask: the card copied at once (c); asks: the sheet of the usual asks (C)
+    const t = current();
+    if (t) { const A = await import('../ask-claude.js'); if (action === 'ask') A.copyAsk(t, 'card'); else A.openAskClaude(t); }
+    return;
+  }
   const s = state();
   const t = current();
   if (action === 'undo') return undoLast();
@@ -353,8 +357,8 @@ export function clarifyKey(e) {
   if (typing) return false;
   if (!s.mode && /^[1-9]$/.test(e.key)) { e.preventDefault(); clarifyAction(CHOICES[Number(e.key) - 1][0]); return true; }
   if (e.key === 's' || e.key === 'ArrowRight') { e.preventDefault(); clarifyAction('skip'); return true; }
-  if (e.key === 'C') { e.preventDefault(); clarifyAction('ask'); return true; }
-  if (e.key === 'c') { e.preventDefault(); const t = current(); if (t) import('../ask-claude.js').then(({ copyAsk }) => copyAsk(t, 'card')); return true; } // the card, you write the ask
+  if (e.key === 'C') { e.preventDefault(); clarifyAction('asks'); return true; }
+  if (e.key === 'c') { e.preventDefault(); clarifyAction('ask'); return true; }
   if (e.key === 'z' || e.key === 'u') { e.preventDefault(); clarifyAction('undo'); return true; }
   return false;
 }

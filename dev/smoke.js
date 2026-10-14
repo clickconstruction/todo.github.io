@@ -3366,6 +3366,10 @@ async function clarifyTwoCol(check) {
   check('…and Undo puts it back', first.in_inbox && !first.project_id && has('.cl-sub', '1 of'));
   let clipped = ''; const hadClip = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (x) => { clipped = x; } } });
+  check('the Ask Claude button shows its key, c, like the suggestion shows ⏎', $('#view [data-clarify="ask"] kbd') && $('#view [data-clarify="ask"] kbd').textContent === 'c');
+  $('#view [data-clarify="ask"]').click(); await until(() => clipped);
+  check('the button copies at once, as c does', clipped.includes('“Frog Pond EIN”') && has('#toast', 'copied for claude') && !$('#sheet2').open);
+  clipped = '';
   keyS('c'); await until(() => clipped);
   check('c copies the item for Claude, the ask left for me', clipped.includes('“Frog Pond EIN”') && clipped.includes('Where I am: clarifying my Inbox.') && /What I want:\n\nIf you have/.test(clipped) && has('#toast', 'copied for claude') && !$('#sheet2').open, clipped.slice(0, 160));
   if (hadClip) Object.defineProperty(navigator, 'clipboard', hadClip); else delete navigator.clipboard;
