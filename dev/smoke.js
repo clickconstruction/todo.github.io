@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, pageSearch, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -3342,6 +3342,49 @@ async function pullToRefresh(check) {
 }
 
 // Search covers everything: the Slipbox, reference (never the secret), events, people, places, checklists, areas, goals.
+// Search on every page (js/page-search.js): the box in the title row filters the page first, and always
+// offers everything; with nothing on the page it switches to everything on its own, in place.
+async function pageSearch(check) {
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const now = new Date().toISOString();
+  T().slipbox_notes.push({ id: 'snPS', user_id: 'u1', title: 'Telescope mirror grinding notes', body: 'Pitch lap, 80 grit, then finer.', kind: 'permanent', source: '', archived_at: null, created_at: now, updated_at: now });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const { searchCount } = await import('/js/views/search.js');
+  const { app } = await import('/js/state.js');
+  app.pageSearch = null; await go('#forecast'); await go('#inbox'); // a fresh draw, whatever page the last suite left
+  const input = () => $('#view .view-head .ps-input');
+  const type = async (v) => { const i = input(); i.value = v; i.dispatchEvent(new Event('input', { bubbles: true })); await wait(60); };
+  const shown = () => $$('#view li.row:not(.ps-hide)');
+  const pk = (k) => input().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  check('a search box sits in the title row, and says it searches this page', !!input() && /this page/i.test(input().placeholder) && !!$('#view .view-head h1 + .ps'));
+  key('s'); await wait(50);
+  check('s focuses it (and so does /)', document.activeElement === input());
+  const nAllTel = searchCount('telescope');
+  await type('telescope');
+  check('typing filters the page: the matching row stays, the others go, and the pills count both', shown().length === 1 && has('#view li.row:not(.ps-hide)', 'telescope') && has('.ps-line', 'this page · 1', `everything · ${nAllTel}`) && /this page/i.test($('.ps-seg.on').textContent) && !$('#ps-results'), text('.ps-line'));
+  await type('mirror grinding');
+  check('nothing on this page: it switches to everything on its own, in place, and says so', has('.ps-line', 'this page · none', 'nothing on this page matches') && /everything/i.test($('.ps-seg.on').textContent) && !!$('#ps-results') && has('#ps-results', 'slipbox · 1', 'telescope mirror grinding notes') && location.hash === '#inbox' && $$('#view > .ps-hide').length > 0, text('.ps-line'));
+  $('.ps-seg[data-ps-scope="page"]').click(); await wait(40);
+  check('the This page pill shows the empty page instead', !$('#ps-results') && has('#view', 'nothing on this page matches “mirror grinding”') && $$('#view li.row.ps-hide').length === 2 && !$('#view .view-head.ps-hide'), text('#view').slice(0, 200));
+  pk('Escape'); await wait(40);
+  check('Esc clears it: the pills go and every row is back', input().value === '' && !$('.ps-line') && shown().length >= 2 && $$('#view .ps-hide').length === 0 && document.activeElement === input());
+  $('.nav-tool[href="#search"]').click(); await wait(40);
+  check('the sidebar’s Search is this box, in Everything scope', location.hash === '#inbox' && document.activeElement === input() && /everything/i.test(input().placeholder));
+  await type('telescope');
+  check('…so a word that is on the page still shows everything, with This page offered', /everything/i.test($('.ps-seg.on').textContent) && !!$('#ps-results') && has('.ps-line', 'this page · 1'));
+  pk('Enter'); await wait(120);
+  check('Enter opens the first result', !$('#inspector').hidden || $('#sheet').open, `${$('#inspector').hidden} ${$('#sheet').open}`);
+  if ($('#sheet').open) { $('#sheet').close(); await wait(30); }
+  await go('#forecast'); await wait(60);
+  check('a different page starts clean, and the keys are the page’s again', !!input() && input().value === '' && !$('.ps-line') && $$('#view .ps-hide').length === 0 && document.activeElement !== input());
+  await go('#inbox'); const t13 = T().tasks.find((t) => t.id === 't13');
+  await type('telescope'); const { render } = await import('/js/router.js'); render(); await wait(40);
+  check('a redraw under it keeps what was typed and the filter', input().value === 'telescope' && shown().length === 1 && has('.ps-line', 'this page · 1'));
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  app.pageSearch = null; await go('#inbox');
+  void t13;
+}
+
 async function searchEverything(check) {
   const now = new Date().toISOString();
   T().slipbox_notes.push({ id: 'snA', user_id: 'u1', title: 'Appleseed protocol', body: 'A farm that runs the Appleseed way: open-source machines, one module at a time.', kind: 'permanent', source: '', archived_at: null, created_at: now, updated_at: now });

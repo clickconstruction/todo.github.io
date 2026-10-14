@@ -6,6 +6,7 @@ import { viewReview, reviewDueCount } from './views/review.js';
 import { renderInspector } from './inspector.js';
 import { viewProjects, viewProject } from './views/projects.js';
 import { viewSearch } from './views/search.js';
+import { mountPageSearch } from './page-search.js';
 import { viewDone } from './views/done.js';
 import { viewSettings } from './views/settings.js';
 import { viewNearby, viewPlaces, mountNearbyMap } from './views/nearby.js';
@@ -109,6 +110,7 @@ export function render() {
   applySidebar();
   renderInspector();
   if ('setAppBadge' in navigator) (inboxCount + dueCount ? navigator.setAppBadge(inboxCount + dueCount) : navigator.clearAppBadge()).catch(() => {});
+  mountPageSearch(); // the search box in the title row, with what was typed before this draw
 }
 
 app.render = render;

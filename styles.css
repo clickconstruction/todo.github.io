@@ -1568,7 +1568,33 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .sg-check .sg-sec { list-style: none; margin: 4px 0 0 -18px; font-weight: 600; color: var(--muted); font-size: 13px; }
 /* Search everything */
 .sr-snip { margin-top: 2px; overflow-wrap: anywhere; }
-#search-results mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+#search-results mark, .ps-results mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+/* Search on every page (js/page-search.js): the box in the title row, the pills under it, the hidden rows. */
+.ps { display: inline-flex; align-items: center; gap: 6px; height: 36px; width: 232px; padding: 0 8px 0 10px; margin-left: auto; align-self: center; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: text; transition: width .15s, border-color .15s, box-shadow .15s; }
+.ps:focus-within { width: 340px; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ps-glyph { font-size: 13px; opacity: .7; }
+.ps .ps-input { flex: 1; min-width: 0; width: auto; padding: 0; border: 0; background: transparent; font-size: 15px; outline: none; }
+.ps-x { display: none; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 2px 5px; border-radius: 6px; font: inherit; font-size: 13px; }
+.ps.has-q .ps-x { display: inline-flex; }
+.ps-x:hover { color: var(--text); background: var(--surface-2); }
+.ps-kbd { font: inherit; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; line-height: 16px; }
+.ps.has-q .ps-kbd, .ps:focus-within .ps-kbd { display: none; }
+.ps-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 6px; }
+.ps-seg { border: 1px solid var(--line); background: var(--surface); color: var(--muted); padding: 5px 12px; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.ps-seg:hover { color: var(--text); }
+.ps-seg.on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+.ps-note { font-size: 13px; color: var(--muted); }
+.ps-esc { margin-left: auto; font-size: 12px; color: var(--muted); }
+.ps-esc kbd { font: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.ps-hide { display: none !important; }
+.ps-empty { margin: 16px 0; }
+@media (max-width: 899px) {
+  .ps { display: none; width: 100%; flex-basis: 100%; order: 9; margin: 6px 0 2px; height: 40px; }
+  .ps.open, .ps.has-q { display: inline-flex; }
+  .ps:focus-within { width: 100%; }
+  .ps.open .ps-x { display: inline-flex; }
+  .ps-kbd, .ps-esc { display: none; }
+}
 
 /* Dailies (js/dailies.js): a checkbox that starts fresh each day; have-to and should */
 .dly-box { flex: none; width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--muted); background: transparent; color: transparent; font-size: 14px; line-height: 1; cursor: pointer; padding: 0; }

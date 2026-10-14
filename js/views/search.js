@@ -27,9 +27,10 @@ function snippet(text, terms, width = 140) {
 }
 const resultRow = (href, icon, title, text, terms, tail = '') => `<a class="group-row sr-row" href="${href}"><span class="group-main"><span>${icon} ${marked(title, terms)}${tail}</span>${text && snippet(text, terms) ? `<span class="hint sr-snip">${snippet(text, terms)}</span>` : ''}</span></a>`;
 
-function searchResultsHtml(q) {
+// Everything that matches, by kind (null with nothing typed). The page search (js/page-search.js) counts these.
+function collect(q) {
   const terms = searchTerms(q);
-  if (!terms.length) return '<p class="empty">Search everything: actions, projects, the Slipbox, reference, events, people, places, checklists, areas and goals.</p>';
+  if (!terms.length) return null;
   const open = db.tasks.filter((t) => isOpen(t) && matchesAll(taskHaystack(t), terms)).sort(taskSort);
   const projects = db.projects.filter((p) => matchesAll(p.name + ' ' + p.notes, terms));
   const folders = db.folders.filter((f) => matchesAll(f.name, terms));
@@ -44,6 +45,17 @@ function searchResultsHtml(q) {
   const checklists = live(db.checklists).filter((c) => matchesAll(`${c.name} ${(c.items || []).map((i) => i.text).join(' ')}`, terms));
   const areas = live(db.areas).filter((a) => matchesAll(`${a.name} ${a.standards || ''}`, terms));
   const goals = (db.goals || []).filter((g) => matchesAll(`${g.title} ${g.why || ''}`, terms));
+  return { terms, open, projects, folders, tags, closed, notes, refs, events, people, places, checklists, areas, goals };
+}
+export function searchCount(q) {
+  const c = collect(q);
+  return c ? ['open', 'projects', 'folders', 'tags', 'closed', 'notes', 'refs', 'events', 'people', 'places', 'checklists', 'areas', 'goals'].reduce((n, k) => n + c[k].length, 0) : 0;
+}
+
+export function searchResultsHtml(q) {
+  const c = collect(q);
+  if (!c) return '<p class="empty">Search everything: actions, projects, the Slipbox, reference, events, people, places, checklists, areas and goals.</p>';
+  const { terms, open, projects, folders, tags, closed, notes, refs, events, people, places, checklists, areas, goals } = c;
   let html = '';
   if (projects.length || folders.length || tags.length || people.length || places.length || checklists.length || areas.length || goals.length) {
     html += `<div class="tally">${[
@@ -65,8 +77,9 @@ function searchResultsHtml(q) {
   return html || '<p class="empty">No matches.</p>';
 }
 
-// Completed/dropped items aren't all loaded locally, so ask the server.
-async function searchServer(q) {
+// Completed/dropped items aren't all loaded locally, so ask the server. onDone draws the caller's results;
+// without one the Search page's own box is drawn.
+export async function searchServer(q, onDone = null) {
   const seq = ++searchSeq;
   const terms = searchTerms(q).map((w) => w.replace(/[,()*%\\]/g, '')).filter(Boolean);
   if (!terms.length) { app.searchExtra = []; return; }
@@ -84,8 +97,9 @@ async function searchServer(q) {
   const { data, error } = await query;
   if (error || seq !== searchSeq) return;
   app.searchExtra = data;
+  if (onDone) { onDone(); return; }
   const box = $('#search-results');
-  if (box) box.innerHTML = searchResultsHtml($('#search-input').value);
+  if (box && $('#search-input')) box.innerHTML = searchResultsHtml($('#search-input').value);
 }
 
 export function viewSearch(q = '') {

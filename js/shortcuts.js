@@ -26,7 +26,8 @@ export const H = {};
 export const SHORTCUTS = [
   { key: 'n', group: 'Anywhere', label: 'Capture to the Inbox', run: () => H.capture() },
   { key: 'N', shift: true, group: 'Anywhere', label: 'New project', run: () => H.newProject() },
-  { key: '/', group: 'Anywhere', label: 'Search', run: () => { location.hash = '#search'; } },
+  { key: '/', group: 'Anywhere', label: 'Search: this page first, then everything', run: () => H.pageSearch() },
+  { key: 's', group: 'Anywhere', label: 'Search (the same)', run: () => H.pageSearch() },
   { key: 'F', shift: true, group: 'Anywhere', label: 'Focus (on the selected item’s project, or choose)', run: () => { const t = selectedTask(); if (t && t.project_id) H.focusOn(t.project_id); else H.focusPicker(); } },
   { key: 'U', shift: true, group: 'Anywhere', label: 'Unfocus (show everything)', run: () => H.unfocus() },
   { key: '?', shift: true, group: 'Anywhere', label: 'Show keyboard shortcuts', run: () => openShortcuts() },
