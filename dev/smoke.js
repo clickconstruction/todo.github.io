@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, pageSearch, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, pageSearch, askClaude, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -3342,6 +3342,46 @@ async function pullToRefresh(check) {
 }
 
 // Search covers everything: the Slipbox, reference (never the secret), events, people, places, checklists, areas, goals.
+// Ask Claude about a card (js/ask-claude.js): a prompt on the clipboard with where you are, the card and the ask.
+async function askClaude(check) {
+  const { app } = await import('/js/state.js');
+  const keyS = (k, opts = {}) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...opts }));
+  const A = await import('/js/ask-claude.js');
+  const now = new Date().toISOString();
+  const t = T();
+  t.tasks.push({ id: 'tAsk', user_id: 'u1', title: 'Get the lot wired before framing', in_inbox: true, project_id: null, parent_id: null, notes: 'Call Oncor first; the pole is theirs.', gain: 'Power at the lot by the 15th', gain_cost: 'Framing slips a month', flagged: true, due_at: null, planned_at: null, defer_at: null, completed_at: null, dropped_at: null, created_at: now, updated_at: now, sort: 99 });
+  t.tasks.push({ id: 'tAskStep', user_id: 'u1', title: 'Find the Oncor account number', in_inbox: false, project_id: null, parent_id: 'tAsk', notes: '', completed_at: null, dropped_at: null, created_at: now, updated_at: now, sort: 0 });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  let clipped = ''; const hadClip = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (x) => { clipped = x; } } });
+  await go('#inbox');
+  const text1 = A.askPrompt(t.tasks.find((x) => x.id === 'tAsk'), 'steps');
+  check('the prompt: the title, where I am, the card’s link and id, and its facts', /^Help me with this card in Todo Tooling: “Get the lot wired before framing”/.test(text1) && text1.includes('Where I am: my Inbox.') && text1.includes('#task/tAsk (id tAsk)') && text1.includes('In the Inbox, not yet clarified') && text1.includes('Flagged') && /Captured /.test(text1), text1.slice(0, 300));
+  check('…the gain, the cost, the notes and the open steps', text1.includes('What I gain: Power at the lot by the 15th') && text1.includes('If I don’t: Framing slips a month') && text1.includes('Notes:\nCall Oncor first; the pole is theirs.') && text1.includes('Steps:\n1. Find the Oncor account number'), text1);
+  check('…then the ask and how Claude can act', text1.includes('What I want: Suggest the concrete steps, first step first.') && text1.includes('get_task tAsk has the whole card') && text1.includes('change the card only when I say so'), text1.slice(-300));
+  check('"just the card" leaves the ask blank for me to write', /What I want:\n\nIf you have/.test(A.askPrompt(t.tasks.find((x) => x.id === 'tAsk'), 'card')));
+  app.selected = { type: 'task', id: 'tAsk' };
+  keyS('C', { shiftKey: true }); await wait(80);
+  check('C on a selected item opens the Ask Claude sheet with the usual asks', $('#sheet2').open && has('#sheet2', 'ask claude about “get the lot wired before framing”', 'clarify it with me', 'break it into steps', 'draft the message', 'think it through', 'just the card'), text('#sheet2'));
+  $('#sheet2 [data-ask="draft"]').click(); await wait(80);
+  check('a choice copies the prompt with that ask, says so, and closes', clipped.includes('What I want: Draft the email or message this needs') && has('#toast', 'copied for claude') && !$('#sheet2').open, clipped.slice(-200));
+  app.selected = null; app.openTask('tAsk'); await wait(120); // the panel on a wide screen, the editor on a phone
+  check('the card’s panel (or editor) has the button', !!$('#inspector [data-ask-claude], #sheet [data-ask-claude]'), `${$('#inspector').hidden} ${$('#sheet').open}`);
+  $('#inspector [data-ask-claude], #sheet [data-ask-claude]').click(); await wait(80);
+  check('…which opens the same sheet', $('#sheet2').open && has('#sheet2', 'ask claude about'));
+  $('#sheet2 [data-cancel]').click(); await wait(40);
+  if ($('#sheet').open) { $('#sheet').close(); await wait(30); }
+  await go('#clarify'); await wait(80);
+  check('the Clarify screen offers it on the item', !!$('#view [data-clarify="ask"]'));
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); app.selected = null; // as after a click on the page
+  keyS('C', { shiftKey: true }); await wait(80);
+  check('C there asks about the item being clarified, and says so', $('#sheet2').open && has('#sheet2', 'ask claude about'), text('#sheet2'));
+  $('#sheet2 [data-ask="clarify"]').click(); await wait(80);
+  check('…with where I am: clarifying', clipped.includes('Where I am: clarifying my Inbox.') && clipped.includes('What I want: Is it a next action, a project, someday, reference, or something to hand off?'), clipped.slice(0, 200));
+  if (hadClip) Object.defineProperty(navigator, 'clipboard', hadClip); else delete navigator.clipboard;
+  app.selected = null; await go('#inbox');
+}
+
 // Search on every page (js/page-search.js): the box in the title row filters the page first, and always
 // offers everything; with nothing on the page it switches to everything on its own, in place.
 async function pageSearch(check) {

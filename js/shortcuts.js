@@ -62,6 +62,7 @@ export const SHORTCUTS = [
   { key: 'D', shift: true, group: 'Selected item', label: 'Drop (with Undo)', run: needTask((t) => patch(t, { dropped_at: new Date().toISOString() }, `Dropped “${t.title}”`)) },
   { key: 'a', group: 'Selected item', label: 'Delegate (waiting on someone)', run: needTask((t) => H.delegate(t)) },
   { key: 't', group: 'Selected item', label: 'Tickle: back in the Inbox on a day', run: needTask((t) => H.tickle(t)) },
+  { key: 'C', shift: true, group: 'Selected item', label: 'Ask Claude about it (copies a prompt)', run: needTask((t) => H.askClaude(t)) },
   { key: 'b', group: 'Selected item', label: 'Break it down into steps', run: needTask((t) => H.breakdown(t)) },
   { key: ']', group: 'Selected item', label: 'Make it a step of the item above', run: needTask((t) => H.indent(t)) },
   { key: '[', group: 'Selected item', label: 'Move it up a level', run: needTask((t) => H.outdent(t)) },

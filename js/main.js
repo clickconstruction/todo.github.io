@@ -14,6 +14,7 @@ import { openProjectEditor, openFolderEditor } from './editors/project.js';
 import { isWide, select, clearSelection, moveSelection } from './inspector.js';
 import { onSearchInput } from './views/search.js';
 import { openPageSearch } from './page-search.js';
+import { openAskClaude } from './ask-claude.js';
 import { onDoneFilterChange } from './views/done.js';
 import { setFilter } from './filter.js';
 import { setTagStatus, insertProject } from './data.js';
@@ -352,6 +353,7 @@ document.addEventListener('keydown', (e) => {
 Object.assign(H, {
   capture: openQuickEntry,
   pageSearch: () => openPageSearch(),
+  askClaude: openAskClaude,
   newProject: () => openNewProject(null, () => openProjectEditor(null)),
   focusPicker: openFocusPicker,
   focusOn,

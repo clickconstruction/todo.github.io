@@ -922,10 +922,10 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .cl-q { margin: 4px 0 8px; color: var(--muted); font-size: 14px; font-weight: 600; }
 .cl-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 @media (max-width: 640px) { .cl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.cl-choice { position: relative; display: grid; gap: 2px; text-align: left; padding: 12px 12px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; min-height: 64px; }
-.cl-choice:hover { border-color: var(--accent); }
-.cl-choice b { font-size: 15px; }
-.cl-choice span { color: var(--muted); font-size: 12px; }
+.cl-choice, .ask-choice { position: relative; display: grid; gap: 2px; text-align: left; padding: 12px 12px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; min-height: 64px; }
+.cl-choice:hover, .ask-choice:hover { border-color: var(--accent); }
+.cl-choice b, .ask-choice b { font-size: 15px; }
+.cl-choice span, .ask-choice span { color: var(--muted); font-size: 12px; }
 .cl-choice kbd { position: absolute; top: 8px; right: 10px; font: 600 11px/1 ui-monospace, monospace; color: var(--muted); }
 .cl-choice.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
 .cl-choice.pri span, .cl-choice.pri kbd { color: rgba(255,255,255,.8); }
@@ -1588,6 +1588,10 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .ps-esc kbd { font: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .ps-hide { display: none !important; }
 .ps-empty { margin: 16px 0; }
+/* Ask Claude about a card (js/ask-claude.js) */
+.ask-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 14px; }
+.ask-claude textarea { width: 100%; font: 13px/1.4 ui-monospace, monospace; }
+@media (max-width: 520px) { .ask-list { grid-template-columns: 1fr; } }
 @media (max-width: 899px) {
   .ps { display: none; width: 100%; flex-basis: 100%; order: 9; margin: 6px 0 2px; height: 40px; }
   .ps.open, .ps.has-q { display: inline-flex; }

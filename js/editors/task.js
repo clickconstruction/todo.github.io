@@ -98,6 +98,7 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
 
 const secondaryButtons = (task) => `
   ${task && isOpen(task) ? '<button type="button" class="btn danger" data-drop>Drop</button><button type="button" class="btn" data-tickle-task title="Out of sight until a day, then back in the Inbox">Tickle…</button>' : ''}
+  ${task ? '<button type="button" class="btn" data-ask-claude title="Copy a prompt about this card for Claude: where you are, the card, and what you want">Ask Claude…</button>' : ''}
   ${task && isOpen(task) && !task.reading_state ? '<button type="button" class="btn" data-to-reading title="Something to read, watch or listen to: onto Reading &amp; watching (up next)">→ Reading &amp; watching</button>' : ''}
 `;
 
@@ -133,6 +134,8 @@ function wireTaskForm(form, t, task, onTagsChange, stepsOpts = {}) {
   if (rl && task) rl.onclick = async () => { const d = form.closest('dialog'); if (d) d.close(); const { toReadingList } = await import('../views/reading.js'); await toReadingList(task.id); };
   const tk = $('[data-tickle-task]', form);
   if (tk && task) tk.onclick = () => openTickle(byId(db.tasks, task.id) || task);
+  const ac = $('[data-ask-claude]', form);
+  if (ac && task) ac.onclick = async () => { const { openAskClaude } = await import('../ask-claude.js'); openAskClaude(byId(db.tasks, task.id) || task); };
   const skip = $('[data-skip-occurrence]', form);
   if (skip && task) skip.onclick = () => skipOccurrence(task, () => { const sheet = form.closest('dialog'); if (sheet) sheet.close(); });
   if (form.elements.status) {
