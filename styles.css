@@ -1802,9 +1802,9 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 
 /* Six: the Ivy Lee list. One list for the day; the first open card is Now, the rest wait under Then. */
 .view-head h1.six { color: var(--accent); }
-.six-seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; }
-.six-seg a { display: inline-flex; align-items: center; min-height: 36px; padding: 4px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--muted); text-decoration: none; }
-.six-seg a.on { background: var(--accent-soft); color: var(--accent); }
+.six-seg, .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; }
+.six-seg a, .seg a { display: inline-flex; align-items: center; min-height: 36px; padding: 4px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--muted); text-decoration: none; }
+.six-seg a.on, .seg a.on { background: var(--accent-soft); color: var(--accent); }
 .six-carried { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; background: var(--accent-soft); font-size: 14px; margin: 0 0 12px; }
 .six-carried span { flex: 1; }
 .six-now { margin: 10px 0 4px; padding: 18px 20px; border-radius: 14px; background: var(--surface); border: 1px solid var(--accent); }
@@ -2008,3 +2008,12 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .chip.on-proj { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px 5px 12px; font-size: 14px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); }
 .chip.on-proj button { background: none; border: none; color: inherit; font: inherit; font-size: 16px; cursor: pointer; padding: 0 2px; line-height: 1; }
 .pgroup-acts .link-btn, .people-acts .link-btn { white-space: nowrap; }
+
+/* Last added (js/views/added.js): when and how a card came in, an Inbox chip while it waits, the way-in tally. */
+.view-head h1.added { color: #06b6d4; }
+.meta-added, .meta-how { white-space: nowrap; }
+.chip.inbox { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.added-tally { margin: -6px 0 10px; }
+.tally .chip.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.added-project .group-sub { white-space: normal; }
+.added-cap { margin: 12px 0; }

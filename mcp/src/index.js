@@ -58,6 +58,7 @@ Templates: for repeated projects (a new job, a trip), list_templates then create
 Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); then settle_import walks the sort (status → recommend → apply, each with an Undo); undo_import takes a whole import back.
 Slipbox and reading: ideas to think with (not actions) go to the slipbox tool as fleeting notes (one idea, the user's words, [[links]]); things to read/watch/listen to go on the reading list (reading tool; clarify_item/full_review decisions slipbox and reading). When they finish something, offer to take notes. The Weekly Review step "notes" turns fleeting notes into permanent ones.
 Search: search finds words across actions (open and done), projects, the Slipbox, reference (never secret values), events, people, places, checklists, areas and goals; use it before asking the user where something is.
+What came in lately: list_added (days, source) lists what was added newest first, by day, with how each came in and where it is now; use it for "what did I capture this week", "what came in by email" and "what did you add". The app shows the same as Last added.
 Events: the user's own calendar entries (an airshow, a trip, an appointment) go in with the events tool (add; several at once with items; pass task to link them to the card they come from); they show in Forecast (by day) and the Events list, and reach their phone through the calendar feed. Not actions: a time block on an action is update_task schedule.
 Calendars: the other calendars they follow (Google, iCloud, Outlook) are private iCal links kept with the calendars tool (list, add, update, remove); their events show in Forecast. You can save a link the user gives you; links are never returned.
 Settings: the settings tool reads and changes what the app's Settings page holds (default times, the Today tag, review and morning reminders, the sidebar, their own mind sweep prompts); change one only when they ask. API tokens and approved email senders are managed in the app only.
@@ -1919,6 +1920,45 @@ const TOOLS = [
         byDay[dk] = (byDay[dk] || 0) + 1;
       });
       return { since, until, count: items.length, by_project: byProject, by_day: byDay, items };
+    },
+  },
+  {
+    name: 'list_added',
+    description: 'What came in lately (the app\'s Last added view): actions and projects added in the last N days, newest first, each with when it was added (added_at), how it came in (how: app, email, shortcut, share, claude, template, import) and where it is now (in_inbox, project, tags, waiting_on, tickler, status). Counts by source and by day, how many still wait in the Inbox, and the projects made. Answers "what did I capture this week?", "what came in by email?", "what did you add?". The next occurrences a repeat makes on its own are left out unless source is "repeat" or include_repeats is true.',
+    inputSchema: { type: 'object', properties: {
+      days: { type: 'integer', default: 7, description: '1 to 90: today and the days before it' },
+      source: { type: 'string', enum: ['app', 'email', 'shortcut', 'share', 'claude', 'template', 'import', 'repeat'], description: 'Only what came in this way' },
+      include_repeats: { type: 'boolean', default: false },
+      limit: { type: 'integer', default: 200, description: 'Items returned (the counts cover everything in the range)' },
+    } },
+    async run(api, a) {
+      const days = Math.min(90, Math.max(1, Math.round(Number(a.days) || 7)));
+      const sinceDay = localDate(new Date(Date.now() - (days - 1) * 86400000).toISOString(), api.tz);
+      const since = zonedToIso(sinceDay, 0, api.tz);
+      const [rows, projects, folders] = await Promise.all([
+        api.q(`tasks?${api.u}&created_at=gte.${since}&order=created_at.desc&limit=1000&select=*`),
+        api.q(`projects?${api.u}&created_at=gte.${since}&select=*`),
+        api.q(`folders?${api.u}&select=id,name`),
+      ]);
+      const WAY = { app: 'app', email: 'email', capture: 'shortcut', share: 'share', mcp: 'claude', template: 'template', repeat: 'repeat' };
+      const how = (t) => (t.import_id ? 'import' : WAY[t.source] || 'app');
+      const newest = (x, y) => (x.created_at < y.created_at ? 1 : x.created_at > y.created_at ? -1 : 0);
+      const kept = rows.filter((t) => (a.source ? how(t) === a.source : a.include_repeats || how(t) !== 'repeat')).sort(newest);
+      const top = kept.slice(0, Math.min(Number(a.limit) || 200, 500));
+      const items = await api.shape(top);
+      const bySource = {}; const byDay = {};
+      kept.forEach((t) => { const h = how(t); bySource[h] = (bySource[h] || 0) + 1; const d = localDate(t.created_at, api.tz); byDay[d] = (byDay[d] || 0) + 1; });
+      const repeats = rows.filter((t) => how(t) === 'repeat').length;
+      return {
+        since: sinceDay, until: localDate(new Date().toISOString(), api.tz), days, count: kept.length,
+        still_in_inbox: kept.filter((t) => t.in_inbox && !t.completed_at && !t.dropped_at).length,
+        done: kept.filter((t) => t.completed_at).length,
+        by_source: bySource, by_day: byDay,
+        repeats_left_out: !a.source && !a.include_repeats && repeats ? repeats : undefined,
+        items: items.map((it, i) => ({ ...it, added_at: localTime(top[i].created_at, api.tz), how: how(top[i]) })),
+        projects: projects.sort(newest).map((p) => ({ ...projectOut(api, p, folders), added_at: localTime(p.created_at, api.tz) })),
+        note: rows.length === 1000 ? 'The newest 1000 in this range; the counts cover those.' : undefined,
+      };
     },
   },
   {

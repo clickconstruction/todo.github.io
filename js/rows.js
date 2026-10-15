@@ -26,7 +26,7 @@ export const linkHtml = (url, cls) => (url ? `<a class="${cls}" href="${esc(url)
 // Meta icons are small and monochrome: the words carry the meaning, the icon only helps scanning.
 const ic = (e, sp = ' ') => `<i class="mi" aria-hidden="true">${e}</i>${sp}`;
 
-export function taskRow(t, { showProject = true, markNext = null, reorder = false, hierarchy = false, hasGroups = false, showPlace = true, depth = 0, extra = '' } = {}) {
+export function taskRow(t, { showProject = true, markNext = null, reorder = false, hierarchy = false, hasGroups = false, showPlace = true, depth = 0, extra = '', lead = '', readOnly = false } = {}) {
   const done = !!t.completed_at;
   const project = t.project_id && byId(db.projects, t.project_id);
   const tags = tagsFor(t.id);
@@ -85,6 +85,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
     prog = `<div class="step-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${p.total}" aria-valuenow="${p.done}" aria-label="${p.done} of ${p.total} steps done"><i style="width:${pct}%"></i></div>
       ${next ? `<div class="step-next"><span>Next:</span> ${esc(next.title)}</div>` : ''}`;
   }
+  if (lead) meta.unshift(lead); // a view's own first words (Last added: when and how it came in)
   const checkCls = ['check', done && 'done', t.flagged && 'flagged', isOverdue(t) && 'overdue'].filter(Boolean).join(' ');
   const held = isOpen(t) && onHoldTagFor(t);
   if (held && !tags.some((g) => g.id === held.id)) meta.push(`<span class="chip hold" title="On hold via ${esc(tagLabel(held))}">⏸ ${esc(tagLabel(held))}</span>`);
@@ -100,7 +101,7 @@ export function taskRow(t, { showProject = true, markNext = null, reorder = fals
     : hierarchy && hasGroups ? '<span class="disclosure-spacer"></span>' : '';
   const addSub = kids.length && isOpen(t) ? `<button class="icon-btn add-sub" data-add-sub="${t.id}" aria-label="Add a step to ${esc(t.title)}" title="Add a step">＋</button>` : '';
   return `<li class="row ${cls} ${kids.length ? 'group' : ''}" data-task="${t.id}" style="--depth:${hierarchy ? depth : 0}">
-    ${toggle}${dly ? `<button class="dly-box ${isTicked(t) ? 'on' : ''}" data-dly-tick="${t.id}" aria-pressed="${isTicked(t)}" aria-label="${isTicked(t) ? 'Un-tick' : 'Tick'} for today">✓</button>` : `<button class="${checkCls}" data-check="${t.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>`}
+    ${toggle}${dly ? `<button class="dly-box ${isTicked(t) ? 'on' : ''}" data-dly-tick="${t.id}" aria-pressed="${isTicked(t)}" aria-label="${isTicked(t) ? 'Un-tick' : 'Tick'} for today">✓</button>` : readOnly ? `<span class="${checkCls}" aria-hidden="true">✓</span>` : `<button class="${checkCls}" data-check="${t.id}" aria-label="${done ? 'Mark incomplete' : 'Complete'}">✓</button>`}
     <div class="row-main"><div class="row-title">${titleHtml(t.title)}</div>${t.gain && !done ? `<div class="row-gain">→ ${esc(t.gain)}${t.gain_by === 'agent' ? ' <span class="chip sug">Claude suggested</span>' : ''}</div>` : ''}${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}${prog}</div>
     <span class="row-signals">${firstUrl(t.title) ? '' : linkHtml(taskLink(t), 'sig-link')}${t.notes ? '<span class="sig-note" title="Has notes" aria-label="Has notes">📝</span>' : ''}
       ${isOpen(t) ? `<button class="flag-btn ${t.flagged ? 'on' : ''}" data-flag="${t.id}" aria-pressed="${!!t.flagged}" aria-label="${t.flagged ? 'Unflag' : 'Flag'}" title="${t.flagged ? 'Unflag' : 'Flag'}">⚑</button>` : ''}</span>

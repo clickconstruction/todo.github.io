@@ -231,7 +231,7 @@ assert(init.body.result.protocolVersion === '2025-06-18' && init.body.result.cap
 assert((await worker.fetch(new Request('https://mcp.todotooling.com/mcp', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }), env, ctx)).status === 202, 'notification -> 202');
 const list = await call('tools/list');
 const TOOL_NAMES = list.body.result.tools.map((x) => x.name);
-assert(list.body.result.tools.length === 81 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 81 tools, no internals leaked');
+assert(list.body.result.tools.length === 82 && list.body.result.tools.every(t => t.inputSchema && !t.run), 'tools/list: 82 tools, no internals leaked');
 const cap = await tool('capture', { title: 'Call GVEC about utilities' });
 assert(cap.in_inbox && cap.title === 'Call GVEC about utilities', 'capture lands in inbox');
 assert((await tool('list_inbox', {})).count === 1, 'list_inbox shows it');
@@ -2107,5 +2107,24 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(both.checklists && both.checklists[0].id === 'ckA' && !both.places && !both.areas, 'search: a checklist matches across its name and lines');
   ['places', 'checklists', 'areas', 'goals'].forEach((k) => { db[k] = db[k].filter((x) => !['plA', 'plB', 'plC', 'ckA', 'ckB', 'arA', 'goA'].includes(x.id)); });
   ['slipbox_notes', 'reference_items', 'events', 'people'].forEach((k) => { db[k] = db[k].filter((x) => !['snA', 'rfA', 'evA', 'ppA'].includes(x.id)); });
+}
+// list_added: what came in lately, newest first, by source; repeats and older ones left out unless asked.
+{
+  const dAgo = (n) => new Date(Date.now() - n * 86400000 - 60000).toISOString();
+  const laA = mk({ title: 'Came by email', in_inbox: true, source: 'email', created_at: dAgo(1) });
+  const laB = mk({ title: 'Claude filed this', in_inbox: false, project_id: db.projects[0].id, source: 'mcp', created_at: dAgo(2) });
+  const laC = mk({ title: 'A repeat made itself', in_inbox: false, source: 'repeat', created_at: dAgo(0) });
+  const laD = mk({ title: 'Captured three weeks ago', in_inbox: true, source: 'app', created_at: dAgo(20) });
+  db.projects.push({ id: 'laP', user_id: UID, name: 'Made this week', status: 'active', kind: 'parallel', folder_id: null, sort: 0, created_at: dAgo(3) });
+  const la = await tool('list_added', {});
+  const ids = la.items.map((x) => x.id);
+  assert(ids.includes(laA.id) && ids.includes(laB.id) && !ids.includes(laC.id) && !ids.includes(laD.id), 'list_added: this week, repeats and older ones left out');
+  assert(la.items.every((x, i) => !i || la.items[i - 1].created_at >= x.created_at) && la.items.find((x) => x.id === laA.id).how === 'email' && la.items.find((x) => x.id === laB.id).how === 'claude' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(la.items[0].added_at), 'list_added: newest first, each with how it came in and when');
+  assert(la.by_source.email >= 1 && la.by_source.claude >= 1 && la.repeats_left_out >= 1 && la.still_in_inbox >= 1 && Object.keys(la.by_day).length >= 2 && la.projects.some((p) => p.id === 'laP' && p.added_at), 'list_added: counts by source and day, the Inbox, and the projects made');
+  const laE = await tool('list_added', { source: 'email' });
+  assert(laE.count >= 1 && laE.items.every((x) => x.how === 'email') && laE.items.some((x) => x.id === laA.id) && !laE.repeats_left_out, 'list_added: one way in');
+  const la30 = await tool('list_added', { days: 30, include_repeats: true, limit: 500 });
+  assert(la30.items.some((x) => x.id === laD.id) && la30.items.some((x) => x.id === laC.id) && la30.by_source.repeat >= 1, 'list_added: 30 days, repeats included');
+  db.tasks = db.tasks.filter((t) => ![laA.id, laB.id, laC.id, laD.id].includes(t.id)); db.projects = db.projects.filter((p) => p.id !== 'laP');
 }
 console.log('ALL PASSED');

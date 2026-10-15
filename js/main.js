@@ -80,7 +80,7 @@ const inspectOrEdit = (id) => {
   if (t) openEditor(t);
 };
 app.openTask = (id) => inspectOrEdit(id);
-const findTask = (id) => byId(db.tasks, id) || byId(app.searchExtra, id) || byId(db.eventTasks || [], id) || (app.doneCache && byId(app.doneCache.rows, id));
+const findTask = (id) => byId(db.tasks, id) || byId(app.searchExtra, id) || byId(db.eventTasks || [], id) || (app.doneCache && byId(app.doneCache.rows, id)) || (app.addedCache && app.addedCache.rows && byId(app.addedCache.rows, id));
 
 const ACTIONS = {
   'customize-sidebar': () => openCustomize(),

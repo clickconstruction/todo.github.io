@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, pageSearch, askClaude, clarifyTwoCol, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, pageSearch, lastAdded, askClaude, clarifyTwoCol, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -63,6 +63,42 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// Last added: what came in lately, newest first by day, with how it came in and where it is now.
+async function lastAdded(check) {
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const t = T();
+  const ago = (days, hour) => { const d = new Date(); d.setDate(d.getDate() - days); d.setHours(hour, 0, 0, 0); return d.toISOString(); };
+  const base = { ...t.tasks[0], project_id: null, parent_id: null, in_inbox: true, completed_at: null, dropped_at: null, flagged: false, due_at: null, planned_at: null, defer_at: null, source: 'app', gain: '', notes: '', tickler: false, waiting_on: null, agenda_for: null, repeat_rule: null, daily: null };
+  t.tasks.push({ ...base, id: 'laA', title: 'Came by email this morning', source: 'email', created_at: ago(0, 9) });
+  t.tasks.push({ ...base, id: 'laB', title: 'Claude filed this yesterday', in_inbox: false, project_id: 'p1', source: 'mcp', created_at: ago(1, 15) });
+  t.tasks.push({ ...base, id: 'laF', title: 'A step made with its card', in_inbox: false, project_id: 'p1', parent_id: 'laB', created_at: ago(1, 15) });
+  t.tasks.push({ ...base, id: 'laC', title: 'A repeat the app made', in_inbox: false, source: 'repeat', created_at: ago(0, 8) });
+  t.tasks.push({ ...base, id: 'laD', title: 'Done the day it came', in_inbox: false, completed_at: ago(3, 12), created_at: ago(3, 11) }); // closed before the session: from the server
+  t.tasks.push({ ...base, id: 'laE', title: 'Captured three weeks ago', created_at: ago(20, 10) });
+  t.projects.push({ ...t.projects[0], id: 'laP', name: 'A project made today', status: 'active', created_at: ago(0, 7) });
+  t.tasks.push({ ...base, id: 'laG', title: 'An action made with the project', in_inbox: false, project_id: 'laP', created_at: ago(0, 7) });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const { app } = await import('/js/state.js'); app.addedCache = null;
+  await go('#added'); await until(() => has(undefined, 'done the day it came'));
+  const v = text('#view');
+  check('Last added lists what came in, newest first, under day headings that count the cards', has('#view', 'today · 3', 'yesterday · 2') && v.indexOf('today ·') < v.indexOf('came by email') && v.indexOf('came by email') < v.indexOf('yesterday ·') && v.indexOf('yesterday ·') < v.indexOf('claude filed this') && v.indexOf('claude filed this') < v.indexOf('done the day it came'), v.slice(0, 300));
+  check('a row says how it came in, and an Inbox chip marks what is not clarified yet', has('#view [data-task="laA"] .row-meta', 'via email', 'inbox') && has('#view [data-task="laB"] .meta-how', 'claude') && !has('#view [data-task="laB"] .row-meta', 'inbox'));
+  check('a step made with its card rides on the card, whose row counts it', !$('#view [data-task="laF"]') && has('#view [data-task="laB"]', '0 of 1 done'));
+  check('an action made with its project rides on the project line', !$('#view [data-task="laG"]') && has('#view .added-project[href="#project/laP"]', 'new project, with 1 action'));
+  check('a card done before the session comes from the server, struck through', !!$('#view li.row[data-task="laD"]') && $('#view li.row[data-task="laD"]').classList.contains('completed'));
+  check('the count line says how many wait in the Inbox, with a link to clarify them', has('#view .view-sub', 'still in the inbox', '1 done') && !!$('#view .view-sub a[href="#clarify"]'), text('#view .view-sub'));
+  check('repeats stay out unless asked for: the tally offers them', !has('#view', 'a repeat the app made') && has('#view .added-tally', 'repeats · 1', 'email · 1', 'claude · 1'), text('#view .added-tally'));
+  await go('#added/7/repeat'); await wait(60);
+  check('…and the Repeats chip shows only them', has('#view', 'a repeat the app made') && !$('#view [data-task="laA"]') && has('#view .view-sub', 'as repeats'));
+  await go('#added/30'); await until(() => has(undefined, 'captured three weeks ago'));
+  check('30 days reaches further back', has('#view', 'captured three weeks ago') && $('#view .seg a.on').textContent.trim() === '30 days');
+  await go('#added'); await until(() => $('#view li.row[data-task="laD"]'));
+  $('#view li.row[data-task="laD"] .row-title').click(); await wait(120);
+  check('a row from the server opens like any other', $('#sheet').open && ($('#sheet [name=title]') || {}).value === 'Done the day it came');
+  if ($('#sheet').open) $('#sheet').close();
+  check('the sidebar lists it under Lists with a quiet count of what came in today', !!$('.nav-group[data-group="lists"] [data-nav="added"]') && $('#badge-added').textContent === '2 today', $('#badge-added').textContent);
+}
 
 // Steps type (parallel / in order / single actions + complete with last step) and "Waits for" links.
 async function stepsAndWaits(check) {
