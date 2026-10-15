@@ -1,12 +1,12 @@
 // Todo Tooling entry point: event wiring, auth, service worker.
 import { tickDaily } from './dailies.js';
-import { sb, db, app, $, byId, isOpen, toggleCollapsed, toast, tagLabel } from './state.js';
+import { sb, db, app, $, byId, isOpen, toggleCollapsed, toast, tagLabel, sortedTags } from './state.js';
 import { render } from './router.js';
 import { loadAll, flushOutbox, capture, setCompleted, createTag, updateProject, updateTask, moveTask, bulkUpdate, markReviewed, indentTask, outdentTask, ensureTag } from './data.js';
 import { openBreakdown } from './editors/breakdown.js';
 import { descendants } from './tree.js';
 import { reviewQueue, remainingIds, reviewDueCount } from './views/review.js';
-import { startOfToday } from './dates.js';
+import { startOfToday, fmtDate } from './dates.js';
 import { forecastData } from './views/forecast.js';
 import { HOURS, atDefaultTime } from './dates.js';
 import { openEditor, openQuickEntry } from './editors/task.js';
@@ -17,9 +17,11 @@ import { openPageSearch } from './page-search.js';
 import { openAskClaude } from './ask-claude.js';
 import { onDoneFilterChange } from './views/done.js';
 import { setFilter } from './filter.js';
-import { setTagStatus, insertProject } from './data.js';
+import { setTagStatus, insertProject, projectNamed, setLinks } from './data.js';
+import { parseCapture, dayLabel } from './capture-grammar.js';
 // A project picker can make the project typed into it ("+ New project").
-registerCreator('project', async (name) => { const p = await insertProject(name); return p ? { value: p.id, label: p.name } : null; });
+registerCreator('project', async (name) => { const p = await insertProject(name); return p ? { value: p.id, label: p.name } : null; },
+  (name) => { const { completed } = projectNamed(name); return completed ? `↻ Reopen “${completed.name}” (completed${completed.completed_at ? ` ${fmtDate(completed.completed_at)}` : ''})` : null; });
 registerCreator('tag', async (label) => { const g = await ensureTag(label); return g ? { value: g.id, label: tagLabel(g) } : null; });
 registerCreator('people-group', async (name) => { const g = await savePeopleGroup(null, { name: String(name).trim().slice(0, 60) }); return g ? { value: g.id, label: g.name } : null; });
 import { openNewProject, openNewTemplate, openSaveAsTemplate } from './views/templates.js';
@@ -280,7 +282,7 @@ view.addEventListener('submit', async (e) => {
   const title = input.value;
   input.value = '';
   const extra = form.dataset.project ? { project_id: form.dataset.project, in_inbox: false } : {};
-  await capture(title, extra);
+  await captureLine(title, extra);
   const again = $('[data-capture] input');
   if (again) again.focus();
 });
@@ -340,6 +342,35 @@ $('#more-tab').onclick = () => {
   sheet.showModal();
 };
 window.addEventListener('hashchange', render);
+// A capture box reads its line as the quick entry does (js/capture-grammar.js): #project, @tag, due fri, plan fri,
+// "→ gain"; not a bare day word, since there are no chips here to show what was read. A #name no project has stays in the title, and the toast offers to make that project (or to
+// reopen a completed one of that name); the card then moves there with a clean title.
+const liveProjects = () => db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold');
+const readLine = (line) => parseCapture(line, { projects: liveProjects(), tags: sortedTags().map((g) => ({ id: g.id, name: g.name, label: tagLabel(g) })), bareDay: false });
+async function captureLine(line, extra = {}) {
+  const a = readLine(line);
+  if (!a.title) return null;
+  const at = (day, key) => atDefaultTime(new Date(`${day}T12:00:00`), key).toISOString();
+  const row = await capture(a.title, { ...extra, ...(a.gain ? { gain: a.gain } : {}), ...(!extra.project_id && a.project ? { project_id: a.project.id, in_inbox: false } : {}), ...(a.due ? { due_at: at(a.due, 'due_at') } : {}), ...(a.planned ? { planned_at: at(a.planned, 'planned_at') } : {}) });
+  if (!row) return null;
+  if (a.tags.length) { await setLinks('task_tags', 'taskTags', 'task_id', row.id, a.tags.map((x) => x.id)); app.render(); }
+  const project = row.project_id && byId(db.projects, row.project_id);
+  const when = [a.due && `due ${dayLabel(a.due)}`, a.planned && `planned ${dayLabel(a.planned)}`].filter(Boolean).join(' · ');
+  const where = project ? `Captured to ${project.name}` : 'Captured to Inbox';
+  if (a.unknownProject && !project) {
+    const name = a.unknownProject;
+    const { completed } = projectNamed(name);
+    toast(`${where} · no project named “${name}” yet`, { label: completed ? `Reopen ${completed.name}` : `Make ${name}`, run: async () => {
+      const p = await insertProject(name);
+      if (!p) return;
+      const again = readLine(line); // the name is a project now, so it leaves the title
+      await updateTask(byId(db.tasks, row.id) || row, { project_id: p.id, in_inbox: false, title: again.title || row.title });
+      toast(`Moved to ${p.name}`);
+    } });
+  } else if (a.chips.length) toast(`${where}${when ? ` · ${when}` : ''}`);
+  return row;
+}
+
 document.addEventListener('keydown', (e) => {
   if (clarifyKey(e) || sweepKey(e) || (!$('#sheet').open && (settleKey(e) || fullReviewKey(e) || sixKey(e)))) return;
   if (!e.metaKey && !e.ctrlKey && !$('#sheet').open && !typing() && location.hash.startsWith('#review') && ['j', 'k', 'm'].includes(e.key)) {

@@ -5,11 +5,13 @@
 // Opt out with data-no-search.
 // A select with data-create="project" can also make what is typed: when the query matches no option by
 // name, the list ends with "+ New project “…”", and picking it calls the creator registered for that kind
-// (registerCreator), which returns { value, label }; the new option is added and picked.
+// (registerCreator), which returns { value, label }; the new option is added and picked. A creator can also
+// name the row (its third argument, a function of the typed name): a completed project of that name gets
+// "↻ Reopen …" instead of "+ New project".
 const MIN_OPTIONS = 12;
 let pop = null, current = null, items = [], active = -1;
-const creators = {};
-export const registerCreator = (kind, fn) => { creators[kind] = fn; };
+const creators = {}; const rowLabels = {};
+export const registerCreator = (kind, fn, rowLabel = null) => { creators[kind] = fn; if (rowLabel) rowLabels[kind] = rowLabel; };
 const creatorOf = (sel) => (sel && sel.dataset.create && creators[sel.dataset.create]) || null;
 
 const qualifies = (el) => el && el.tagName === 'SELECT' && !el.multiple && !el.disabled && !el.hasAttribute('data-no-search')
@@ -50,6 +52,7 @@ function draw(q) {
   const name = q.trim();
   const make = creatorOf(current) && name && !entries(current).some((e) => e.o && e.o.textContent.trim().toLowerCase() === name.toLowerCase()) ? { make: name } : null;
   if (make) items.push(make);
+  const rowText = make ? ((rowLabels[current.dataset.create] && rowLabels[current.dataset.create](name)) || `+ New ${current.dataset.create} “${name}”`) : '';
   const val = current.value;
   active = Math.max(0, items.findIndex((e) => e.o && e.o.value === val && words.length === 0));
   if (words.length) active = items.length ? 0 : -1;
@@ -57,7 +60,7 @@ function draw(q) {
     ? `<li class="ss-group" role="presentation">${escHtml(e.group)}</li>`
     : `<li class="ss-opt${e.o.value === val ? ' ss-cur' : ''}" role="option" id="ss-o${items.indexOf(e)}" data-i="${items.indexOf(e)}" aria-selected="${e.o.value === val}">${escHtml(e.o.textContent.trim() || '—')}${words.length && e.groupLabel ? `<small>${escHtml(e.groupLabel)}</small>` : ''}</li>`).join('')
     : make ? '' : '<li class="ss-empty">No matches</li>')
-    + (make ? `<li class="ss-opt ss-new" role="option" id="ss-o${items.indexOf(make)}" data-i="${items.indexOf(make)}" aria-selected="false">+ New ${escHtml(current.dataset.create)} “${escHtml(name)}”</li>` : '');
+    + (make ? `<li class="ss-opt ss-new" role="option" id="ss-o${items.indexOf(make)}" data-i="${items.indexOf(make)}" aria-selected="false">${escHtml(rowText)}</li>` : '');
   mark();
 }
 

@@ -433,13 +433,31 @@ export async function insertFolder(name) {
   return row;
 }
 
-// A project by name, for the "+ New project" row of a project picker: the active one of that name if
-// there is one, else a plain active parallel project.
+// The projects of a name, for the pickers and the capture line: the live one (active or on hold) if any,
+// and the latest completed one. Pickers and the capture line only see live projects, so a completed
+// namesake is what makes "+ New project" into "Reopen".
+export function projectNamed(name) {
+  const key = (name || '').trim().toLowerCase();
+  const same = key ? db.projects.filter((p) => p.name.trim().toLowerCase() === key) : [];
+  return { live: same.find((p) => p.status === 'active' || p.status === 'on_hold') || null,
+    completed: same.filter((p) => p.status === 'completed').sort((a, b) => String(b.completed_at || '').localeCompare(String(a.completed_at || '')))[0] || null };
+}
+
+// A project by name, for the "+ New project" row of a project picker and the capture line's #name: the live
+// one of that name if there is one; else a completed one is reopened (its history stays with it), so a card
+// never lands in a project the Projects page hides; a dropped one is left alone and a plain active parallel
+// project is made.
 export async function insertProject(name) {
   name = (name || '').trim();
   if (!name) return null;
-  const existing = db.projects.find((p) => p.status !== 'dropped' && p.name.toLowerCase() === name.toLowerCase());
-  if (existing) return existing;
+  const { live, completed } = projectNamed(name);
+  if (live) return live;
+  if (completed) {
+    const [row] = await run(sb.from('projects').update({ status: 'active', completed_at: null }).eq('id', completed.id).select());
+    syncRow('projects', completed, row);
+    toast(`Project “${row.name}” reopened: it was completed`);
+    return row;
+  }
   const [row] = await run(sb.from('projects').insert({ name: name.slice(0, 200), status: 'active', kind: 'parallel', sort: db.projects.length }).select());
   db.projects.push(row);
   toast(`Project “${row.name}” added`);

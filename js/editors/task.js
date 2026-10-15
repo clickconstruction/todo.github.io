@@ -6,7 +6,7 @@ import { openSearch } from '../select-search.js';
 import { atDefaultTime } from '../dates.js';
 import { fromDateInput, fromDateTimeInput, HOURS, quickDate } from '../dates.js';
 import { dateField, estimateField, dateTimeField, stampsHtml, wireQuickButtons } from '../components.js';
-import { saveTask, capture, setLinks } from '../data.js';
+import { saveTask, capture, setLinks, insertProject, projectNamed } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from './tagPicker.js';
 import { locationFieldHtml, wireLocationField } from './place.js';
 import { placeFor } from '../places.js';
@@ -295,7 +295,7 @@ export function openQuickEntry(opts = {}) {
   const parsed = () => parseCapture(titleEl.value, { projects: db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold'), tags: sortedTags().map((g) => ({ id: g.id, name: g.name, label: tagLabel(g) })), keep: pick.drop });
   const applied = () => {
     const r = parsed();
-    return { title: r.title, gain: r.gain, chips: r.chips,
+    return { title: r.title, gain: r.gain, chips: r.chips, unknownProject: r.unknownProject,
       project_id: pick.project_id || (!pick.drop.has('project') && r.project ? r.project.id : null),
       tag_ids: [...new Set([...pick.tag_ids, ...(pick.drop.has('tag') ? [] : r.tags.map((t) => t.id))])],
       due: pick.due || (pick.drop.has('due') ? null : r.due), planned: pick.planned || (pick.drop.has('planned') ? null : r.planned) };
@@ -308,13 +308,16 @@ export function openQuickEntry(opts = {}) {
     if (a.due) chips.push(`<button type="button" class="qe-chip on red" data-qe-drop="due" title="Take off">due ${esc(dayLabel(a.due))} ×</button>`);
     if (a.planned) chips.push(`<button type="button" class="qe-chip on" data-qe-drop="planned" title="Take off">planned ${esc(dayLabel(a.planned))} ×</button>`);
     if (!a.project_id) recentIds().map((id) => byId(db.projects, id)).filter((p) => p && p.status === 'active').slice(0, 3).forEach((p) => chips.push(`<button type="button" class="qe-chip" data-qe-project="${p.id}">＋ ${esc(p.name)}</button>`));
+    // A #name no project has: offer to make it (or to reopen a completed one of that name); the card goes in it.
+    if (!a.project_id && a.unknownProject) { const { completed } = projectNamed(a.unknownProject); chips.push(`<button type="button" class="qe-chip qe-new" data-qe-make="${esc(a.unknownProject)}" title="${completed ? 'Reopen the completed project of that name and file the card in it' : 'Make this project and file the card in it'}">${completed ? '↻ Reopen' : '＋ New project'} “${esc(a.unknownProject)}”</button>`); }
     if (!chips.length) chips.push('<span class="hint">#project · @tag · “due fri” · a day word</span>');
     $('[data-qe-chips]', form).innerHTML = chips.join('');
   };
   titleEl.addEventListener('input', () => { if (titleEl.value.endsWith('#')) openSearch(selEl); drawChips(); });
   selEl.addEventListener('change', () => { if (selEl.value) { pick.project_id = selEl.value; pick.drop.delete('project'); titleEl.value = `${titleEl.value.replace(/#$/, '').trimEnd()} `.replace(/^ $/, ''); } selEl.value = ''; drawChips(); setTimeout(() => titleEl.focus(), 0); });
   $('[data-qe-chips]', form).addEventListener('click', (e) => {
-    const off = e.target.closest('[data-qe-drop]'); const on = e.target.closest('[data-qe-project]');
+    const off = e.target.closest('[data-qe-drop]'); const on = e.target.closest('[data-qe-project]'); const mk = e.target.closest('[data-qe-make]');
+    if (mk) { insertProject(mk.dataset.qeMake).then((p) => { if (p) { pick.project_id = p.id; pick.drop.delete('project'); } drawChips(); titleEl.focus(); }); return; }
     if (off) {
       const k = off.dataset.qeDrop;
       if (k === 'project') { if (pick.project_id) pick.project_id = null; else pick.drop.add('project'); }

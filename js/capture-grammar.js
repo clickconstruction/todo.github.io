@@ -66,17 +66,28 @@ function marked(text, mark, items, namesOf) {
   return found.sort((a, b) => a.start - b.start);
 }
 
-// The line read: { title, gain, project, tags, due, planned, chips }. `keep` names kinds whose words stay
-// in the title (a chip the user took off): 'project', 'tag', 'due', 'planned'.
-export function parseCapture(line, { projects = [], tags = [], today = new Date(), keep = new Set() } = {}) {
+// The line read: { title, gain, project, tags, due, planned, chips, unknownProject }. unknownProject is a
+// "#word" no project has (it stays in the title; the app offers to make that project). `keep` names kinds whose words stay
+// in the title (a chip the user took off): 'project', 'tag', 'due', 'planned'. bareDay false leaves a lone day word
+// in the title (a box with no chips to show what it read: "yes to Thursday" stays as typed).
+export function parseCapture(line, { projects = [], tags = [], today = new Date(), keep = new Set(), bareDay = true } = {}) {
   let text = String(line || '');
   let gain = '';
   const g = text.match(/^(.*?\S)\s*(?:→|->|::)\s*(\S.*)$/);
   if (g) { text = g[1]; gain = g[2].trim().slice(0, 500); }
-  const out = { gain, project: null, tags: [], due: null, planned: null, chips: [] };
+  const out = { gain, project: null, tags: [], due: null, planned: null, chips: [], unknownProject: null };
   const cuts = []; // [start, end) spans to take out of the title
   const projectHits = marked(text, '#', projects, (p) => [p.name]);
   if (projectHits.length) { const h = projectHits[0]; out.project = h.item; out.chips.push({ kind: 'project', id: h.item.id, label: h.name }); if (!keep.has('project')) cuts.push([h.start, h.end]); }
+  // A "#word" no project has (with a letter in it; a link's #fragment has no space before it): offered, never made on its own.
+  const loneP = /(^|\s)#([^\s#@]+)/g;
+  let u;
+  while (!out.unknownProject && (u = loneP.exec(text))) {
+    const start = u.index + u[1].length; const end = u.index + u[0].length;
+    if (projectHits.some((h) => start < h.end && end > h.start)) continue;
+    const word = u[2].replace(/[.,;:!?)]+$/, '');
+    if (/[a-z]/i.test(word)) out.unknownProject = word;
+  }
   marked(text, '@', tags, (t) => [t.label, t.name]).forEach((h) => {
     if (out.tags.some((x) => x.id === h.item.id)) return;
     out.tags.push(h.item); out.chips.push({ kind: 'tag', id: h.item.id, label: h.name });
@@ -91,7 +102,7 @@ export function parseCapture(line, { projects = [], tags = [], today = new Date(
     out.chips.push({ kind, day: out[kind], label: `${kind} ${dayLabel(out[kind], today)}` });
     if (!keep.has(kind)) cuts.push([m.index + m[1].length, m.index + m[0].length]);
   }
-  if (!out.planned && !out.due) {
+  if (bareDay && !out.planned && !out.due) {
     const bare = new RegExp(`(^|\\s)(${DAYWORD})${AFTER}`, 'i').exec(text);
     if (bare) {
       out.planned = dayFromWord(bare[2], today);

@@ -53,7 +53,7 @@ Daily review: in the morning call daily_review (briefing), help the user pick up
 Six (the Ivy Lee list): the six tool keeps up to six cards per day in order, today and tomorrow (the same list as the daily review's focus); the first open one is what to do now. Adding plans the card for that day; what is left of a day comes over to the top of the next (carry).
 Time blocks: update_task schedule ("YYYY-MM-DDTHH:MM") puts an action on their calendar (Forecast and their calendar feed); check forecast for free time first. Checklists (routines run again and again): list_checklists, save_checklist (attach_to an action), run_checklist to tick through one with them.
 Horizons of Focus: list_horizons shows purpose, vision, goals and areas (with balance warnings); save_area, save_goal, save_horizon edit them; projects take outcome ("done looks like"), area and goal. To plan a project with the user (Natural Planning Model), use plan_project: why, done looks like, brainstorm, organize, next actions; show the preview, then create. For "what should I do now?", call what_now (where, minutes, energy) and explain its reasons.
-Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped.
+Folders and projects are never deleted: archive a folder with update_folder (only possible once it has no active/on-hold projects) and archive a project by setting its status to completed or dropped. A project name means the live one of that name first; a card never goes into a completed or dropped project (capture and update_task refuse and say to reopen it with update_project).
 Templates: for repeated projects (a new job, a trip), list_templates then create_from_template with the blanks' values; save_as_template turns a project into one.
 Moving from OmniFocus: import_omnifocus previews first (confirm: true to save); then settle_import walks the sort (status → recommend → apply, each with an Undo); undo_import takes a whole import back.
 Slipbox and reading: ideas to think with (not actions) go to the slipbox tool as fleeting notes (one idea, the user's words, [[links]]); things to read/watch/listen to go on the reading list (reading tool; clarify_item/full_review decisions slipbox and reading). When they finish something, offer to take notes. The Weekly Review step "notes" turns fleeting notes into permanent ones.
@@ -699,9 +699,19 @@ class Api {
   async resolveProject(ref) {
     if (ref === null || ref === '') return null;
     const { projects } = await this.lookups();
-    const p = projects.find((x) => x.id === ref) || projects.find((x) => x.name.toLowerCase() === String(ref).toLowerCase());
+    const same = projects.filter((x) => x.name.toLowerCase() === String(ref).toLowerCase());
+    const p = projects.find((x) => x.id === ref) || same.find((x) => x.status === 'active' || x.status === 'on_hold') || same[0]; // a live one before a closed namesake
     if (!p) throw new Error(`No project named "${ref}". Use list_projects or create_project first.`);
     return p.id;
+  }
+
+  // For a card going into a project: never a completed or dropped one, which the app's Projects page hides.
+  async resolveLiveProject(ref) {
+    const id = await this.resolveProject(ref);
+    if (id === null) return null;
+    const p = (await this.lookups()).projects.find((x) => x.id === id);
+    if (p && (p.status === 'completed' || p.status === 'dropped')) throw new Error(`Project "${p.name}" is ${p.status}. Reopen it with update_project (status "active"), or make another with create_project.`);
+    return id;
   }
 
   // Folder by name (case-insensitive), created if missing. null/'' means no folder.
@@ -1073,7 +1083,7 @@ const TOOLS = [
       if (rest.gain) { body.gain = String(rest.gain).trim().slice(0, 500); body.gain_by = rest.gain_suggested ? 'agent' : null; }
       if (rest.gain_cost) body.gain_cost = String(rest.gain_cost).trim().slice(0, 500);
       if (rest.project) {
-        body.project_id = await api.resolveProject(rest.project);
+        body.project_id = await api.resolveLiveProject(rest.project);
         const sib = await api.q(`tasks?${api.u}&project_id=eq.${body.project_id}&parent_id=is.null&select=sort&order=sort.desc&limit=1`);
         body.sort = sib.length ? (sib[0].sort || 0) + 1 : 0;
       }
@@ -1462,7 +1472,7 @@ const TOOLS = [
       if (a.due !== undefined) patch.due_at = zonedToIso(a.due, api.hours.due, api.tz);
       if (a.planned !== undefined) patch.planned_at = zonedToIso(a.planned, api.hours.planned, api.tz);
       if (a.defer !== undefined) patch.defer_at = zonedToIso(a.defer, api.hours.defer, api.tz);
-      if (a.project !== undefined) patch.project_id = await api.resolveProject(a.project);
+      if (a.project !== undefined) patch.project_id = await api.resolveLiveProject(a.project);
       if (a.completion_note !== undefined) patch.completion_note = String(a.completion_note).trim();
       if (a.gain !== undefined) { patch.gain = String(a.gain || '').trim().slice(0, 500); patch.gain_by = a.gain_suggested ? 'agent' : null; }
       if (a.gain_cost !== undefined) patch.gain_cost = String(a.gain_cost || '').trim().slice(0, 500);

@@ -1784,6 +1784,7 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const branch = await tool('tech_tree', { destination: 'Tree significant assets' });
   assert(branch.nodes.length === 4 && branch.destinations[0].of === 4 && branch.destinations[0].next.join() === 'Tree Estate Feeder (phase 1)' && !branch.nodes.some((x) => /Animal/.test(x.title)), 'get destination: its branch, and what is next');
 
+  const card = await tool('capture', { title: 'Find a tree title attorney', project: p1.id }); // while phase 1 is open: a card never goes into a completed project
   db.projects.find((x) => x.id === p1.id).status = 'completed';
   const g3 = await tool('tech_tree', {});
   assert(g3.nodes.find((x) => x.id === p2.id).state === 'ready' && g3.counts.ready === 1, 'phase 1 done: phase 2 is unlocked and waiting to be started');
@@ -1791,7 +1792,6 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(started.status === 'active' && db.projects.find((x) => x.id === p2.id).status === 'active', 'start: active again');
 
   // A little card that opens a whole project.
-  const card = await tool('capture', { title: 'Find a tree title attorney', project: p1.id });
   const own = await tool('capture', { title: 'Draft the tree title chain', project: p3.id });
   db.projects.find((x) => x.id === p3.id).status = 'active';
   const byCard = await tool('tech_tree', { action: 'link', node: p3.id, card: 'find a tree title attorney' });
@@ -2126,5 +2126,19 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   const la30 = await tool('list_added', { days: 30, include_repeats: true, limit: 500 });
   assert(la30.items.some((x) => x.id === laD.id) && la30.items.some((x) => x.id === laC.id) && la30.by_source.repeat >= 1, 'list_added: 30 days, repeats included');
   db.tasks = db.tasks.filter((t) => ![laA.id, laB.id, laC.id, laD.id].includes(t.id)); db.projects = db.projects.filter((p) => p.id !== 'laP');
+}
+// A completed project of the same name: a live namesake wins, and a card never lands in a closed one.
+{
+  const now = new Date().toISOString();
+  db.projects.push({ id: 'cpMov', user_id: UID, name: 'Namesake films', status: 'completed', completed_at: now, kind: 'parallel', folder_id: null, sort: 0, created_at: now });
+  let err = ''; try { await tool('capture', { title: 'Watch the hummingbird film', project: 'namesake films' }); } catch (e) { err = e.message; }
+  assert(/is completed/.test(err) && /update_project/.test(err), 'capture refuses a completed project and says how to reopen it');
+  const cpT = await tool('capture', { title: 'Watch the hummingbird film' });
+  err = ''; try { await tool('update_task', { id: cpT.id, project: 'Namesake films' }); } catch (e) { err = e.message; }
+  assert(/is completed/.test(err), 'update_task refuses to move a card into a completed project');
+  db.projects.push({ id: 'cpMov2', user_id: UID, name: 'Namesake films', status: 'active', completed_at: null, kind: 'parallel', folder_id: null, sort: 0, created_at: now });
+  const cpU = await tool('update_task', { id: cpT.id, project: 'Namesake films' });
+  assert(cpU.project_id === 'cpMov2', 'with a live project of that name, the name means the live one');
+  db.projects = db.projects.filter((p) => !['cpMov', 'cpMov2'].includes(p.id)); db.tasks = db.tasks.filter((t) => t.id !== cpT.id);
 }
 console.log('ALL PASSED');

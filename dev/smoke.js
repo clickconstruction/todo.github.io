@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, pageSearch, lastAdded, askClaude, clarifyTwoCol, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, pageSearch, lastAdded, projectNamesakes, askClaude, clarifyTwoCol, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -63,6 +63,63 @@ export async function run({ only } = {}) {
 
 const key = (k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 const byTitle = (title) => T().tasks.find((t) => t.title === title);
+
+// A project of a name that is completed: the picker reopens it (its row says so), the capture line's #name
+// offers to make or reopen, the Inbox box reads the line and offers in its toast, and a card never lands in a
+// project the Projects page hides.
+async function projectNamesakes(check) {
+  const { db } = await import('/js/state.js');
+  const { openEditor } = await import('/js/editors/task.js');
+  const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
+  const t = T();
+  const ago = new Date(Date.now() - 20 * 86400000).toISOString();
+  t.projects.push({ ...t.projects[0], id: 'pnMov', name: 'Movies', status: 'completed', completed_at: ago, folder_id: null, created_at: ago });
+  const { loadAll } = await import('/js/data.js'); await loadAll();
+  const openPicker = (sel) => sel.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+  const type = (q) => { const inp = $('.ss-pop input'); inp.value = q; inp.dispatchEvent(new Event('input', { bubbles: true })); };
+  await go('#inbox');
+  openEditor(db.tasks.find((x) => x.id === 't1')); await wait(80);
+  const sel = $('#sheet select[name=project_id]');
+  check('a completed project is not in the picker', ![...sel.options].some((o) => o.value === 'pnMov'));
+  openPicker(sel); await wait(50);
+  type('movies'); await wait(30);
+  const row = $('.ss-pop .ss-new');
+  check('typing its name: the row offers to reopen it, and says it was completed', !!row && /reopen “movies”/i.test(row.textContent) && /completed/i.test(row.textContent), row && row.textContent);
+  row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+  await until(() => t.projects.find((p) => p.id === 'pnMov').status === 'active');
+  await wait(80);
+  check('picked: the project is reopened (no second one made), selected, and the toast says so', t.projects.filter((p) => p.name.toLowerCase() === 'movies').length === 1 && sel.value === 'pnMov' && /reopened/i.test(text('#toast')), text('#toast'));
+  $('#sheet form').requestSubmit(); await until(() => t.tasks.find((x) => x.id === 't1').project_id === 'pnMov');
+  if ($('#sheet').open) $('#sheet').close();
+  await go('#projects');
+  check('…and it shows on the Projects page', !!$('#view .group-row[href="#project/pnMov"]'));
+  // The capture line: a #name no project has offers to make it.
+  await go('#forecast');
+  $('#fab').click(); await wait(100);
+  const title = () => $('#quick [name=title]');
+  const typeQ = async (s) => { title().value = s; title().dispatchEvent(new Event('input', { bubbles: true })); await wait(50); };
+  await typeQ('Watch Dune #Westerns');
+  check('quick entry: a #name no project has stays text, and a chip offers to make the project', has('#quick .qe-chips', 'new project “westerns”') && !$('#quick [data-qe-drop="project"]'), text('#quick .qe-chips'));
+  $('#quick [data-qe-make]').click(); await until(() => t.projects.some((p) => p.name === 'Westerns'));
+  await wait(80);
+  const west = t.projects.find((p) => p.name === 'Westerns');
+  check('tapped: the project is made and on the card', !!west && !!$('#quick [data-qe-drop="project"]') && has('#quick .qe-chips', 'westerns'));
+  $('#quick').requestSubmit(); await until(() => t.tasks.some((x) => x.title === 'Watch Dune'));
+  check('saved: the card is in the new project with a clean title', (t.tasks.find((x) => x.title === 'Watch Dune') || {}).project_id === west.id);
+  if ($('#sheet').open) $('#sheet').close();
+  // The Inbox box reads the same line, and offers in its toast when the project doesn't exist.
+  await go('#inbox');
+  const box = () => $('[data-capture] input');
+  box().value = 'Fix the gate #Westerns'; $('[data-capture]').requestSubmit();
+  await until(() => t.tasks.some((x) => x.title === 'Fix the gate'));
+  check('the Inbox box reads #project too: the card goes to the project, and the toast says where', (t.tasks.find((x) => x.title === 'Fix the gate') || {}).project_id === west.id && /captured to westerns/i.test(text('#toast')), text('#toast'));
+  box().value = 'Read the manual #Noir'; $('[data-capture]').requestSubmit();
+  await until(() => t.tasks.some((x) => x.title === 'Read the manual #Noir'));
+  check('a #name no project has: the card stays in the Inbox as typed, and the toast offers to make the project', (t.tasks.find((x) => x.title === 'Read the manual #Noir') || {}).in_inbox === true && /no project named “noir” yet/i.test(text('#toast')) && !!$('#toast button'), text('#toast'));
+  $('#toast button').click(); await until(() => t.projects.some((p) => p.name === 'Noir') && t.tasks.some((x) => x.title === 'Read the manual'));
+  const noir = t.projects.find((p) => p.name === 'Noir');
+  check('…tapped: the project is made and the card moves there, the #name gone from its title', !!noir && (t.tasks.find((x) => x.title === 'Read the manual') || {}).project_id === noir.id && !t.tasks.some((x) => x.title === 'Read the manual #Noir'));
+}
 
 // Last added: what came in lately, newest first by day, with how it came in and where it is now.
 async function lastAdded(check) {
