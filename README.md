@@ -65,7 +65,7 @@ To pick up a Full Review on another computer, open the review in the app, copy t
 | `js/` | App modules (plain ES modules, no build step). `main.js` starts it; `views/` are screens; `editors/` are the inspector and sheets |
 | `config.js` | Supabase URL and publishable key (public, protected by RLS). `config.example.js` is the template for a local `config.local.js` |
 | `supabase-client.js`, `vendor/` | The Supabase client and the bundled `supabase-js` library it loads |
-| `icons/`, `favicon.png` | App icons |
+| `icons/`, `favicon.png` | App icons. `icons/icon.svg` is the master (a gear with a check); the PNGs beside it and `favicon.png` are rendered from it, the maskable one with the artwork at 80% for the safe zone |
 | `supabase/migrations/` | The database schema, rules and functions |
 | `supabase/tests/` | SQL rule tests; each runs in a transaction and rolls back |
 | `mcp/` | The MCP server, a Cloudflare Worker (also email capture, reminders, calendar feed, push) |
