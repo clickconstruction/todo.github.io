@@ -310,7 +310,7 @@ export function openQuickEntry(opts = {}) {
     if (!a.project_id) recentIds().map((id) => byId(db.projects, id)).filter((p) => p && p.status === 'active').slice(0, 3).forEach((p) => chips.push(`<button type="button" class="qe-chip" data-qe-project="${p.id}">＋ ${esc(p.name)}</button>`));
     // A #name no project has: offer to make it (or to reopen a completed one of that name); the card goes in it.
     if (!a.project_id && a.unknownProject) { const { completed } = projectNamed(a.unknownProject); chips.push(`<button type="button" class="qe-chip qe-new" data-qe-make="${esc(a.unknownProject)}" title="${completed ? 'Reopen the completed project of that name and file the card in it' : 'Make this project and file the card in it'}">${completed ? '↻ Reopen' : '＋ New project'} “${esc(a.unknownProject)}”</button>`); }
-    if (!chips.length) chips.push('<span class="hint">#project · @tag · “due fri” · a day word</span>');
+    chips.push('<span class="hint">#project · @tag · “due fri” · a day word</span>'); // always there, on its own line under the chips
     $('[data-qe-chips]', form).innerHTML = chips.join('');
   };
   titleEl.addEventListener('input', () => { if (titleEl.value.endsWith('#')) openSearch(selEl); drawChips(); });
