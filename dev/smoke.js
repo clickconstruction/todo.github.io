@@ -1882,6 +1882,22 @@ async function updates(check) {
   $('#more-tab').click(); await wait(80);
   check('More sheet: “Update ready · Reload” at the top', !!$('#sheet [data-update-now]'));
   $('#sheet').close();
+  // A switch that never came back (the tab was asleep when the worker took over): a tap tries again instead of nothing.
+  U.__resetUpdates(); U.onWaiting(fake); await wait(30);
+  $('#nav-update').click(); await wait(30);
+  check('a tap asks the worker to take over', reloads === 4 && U.updateState().applying, `${reloads} ${U.updateState().applying}`);
+  U.updateState().applyAt = Date.now() - 4000; // …and nothing happened for a while
+  $('#nav-update').click(); await wait(30);
+  check('a tap after a switch that never came back tries again', reloads === 5, String(reloads));
+  // The worker that was waiting was replaced by the next release: the one waiting now is asked instead.
+  U.__resetUpdates(); posted.length = 0;
+  const reply = (ports, v) => { if (ports && ports[0]) ports[0].postMessage({ version: v, min: 'v1' }); };
+  const gone = { state: 'redundant', postMessage: (m, ports) => { posted.push(`old:${m.type}`); if (m.type === 'INFO') reply(ports, 'v99'); } };
+  const now = { postMessage: (m, ports) => { posted.push(`new:${m.type}`); if (m.type === 'INFO') reply(ports, 'v100'); } };
+  U.updateState().reg = { waiting: now, update: async () => {} };
+  U.onWaiting(gone); await wait(30);
+  check('a superseded worker is skipped: the one waiting now is asked', U.tryApply('navigate') && posted.includes('new:SKIP_WAITING') && !posted.includes('old:SKIP_WAITING') && reloads === 6, `${posted} ${reloads}`);
+  U.updateState().reg = null;
   U.__resetUpdates(); window.__reload = undefined; try { sessionStorage.removeItem('todo.resume'); } catch { /* ignore */ }
 }
 

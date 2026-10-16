@@ -19,7 +19,7 @@ const num = (v) => Number(String(v || '').replace(/^v/, '')) || 0;
 
 // page: the version this page runs (the worker that served it, asked at load), which a newer worker taking
 // over later doesn't change; ctl: a stand-in worker for tests.
-const U = { reg: null, waiting: null, force: false, applying: false, lastCheck: 0, lastInput: Date.now(), controllerChanged: false, hadController: false, page: null, ctl: null };
+const U = { reg: null, waiting: null, force: false, applying: false, applyAt: 0, watch: null, lastCheck: 0, lastInput: Date.now(), controllerChanged: false, hadController: false, page: null, ctl: null };
 export const updateState = () => U;
 
 // ---------- is it safe right now? ----------
@@ -57,17 +57,38 @@ function saveContext() {
   try { sessionStorage.setItem(RESUME_KEY, JSON.stringify({ hash: location.hash, y: window.scrollY, selected: s || null, at: Date.now() })); } catch { /* private mode */ }
 }
 export function tryApply(reason = 'manual') {
-  if (U.applying || (!U.waiting && !U.controllerChanged)) return false;
+  // A switch that was started but never came back (the tab was asleep when the worker took over, or the
+  // worker it asked was replaced by the next release while it waited): your tap tries again rather than
+  // being swallowed, and the watchdog below sorts it out on its own after a few seconds.
+  if (U.applying && reason === 'manual' && Date.now() - U.applyAt > 3000) U.applying = false;
+  if (U.applying) return false;
+  if (U.waiting && U.waiting.state === 'redundant') U.waiting = (U.reg && U.reg.waiting) || null; // superseded while it waited
+  if (!U.waiting && !U.controllerChanged) return false;
   // Your tap on "Update ready" counts like a forced update: only typing, unsaved edits or a save in flight wait.
   const blocked = busyReason({ forced: U.force || reason === 'manual' });
   if (blocked) { if (reason === 'manual') toast(blocked === 'import' ? 'Updating after the import finishes' : 'Updating as soon as this is saved'); return false; }
-  U.applying = true;
+  U.applying = true; U.applyAt = Date.now();
   U.reason = reason;
   saveContext();
   if (U.controllerChanged || !U.waiting) { window.__reload ? window.__reload() : location.reload(); return true; } // another tab already switched
   U.waiting.postMessage({ type: 'SKIP_WAITING' }); // → controllerchange → reload
-  if (window.__reload) window.__reload(); // tests
+  if (window.__reload) { window.__reload(); return true; } // tests
+  watchdog();
   return true;
+}
+// SKIP_WAITING went out but no controllerchange followed. Either the new worker did take over while this
+// page couldn't see it (reload now), or the worker asked never activated (it had been replaced): start over
+// with whatever is waiting now, and take the button down if nothing is.
+function watchdog() {
+  clearTimeout(U.watch);
+  U.watch = setTimeout(async () => {
+    if (!U.applying) return;
+    const cur = await ask(controller());
+    if (cur && cur.version && U.page && cur.version !== U.page) { location.reload(); return; }
+    U.applying = false;
+    U.waiting = (U.reg && U.reg.waiting) || null;
+    if (!U.waiting && !U.controllerChanged) hideReady();
+  }, 6000);
 }
 
 // Back on the same screen after an update: scroll, selection, and a quiet note.
@@ -89,6 +110,11 @@ function showReady() {
   document.body.classList.add('update-ready');
   const b = $('#nav-update');
   if (b) b.hidden = false;
+}
+function hideReady() {
+  document.body.classList.remove('update-ready');
+  const b = $('#nav-update');
+  if (b) b.hidden = true;
 }
 // What version is a worker? ({ version, min } from sw.js, or null)
 const ask = (w) => new Promise((res) => { if (!w) return res(null); try { const ch = new MessageChannel(); ch.port1.onmessage = (e) => res(e.data); w.postMessage({ type: 'INFO' }, [ch.port2]); setTimeout(() => res(null), 3000); } catch { res(null); } });
@@ -194,8 +220,7 @@ export function initUpdates({ importBusy } = {}) {
 
 // Tests only: start over (dev/smoke.js).
 export function __resetUpdates() {
-  Object.assign(U, { waiting: null, force: false, applying: false, controllerChanged: false, reason: null, lastInput: Date.now(), ctl: null });
-  document.body.classList.remove('update-ready');
-  const b = $('#nav-update');
-  if (b) b.hidden = true;
+  clearTimeout(U.watch);
+  Object.assign(U, { waiting: null, force: false, applying: false, applyAt: 0, watch: null, controllerChanged: false, reason: null, lastInput: Date.now(), ctl: null });
+  hideReady();
 }
