@@ -2971,6 +2971,12 @@ async function mindSweep(check) {
   inp().value = 'Finish the Smith bathroom punch list'; inp().closest('form').requestSubmit(); await wait(250);
   inp().value = 'Invoice the Jones job'; inp().closest('form').requestSubmit(); await wait(250);
   check('Enter captures to the Inbox and lists it under the prompt', T().tasks.filter((t) => ['Finish the Smith bathroom punch list', 'Invoice the Jones job'].includes(t.title) && t.in_inbox).length === 2 && $$('.sweep-caps li').length === 2 && has(undefined, '2 captured'));
+  // Typed or pasted while the last capture is still saving: the redraw when the save returns keeps it, caret and focus too.
+  inp().focus(); inp().value = 'Order the water heater'; inp().closest('form').requestSubmit();
+  inp().value = 'Call the inspector'; inp().setSelectionRange(4, 4); // in the box before the save came back
+  await wait(250);
+  check('what you type while a capture saves survives the redraw, with the caret and focus', inp().value === 'Call the inspector' && document.activeElement === inp() && inp().selectionStart === 4 && $$('.sweep-caps li').length === 3, `${inp().value} · caret ${inp().selectionStart} · ${$$('.sweep-caps li').length} listed`);
+  inp().value = '';
   inp().focus();
   inp().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await wait(150);
   check('→ on an empty box goes to the next prompt', has(undefined, '2 of 56', 'meaning to start'));
@@ -2987,7 +2993,7 @@ async function mindSweep(check) {
   const { app } = await import('/js/state.js');
   app.sweep.i = 54; (await import('/js/router.js')).render(); await wait(80);
   $('[data-sweep="next"]').click(); await wait(150);
-  check('end: swept, with a link to clarify', has(undefined, 'swept', '2 captured') && !!$('a[href="#clarify"]'));
+  check('end: swept, with a link to clarify', has(undefined, 'swept', '3 captured') && !!$('a[href="#clarify"]'));
   $('.sweep-edit').open = true;
   const f = $('[data-sweep-add]'); f.elements.group.value = 'Work'; f.elements.text.value = 'Rental properties'; f.requestSubmit(); await wait(300);
   check('add your own prompt', (T().user_settings[0].trigger_custom || []).some((c) => c.text === 'Rental properties' && c.group === 'Work'));

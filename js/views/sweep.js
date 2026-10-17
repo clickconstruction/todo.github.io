@@ -1,6 +1,8 @@
 // Mind sweep: one trigger at a time ("Home repairs", "Money owed"…); type what comes to mind and
 // press Enter to capture it to the Inbox. Hidden and custom prompts are saved to the account. Whatever hides a
 // prompt sits beside a way to see the hidden ones and bring any of them back (beside Hide, and under Edit the prompts).
+// A draw never throws away what is in the box: sweepHtml reads the live box before the draw replaces it and
+// focusInput puts its text, caret and focus back after (see remember below).
 import { app, esc, toast } from '../state.js';
 import { sweepPrompts, TRIGGERS } from '../weekly.js';
 import { capture } from '../data.js';
@@ -30,7 +32,8 @@ async function keepPlace(fn) {
 export function sweepHtml({ embedded = false } = {}) {
   const s = state();
   const list = prompts();
-  if (s.i >= list.length) return endHtml(embedded);
+  const box = remember(); // what is in the box this draw replaces
+  if (s.i >= list.length) { s.box = null; return endHtml(embedded); }
   const p = list[s.i];
   const inGroup = list.filter((x) => x.group === p.group);
   const mine = s.captured[p.id] || [];
@@ -40,7 +43,7 @@ export function sweepHtml({ embedded = false } = {}) {
     <div class="cl-progress"><i style="width:${Math.round((s.i / list.length) * 100)}%"></i></div>
     <div class="cl-item sweep-card"><b>${esc(p.text)}</b>${p.hint ? `<span class="cl-meta">${esc(p.hint)}…</span>` : ''}</div>
     ${mine.length ? `<ul class="sweep-caps">${mine.map((t) => `<li>📥 ${esc(t)}</li>`).join('')}</ul>` : ''}
-    <form class="capture" data-sweep-capture><input type="text" name="title" id="sweep-input" placeholder="${mine.length ? 'Anything else?' : 'What comes to mind?'} ⏎ to capture" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
+    <form class="capture" data-sweep-capture><input type="text" name="title" id="sweep-input" value="${esc(box ? box.value : '')}" placeholder="${mine.length ? 'Anything else?' : 'What comes to mind?'} ⏎ to capture" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
     <p class="hint">Add why it’s worth doing after an arrow: <span class="gain-text">Get a trailer quote → two crews on Fridays</span></p>
     <div class="sweep-foot"><button class="btn small" data-sweep="prev" ${s.i ? '' : 'disabled'}>‹</button>
       <button class="btn small" data-sweep="hide" data-id="${p.id}">Hide this prompt</button>
@@ -65,7 +68,25 @@ function endHtml(embedded) {
     </details>`;
 }
 
-const focusInput = () => setTimeout(() => { const i = document.getElementById('sweep-input'); if (i && !matchMedia('(pointer: coarse)').matches) i.focus(); }, 0);
+// Every draw replaces the box, and a draw can come while you are typing or pasting into it: a capture redraws the
+// view when its save returns (seconds, on a poor connection), and the app reloads and redraws when it comes back to
+// the front. The text, caret and focus are read from the live box before the draw and put back after, so what was
+// typed in between is still there, where it was (v162). Before, the new box took focus and sat empty: a paste made
+// while the last item saved was gone, and it looked as if the box had to be clicked before it took one.
+const liveBox = () => document.getElementById('sweep-input');
+function remember() {
+  const i = liveBox();
+  const s = state();
+  s.box = i ? { value: i.value, start: i.selectionStart, end: i.selectionEnd, focused: document.activeElement === i } : null;
+  return s.box;
+}
+const focusInput = () => setTimeout(() => {
+  const i = liveBox();
+  if (!i) return;
+  const b = state().box; state().box = null;
+  if ((b && b.focused) || !matchMedia('(pointer: coarse)').matches) i.focus(); // phones: only when it had focus (no keyboard popping up on its own)
+  if (b && b.value && document.activeElement === i) { try { i.setSelectionRange(b.start ?? b.value.length, b.end ?? b.value.length); } catch { /* not a text field */ } }
+}, 0);
 export const mountSweep = () => focusInput();
 
 export async function sweepAction(el) {
