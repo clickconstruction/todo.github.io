@@ -80,6 +80,8 @@ textarea { min-height: 80px; resize: vertical; }
   padding: calc(env(safe-area-inset-top) + 20px) 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 96px);
 }
 .view-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+/* The title sits on its baseline; everything beside it (the search box, buttons, menus) is centred on the row, so they line up with each other. */
+.view-head > :not(h1) { align-self: center; }
 .view-head h1 { margin: 0; font-size: 34px; letter-spacing: -0.5px; }
 .view-head h1.inbox { color: var(--accent); }
 .view-head h1.today { color: var(--due); }
@@ -704,6 +706,8 @@ form label.prop-inline select { width: auto; max-width: 62%; padding: 7px 10px; 
 .steps-actions { gap: 16px; align-items: center; }
 .steps-field .flag-toggle { font-weight: 500; }
 .stamps { font-size: 12px; }
+/* In the panel the stamps sit under the heading, where they are seen without scrolling. */
+.inspector-head + .stamps { margin-top: -8px; }
 /* The panel's own buttons (Drop, Tickle…, → Reading & watching): a row of small buttons that wraps with room
    between them, with Drop set apart at the end. */
 .inspector-form .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }

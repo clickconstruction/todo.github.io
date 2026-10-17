@@ -93,7 +93,7 @@ function taskFieldsHtml(t, task, { inspector = false } = {}) {
       <div data-dropped-box ${t.dropped_at && !t.completed_at ? '' : 'hidden'}>${t.dropped_at ? dateTimeField('dropped_at_edit', 'Dropped', t.dropped_at) : ''}</div>
       ${attachFieldHtml()}
       ${historyFieldHtml(task)}`) : section('files', 'Files', attachFieldHtml())}
-    ${task ? stampsHtml(task) : ''}`;
+    ${task && !inspector ? stampsHtml(task) : ''}`;
 }
 
 const secondaryButtons = (task) => `
@@ -242,6 +242,7 @@ export function openEditor(task, defaults = {}, opts = {}) {
 export function renderTaskInspector(container, task) {
   container.innerHTML = `<form class="inspector-form" data-inspector-task="${task.id}" novalidate>
     <div class="inspector-head"><span class="inspector-kind">Action</span><span class="save-state" aria-live="polite"></span></div>
+    ${stampsHtml(task)}
     ${taskFieldsHtml(task, task, { inspector: true })}
     <div class="actions">${secondaryButtons(task)}</div>
   </form>`;

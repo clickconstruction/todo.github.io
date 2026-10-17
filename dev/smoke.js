@@ -1911,6 +1911,7 @@ async function visualPass(check) {
   check('nothing selected: no empty panel, the list gets the width', $('#inspector').hidden && !document.body.classList.contains('has-inspector'));
   (await import('/js/inspector.js')).select('task', 't10'); await until(() => !$('#inspector').hidden);
   check('select an action: the panel opens with it', !$('#inspector').hidden && document.body.classList.contains('has-inspector') && !!$('#inspector form'));
+  check('…saying when it was added and last changed, right under the heading', has('#inspector .inspector-head + .stamps', 'added', 'changed'), text('#inspector .stamps'));
   (await import('/js/inspector.js')).clearSelection(); await wait(50);
   check('Esc/clear: the panel goes away again', $('#inspector').hidden);
   window.__forceWide = false; window.__forceSheet = true;

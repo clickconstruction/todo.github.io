@@ -25,7 +25,7 @@ function horizonsFields(p) {
     ${goals.length ? propInline('Serves goal', `<select name="goal_id"><option value="">No goal</option>${goals.map((g) => `<option value="${g.id}" ${g.id === p.goal_id ? 'selected' : ''}>${esc(g.title)}</option>`).join('')}</select>`) : ''}`;
 }
 
-function projectFieldsHtml(p, project) {
+function projectFieldsHtml(p, project, { inspector = false } = {}) {
   const folderOptions = db.folders.filter((f) => !f.archived_at || f.id === p.folder_id).sort(bySort)
     .map((f) => `<option value="${f.id}" ${f.id === p.folder_id ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
   return `
@@ -67,7 +67,7 @@ function projectFieldsHtml(p, project) {
       <p class="hint prop-note">Projects are never deleted. Mark it Completed or Dropped to archive it.</p>
       ${attachFieldHtml()}
       ${historyFieldHtml(project)}`) : section('files', 'Files', attachFieldHtml())}
-    ${stampsHtml(project)}`;
+    ${project && !inspector ? stampsHtml(project) : ''}`;
 }
 
 // Shared wiring; returns collect() → Promise<{ fields, tagIds } | null> (creates a new folder if asked).
@@ -164,7 +164,8 @@ export function openProjectEditor(project, defaults = {}) {
 export function renderProjectInspector(container, project) {
   container.innerHTML = `<form class="inspector-form" data-inspector-project="${project.id}" novalidate>
     <div class="inspector-head"><span class="inspector-kind">Project</span><span class="save-state" aria-live="polite"></span></div>
-    ${projectFieldsHtml(project, project)}
+    ${stampsHtml(project)}
+    ${projectFieldsHtml(project, project, { inspector: true })}
   </form>`;
   const form = $('form', container);
   const state = $('.save-state', form);
