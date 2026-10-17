@@ -50,7 +50,7 @@ export function sweepHtml({ embedded = false } = {}) {
       ${nHidden ? `<button class="btn small" data-sweep="hidden-toggle" aria-expanded="${s.showHidden ? 'true' : 'false'}">${s.showHidden ? 'Close hidden prompts' : `View hidden prompts (${nHidden})`}</button>` : ''}
       <button class="btn primary" data-sweep="next">${s.i === list.length - 1 ? 'Finish' : 'Next prompt'} →</button></div>
     ${nHidden && s.showHidden ? `<div class="sweep-hidden"><p class="hint">${nHidden} built-in prompt${nHidden === 1 ? '' : 's'} hidden. Show one again and it’s back in its place in the sweep.</p>${hiddenListHtml()}</div>` : ''}
-    <p class="hint sweep-keys">⏎ captures · → next prompt (when the box is empty) · ← back</p>
+    <p class="hint sweep-keys"><kbd>⏎</kbd> captures · <kbd>→</kbd> next prompt (when the box is empty) · <kbd>←</kbd> back</p>
   </div>`;
 }
 
@@ -147,6 +147,6 @@ export function sweepKey(e) {
 
 export function viewSweep() {
   return `<a class="back" href="#inbox">‹ Inbox</a><div class="view-head"><h1 class="inbox">Mind sweep</h1></div>
-    <p class="view-sub">Empty your head: for each prompt, capture every open loop it brings up. You’ll clarify them later.</p>
+    <p class="view-sub">Half-thoughts are fine. Anything you type lands in the Inbox, where you’ll make sense of it later.</p>
     ${sweepHtml()}`;
 }

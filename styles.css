@@ -1844,7 +1844,8 @@ body.fr-mode .fab.fr-fab { display: block !important; position: fixed; right: 24
 .six-all.quiet { color: var(--muted); font-weight: 500; }
 .six-foot { margin-top: 14px; }
 .six-keys { margin-top: 10px; }
-.six-keys kbd { font: inherit; font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); }
+/* Key hints under Six and the mind sweep: the keys drawn as keys. */
+.six-keys kbd, .sweep-keys kbd { font: inherit; font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); }
 .chip.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
 /* Phones: the title keeps the width; a row's controls sit on a line of their own, under it. */
 @media (max-width: 767px) { .six-keys { display: none; } .six-now-btns .btn { flex: 1 1 auto; } .six-now-btns .btn.link { flex: 1 1 100%; } .six-row { flex-wrap: wrap; } .six-ctl { max-width: none; flex: 1 1 100%; justify-content: flex-end; } .six-foot { padding-right: 76px; } /* clear of the floating capture button */ }
