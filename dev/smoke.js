@@ -48,7 +48,7 @@ export async function run({ only } = {}) {
   window.prompt = () => { throw new Error('the browser prompt() is not used: ask() in js/state.js'); };
   const results = [];
   const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 160) });
-  const suites = { core, pageSearch, lastAdded, projectNamesakes, askClaude, clarifyTwoCol, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
+  const suites = { core, pageSearch, lastAdded, projectNamesakes, askClaude, clarifyTwoCol, inboxSuggestions, stepsAndWaits, folders, matrix, slipboxReading, fullReview, reviewUndo, six, bucketSort, captureDetails, personTag, peopleTidy, peopleGroups, tagsScale, waitingSheets, quickStart, techTree, treeLinker, treeReview, dailies, weeklyChecks, quarterlyChecks, yearlyChecks, newProjectFromPicker, horizonChecks, staySignedIn, updates, visualPass, sidebar, gains, settleIn, horizonReviews, dailyReview, scheduleIt, checklists, captureAnywhere, planIt, horizons, whatNow, weeklyReview, mindSweep, someday, clarify, tickler, reference, delegation, energy, planned, projectTypes, groups, steps, perspectives, layout, omnifocusImport, onHoldTags, templates, focusMode, datesSettings, keyboard, calendars, events, searchEverything, checkUpdates, pullToRefresh, signals, filters, forecast, review, inspector, nearby, alerts, errands, parity, repeat, reminders, attachments, history };
   for (const [name, fn] of Object.entries(suites)) {
     if (only && !only.includes(name)) continue;
     await reload();
@@ -1899,6 +1899,29 @@ async function updates(check) {
   check('a superseded worker is skipped: the one waiting now is asked', U.tryApply('navigate') && posted.includes('new:SKIP_WAITING') && !posted.includes('old:SKIP_WAITING') && reloads === 6, `${posted} ${reloads}`);
   U.updateState().reg = null;
   U.__resetUpdates(); window.__reload = undefined; try { sessionStorage.removeItem('todo.resume'); } catch { /* ignore */ }
+}
+
+// Inbox suggestions: Claude's draft of a clarify decision sits on the item; it comes first, Submit (⏎) does it
+// through the same code as the choice, Undo puts it back pending, Dismiss takes it down, and the prompt to draft
+// the rest is a copy away.
+async function inboxSuggestions(check) {
+  const { db, sb, run, syncRow, byId, app } = await import('/js/state.js');
+  const put = async (id, suggestion) => { const [row] = await run(sb.from('tasks').update({ suggestion }).eq('id', id).select()); syncRow('tasks', byId(db.tasks, id), row); };
+  app.clarify = null;
+  await put('t13', { decision: 'next_action', project_id: 'p1', project_name: 'Click Plumbing', tag_ids: ['g2'], tag_labels: ['Phone'], note: 'A call for the job', by: 'agent', at: new Date().toISOString() });
+  await go('#clarify'); await wait(150);
+  check('an item with a suggestion comes first', has('.cl-item', 'build a 2m telescope'), text('.cl-item'));
+  check('the suggestion shows in words, with the note and a Submit', has('[data-cl-claude]', 'claude suggests', 'next action', 'in click plumbing', '@phone', 'a call for the job') && !!$('[data-cl-claude] .cl-sug'), text('[data-cl-claude]'));
+  check('the count line says how many have one, and offers the prompt', has('.cl-draft', '1 of 2 has a suggestion', 'copy a prompt'), text('.cl-draft'));
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await wait(300);
+  const t13 = byId(db.tasks, 't13');
+  check('⏎ submits: filed in the project with the tag, the suggestion stamped applied', !t13.in_inbox && t13.project_id === 'p1' && db.taskTags.some((l) => l.task_id === 't13' && l.tag_id === 'g2') && !!(t13.suggestion && t13.suggestion.applied_at), JSON.stringify(t13.suggestion));
+  check('…and the next item is up', has('.cl-item', 'frog pond ein'), text('.cl-item'));
+  $('[data-clarify="undo"]').click(); await wait(300);
+  check('Undo puts it back in the Inbox with the suggestion pending again', byId(db.tasks, 't13').in_inbox && !byId(db.tasks, 't13').suggestion.applied_at && has('[data-cl-claude]', 'click plumbing'), JSON.stringify(byId(db.tasks, 't13').suggestion));
+  $('[data-clarify="dismiss-suggestion"]').click(); await wait(200);
+  check('Dismiss takes it down (kept as resolved); the same item stays on screen to clarify', !$('[data-cl-claude]') && !!byId(db.tasks, 't13').suggestion.resolved_at && has('.cl-item', 'build a 2m telescope'), text('.cl-item'));
+  app.clarify = null;
 }
 
 // Visual pass: room for the list, one View control, ⋯ menus, chip nudges, sidebar capture, fixes.

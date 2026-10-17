@@ -53,6 +53,18 @@ globalThis.fetch = async (url, init = {}) => {
     return new Response(JSON.stringify({ ...counts, dry_run: b.dry_run, ...(b.dry_run ? {} : { import_id: 'imp-1' }) }), { status: 200 });
   }
   if (String(url).includes('/rest/v1/rpc/undo_import')) { const b = JSON.parse(init.body); (globalThis.undoCalls = globalThis.undoCalls || []).push(b); return new Response(JSON.stringify({ tasks_dropped: 9, projects_dropped: 3, folders_archived: 1 }), { status: 200 }); }
+  if (String(url).includes('/rest/v1/rpc/inbox_suggest')) { // mirror of migration 20261115000001: the owner's open Inbox items only
+    const b = JSON.parse(init.body); const done = []; const skipped = [];
+    for (const it of b.p_items) {
+      const t = db.tasks.find((x) => x.id === it.id && x.user_id === b.owner);
+      if (!t) { skipped.push({ id: it.id, why: 'not found' }); continue; }
+      if (t.completed_at || t.dropped_at) { skipped.push({ id: it.id, why: 'closed' }); continue; }
+      if (!t.in_inbox) { skipped.push({ id: it.id, why: 'not in the Inbox' }); continue; }
+      const { id: _id, applied_at: _a, resolved_at: _r, ...rest } = it;
+      t.suggestion = { ...rest, by: 'agent', at: new Date().toISOString() }; done.push(t.id);
+    }
+    return new Response(JSON.stringify({ suggested: done, skipped }), { status: 200 });
+  }
   if (String(url).includes('/rest/v1/rpc/convert_to_project')) { // mirror of the SQL function
     const b = JSON.parse(init.body); const t = db.tasks.find((x) => x.id === b.task_id && x.user_id === b.owner);
     if (!t) return new Response(JSON.stringify({ message: 'Task not found.' }), { status: 400 });
@@ -1648,6 +1660,25 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   await tool('update_task', { id: kava.id, waits_for: [move.id, bucket.id] });
   await tool('update_task', { id: kava.id, waits_for: [] });
   assert(!db.task_waits.some((w) => w.task_id === kava.id), 'waits_for replaces the list ([] clears)');
+}
+// ---------- Inbox suggestions: Claude drafts, the user presses Submit ----------
+{
+  const a = await tool('capture', { title: 'Order the backflow test kit' });
+  const b = await tool('capture', { title: 'Old flyer from the trade show' });
+  const s1 = await tool('clarify_item', { mode: 'suggest', id: a.id, decision: 'next_action', tags: ['Phone'], note: 'A call for the job' });
+  const ta = () => db.tasks.find((t) => t.id === a.id);
+  assert(s1.suggested === 1 && ta().suggestion.decision === 'next_action' && ta().suggestion.tag_labels[0] === 'Phone' && ta().suggestion.by === 'agent' && !ta().suggestion.applied_at && ta().in_inbox, 'clarify_item mode suggest: a pending suggestion, tags resolved to existing ones, nothing clarified');
+  let err = ''; try { await tool('clarify_item', { mode: 'suggest', id: b.id, decision: 'next_action', tags: ['NoSuchTag'] }); } catch (e) { err = e.message; }
+  assert(/No tag named/.test(err), 'suggest: an unknown tag is refused, never created');
+  const s2 = await tool('clarify_item', { mode: 'suggest', items: [{ id: b.id, decision: 'trash', note: 'Out of date' }, { id: '00000000-0000-0000-0000-00000000dead', decision: 'trash' }] });
+  assert(s2.suggested === 1 && s2.skipped.length === 1 && s2.items[0].says === 'Trash · not needed', 'suggest: several at once in items; what isn’t the user’s Inbox item is skipped and named');
+  const inb = await tool('list_inbox', {});
+  const ia = inb.items.find((x) => x.id === a.id);
+  assert(ia && ia.suggestion && ia.suggestion.decision === 'next_action' && ia.suggestion.says === 'Next action · @Phone' && ia.suggestion.note === 'A call for the job' && inb.suggested >= 2 && !inb.missing.includes(a.id), `list_inbox shows each pending suggestion in words, counts them, and names the items still without one (${JSON.stringify(ia && ia.suggestion)})`);
+  const ap = await tool('clarify_item', { id: a.id, decision: 'suggested' });
+  assert(ap.applied === 'next_action' && !ta().in_inbox && ta().suggestion.applied_at && db.task_tags.some((l) => l.task_id === a.id), 'decision "suggested" presses Submit: the item is clarified as the suggestion says and the suggestion is stamped applied');
+  err = ''; try { await tool('clarify_item', { id: a.id, decision: 'suggested' }); } catch (e) { err = e.message; }
+  assert(/No pending suggestion/.test(err), 'nothing pending: refused');
 }
 { // requests per call: whole-library reads come from one snapshot
   const real = globalThis.fetch; let count = 0; const paths = [];

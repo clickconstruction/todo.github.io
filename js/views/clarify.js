@@ -1,18 +1,21 @@
 // Clarify (Process Inbox): one item at a time, one decision each. 1 Next action · 2 Do it now
 // (2-minute timer) · 3 Delegate · 4 Project · 5 Someday · 6 Tickler · 7 Trash · 8 Reference · 9 Slipbox,
 // in three rows by the question they answer (do something · not now · not an action). On a wide screen
-// the item sits on the left and the decision on the right. A suggestion (a project and tags from similar
-// items) is one press: the button, or ⏎. c copies the item for Claude, C offers the asks.
+// the item sits on the left and the decision on the right. A suggestion is one press (the button, or ⏎):
+// Claude's, when it has drafted one on the item (tasks.suggestion, js/inbox-suggestion.js; items with one
+// come first, Dismiss takes it down, and a prompt to draft the rest is a copy away), else a project and tags
+// from similar items. c copies the item for Claude, C offers the asks.
 // Every decision can be undone (↶), and Skip leaves an item for later in this session.
 import { db, app, sb, run, syncRow, esc, byId, isOpen, taskSort, tagsFor, toast, tagLabel } from '../state.js';
 import { startOfToday, addDays, fmtDate, atDefaultTime } from '../dates.js';
 import { saveTask, setLinks, convertToProject, capture } from '../data.js';
 import { tagPickerHtml, wireTagPicker } from '../editors/tagPicker.js';
 import { attachmentsFor, signedUrl } from '../editors/attachField.js';
-import { ENERGY, isTickled, returnedFromTickler, suggestFor, makeSomeday, fileToReference, topics, saveReference, dayKey, somedayCategories } from '../gtd.js';
+import { ENERGY, isTickled, returnedFromTickler, suggestFor, makeSomeday, fileToReference, topics, saveReference, dayKey, somedayCategories, delegate, tickle } from '../gtd.js';
 import { openDelegate, openTickle } from '../editors/gtd.js';
 import { openReview } from './weekly.js';
 import { isWeak } from '../gain.js';
+import { pendingSuggestion, suggestionWords, DRAFT_PROMPT } from '../inbox-suggestion.js';
 
 export const CHOICES = [
   ['next', 'Next action', 'I’ll do it'],
@@ -28,11 +31,20 @@ export const CHOICES = [
 // The choices by the question they answer; the keys stay 1–9 in CHOICES order.
 const GROUPS = [['Do something', 'it leads to an action', ['next', 'now', 'delegate', 'project']], ['Not now', 'keep it, out of the way', ['someday', 'tickler']], ['Not an action', 'nothing to do', ['trash', 'reference', 'slipbox']]];
 // Columns an undo puts back.
-const COLS = ['in_inbox', 'project_id', 'parent_id', 'completed_at', 'dropped_at', 'completion_note', 'planned_at', 'defer_at', 'flagged', 'energy', 'waiting_on', 'follow_up_at', 'delegated_at', 'agenda_for', 'tickler', 'reference_id'];
+const COLS = ['in_inbox', 'project_id', 'parent_id', 'completed_at', 'dropped_at', 'completion_note', 'planned_at', 'defer_at', 'flagged', 'energy', 'waiting_on', 'follow_up_at', 'delegated_at', 'agenda_for', 'tickler', 'reference_id', 'suggestion'];
 
 const state = () => (app.clarify ||= { skipped: new Set(), history: [], mode: null, counts: {}, done: 0 });
-export const clarifyQueue = () => db.tasks.filter((t) => t.in_inbox && !t.parent_id && isOpen(t) && !isTickled(t)).sort(taskSort);
-const current = () => clarifyQueue().find((t) => !state().skipped.has(t.id)) || null;
+// Items Claude has drafted a suggestion on come first: they are one press each.
+export const clarifyQueue = () => db.tasks.filter((t) => t.in_inbox && !t.parent_id && isOpen(t) && !isTickled(t)).sort((a, b) => ((pendingSuggestion(b) ? 1 : 0) - (pendingSuggestion(a) ? 1 : 0)) || taskSort(a, b));
+// The item on screen stays until it is decided or skipped: a suggestion arriving or being dismissed elsewhere
+// in the queue never swaps it out from under you.
+const current = () => {
+  const s = state();
+  const q = clarifyQueue().filter((t) => !s.skipped.has(t.id));
+  const t = (s.currentId && q.find((x) => x.id === s.currentId)) || q[0] || null;
+  s.currentId = t ? t.id : null;
+  return t;
+};
 
 function snapshot(t) {
   return { id: t.id, row: Object.fromEntries(COLS.map((k) => [k, t[k] ?? null])), tagIds: tagsFor(t.id).map((g) => g.id) };
@@ -60,6 +72,7 @@ export async function undoLast() {
   s.counts[h.kind] -= 1;
   s.done -= 1;
   s.skipped.delete(h.id);
+  s.currentId = h.id; // the item Undo put back is the one on screen
   s.mode = null;
   app.render();
   toast('Undone');
@@ -169,6 +182,108 @@ function nowPanel() {
     <div class="cl-foot"><button class="btn" data-clarify="longer">Taking longer: make it an action</button><button class="btn primary" data-clarify="did-it">✓ Done ⏎</button></div></div>`;
 }
 
+// ---------- Claude's suggestion on the item ----------
+const DAY = (key) => (key ? fmtDate(new Date(`${key}T00:00:00`).toISOString()) : '');
+const namesFor = (s) => ({
+  project: (s.project_id && (byId(db.projects, s.project_id) || {}).name) || s.project_name,
+  tags: (s.tag_ids || []).map((id) => byId(db.tags, id)).filter(Boolean).map(tagLabel).concat(s.tag_ids ? [] : (s.tag_labels || [])),
+  person: (s.person_id && (byId(db.people || [], s.person_id) || {}).name) || s.person_name,
+  day: DAY,
+});
+function claudeBar(s) {
+  const [what, ...rest] = suggestionWords(s, namesFor(s));
+  return `<div class="cl-claude" data-cl-claude><div class="cl-claude-head"><span class="chip sug">✦ Claude suggests</span>${s.note ? `<span class="cl-claude-note">${esc(s.note)}</span>` : ''}</div>
+    <button type="button" class="cl-sug" data-clarify="submit-suggestion" title="Do what Claude suggests (⏎)"><span class="cl-sug-ok" aria-hidden="true">✓</span>${esc(what)}${rest.map((x) => `<span class="chip">${esc(x)}</span>`).join('')}<kbd>⏎</kbd></button>
+    <div class="cl-claude-foot"><button type="button" class="btn small" data-clarify="dismiss-suggestion">Dismiss</button><span class="hint">Or pick another choice on the right; nothing changes until you press.</span></div></div>`;
+}
+// How many items have one, and a prompt that asks Claude to draft the rest.
+function draftLine(queue) {
+  const n = queue.filter(pendingSuggestion).length;
+  const words = n ? `${n} of ${queue.length} ${n === 1 ? 'has' : 'have'} a suggestion from Claude` : 'No suggestions from Claude yet';
+  const btn = n < queue.length ? `<button type="button" class="link-btn" data-clarify="draft-prompt" title="Copy a prompt that asks Claude to draft a suggestion on each item without one">${n ? 'Copy a prompt to draft the rest' : 'Copy a prompt to draft them'}</button>` : '';
+  return `<div class="cl-draft"><span aria-hidden="true">✦</span><span>${words}${btn ? ' ·' : ''}</span>${btn}</div>`;
+}
+const KIND = { next_action: 'next', done: 'now' }; // the suggestion's decision names → the choice they count as
+// Submit: the suggestion goes through the same code as the choice it names. applied_at is written in the same update
+// where there is one, else right after the step succeeds (replacing the resolved_at the trigger stamps as the item
+// leaves the Inbox), so a step that fails never leaves a suggestion marked applied.
+async function applySuggestion(t, s) {
+  const snap = snapshot(t);
+  const applied = { ...s, applied_at: new Date().toISOString() };
+  const stamp = async () => { const [row] = await run(sb.from('tasks').update({ suggestion: applied }).eq('id', t.id).select()); syncRow('tasks', t, row); };
+  const dayIso = (key) => atDefaultTime(new Date(`${key}T00:00:00`), 'planned_at').toISOString();
+  let undo = null; let msg = '';
+  switch (s.decision) {
+    case 'next_action': {
+      const tagIds = (s.tag_ids || []).filter((id) => byId(db.tags, id));
+      const project_id = s.project_id && byId(db.projects, s.project_id) ? s.project_id : null;
+      if (!project_id && !tagIds.length) { toast('The suggestion names no project or tag that is still there'); return; }
+      await saveTask(t, { project_id, tickler: false, suggestion: applied, ...(s.planned ? { planned_at: dayIso(s.planned) } : {}), ...(typeof s.flagged === 'boolean' ? { flagged: s.flagged } : {}), ...(s.energy ? { energy: s.energy } : {}) }, tagIds);
+      msg = project_id ? `Filed in ${byId(db.projects, project_id).name}` : 'Filed as a next action';
+      break;
+    }
+    case 'done': { const [row] = await run(sb.from('tasks').update({ completed_at: new Date().toISOString(), suggestion: applied }).eq('id', t.id).select()); syncRow('tasks', t, row); msg = 'Done'; break; }
+    case 'trash': { const [row] = await run(sb.from('tasks').update({ dropped_at: new Date().toISOString(), suggestion: applied }).eq('id', t.id).select()); syncRow('tasks', t, row); msg = 'Trashed (never deleted)'; break; }
+    case 'delegate': {
+      const p = byId(db.people || [], s.person_id);
+      if (!p) { toast('The suggestion names a person who is no longer there'); return; }
+      await delegate(t, p, s.follow_up ? { followUpKey: s.follow_up } : {});
+      await stamp();
+      msg = `Delegated to ${p.name}`;
+      break;
+    }
+    case 'tickler': { if (!s.date) return; await tickle(t, s.date); await stamp(); msg = `In the tickler until ${DAY(s.date)}`; break; }
+    case 'someday': { await makeSomeday(t, s.category || ''); await stamp(); msg = `Parked in Someday/Maybe${s.category ? ` · ${s.category}` : ''}`; break; }
+    case 'project': {
+      const name = String(s.name || '').trim();
+      if (name && name !== t.title) { snap.row.title = t.title; const [r] = await run(sb.from('tasks').update({ title: name }).eq('id', t.id).select()); syncRow('tasks', t, r); }
+      const pid = await convertToProject(byId(db.tasks, t.id) || t);
+      const p = byId(db.projects, pid);
+      if (p && s.first_action) await capture(s.first_action, { project_id: p.id, in_inbox: false });
+      await stamp();
+      undo = async () => { if (p) { const [r] = await run(sb.from('projects').update({ status: 'dropped' }).eq('id', p.id).select()); syncRow('projects', p, r); } };
+      msg = `Project “${name || t.title}” created`;
+      break;
+    }
+    case 'reference': {
+      const files = attachmentsFor('task_id', t.id).map((a) => a.id);
+      const topic = String(s.topic || '').trim();
+      const ref = await fileToReference(t, topic);
+      const proj = db.projects.find((p) => p.name.toLowerCase() === topic.toLowerCase() && ['active', 'on_hold'].includes(p.status));
+      if (proj) await saveReference(ref, { project_id: proj.id });
+      await stamp();
+      undo = async () => {
+        await saveReference(ref, { archived_at: new Date().toISOString() });
+        for (const id of files) { const a = byId(db.attachments, id); const [r] = await run(sb.from('attachments').update({ reference_id: null, task_id: t.id }).eq('id', id).select()); if (a) syncRow('attachments', a, r); }
+      };
+      msg = `Filed in Reference${topic ? ` · ${topic}` : ''}`;
+      break;
+    }
+    case 'slipbox': {
+      const noteId = await run(sb.rpc('slipbox_from_task', { task: t.id, title: String(s.title || '').trim() || t.title, body: t.notes || '', source: String(s.source || '').trim() }));
+      const [row] = await run(sb.from('tasks').select('*').eq('id', t.id)); syncRow('tasks', t, row);
+      const [note] = await run(sb.from('slipbox_notes').select('*').eq('id', noteId)); if (note) (db.slipbox ||= []).push(note);
+      await stamp();
+      undo = async () => { const [r] = await run(sb.from('slipbox_notes').update({ archived_at: new Date().toISOString() }).eq('id', noteId).select()); const n = byId(db.slipbox || [], noteId); if (n) syncRow('slipbox', n, r); };
+      msg = 'Saved to your slipbox';
+      break;
+    }
+    case 'reading': {
+      await run(sb.rpc('reading_set', { task: t.id, state: 'up_next', rtype: s.type || null }));
+      const [row] = await run(sb.from('tasks').select('*').eq('id', t.id)); syncRow('tasks', t, row);
+      await stamp();
+      msg = 'On Reading & watching';
+      break;
+    }
+    default: return;
+  }
+  record(snap, KIND[s.decision] || s.decision, undo);
+  toast(msg);
+}
+async function copyDraftPrompt() {
+  try { await navigator.clipboard.writeText(DRAFT_PROMPT); toast('Prompt copied: paste it into a chat with your Todo Tooling tools'); } catch { toast('Couldn’t reach the clipboard'); }
+}
+
 export function viewClarify() {
   const s = state();
   const t = current();
@@ -190,15 +305,16 @@ export function viewClarify() {
   else if (s.mode === 'now') body = nowPanel();
   else if (s.mode === 'someday') body = somedayForm();
   else if (s.mode === 'slipbox') body = slipboxForm(t);
-  const sug = s.mode ? null : suggestFor(t);
+  const cs = pendingSuggestion(t);
+  const sug = s.mode || cs ? null : suggestFor(t);
   if (!s.mode) {
     const choice = (k) => { const i = CHOICES.findIndex(([x]) => x === k); const [, l, sub] = CHOICES[i]; return `<button class="cl-choice ${i === 0 ? 'pri' : ''} ${k === 'trash' ? 'warn' : ''}" data-clarify="${k}"><kbd>${i + 1}</kbd><span class="cl-ct"><b>${l}</b><span>${sub}</span></span></button>`; };
-    body = `<div class="cl-qrow"><p class="cl-q">${sug ? 'Or, what is it?' : 'What is it?'}</p><span class="hint cl-keys">1–9 choose</span></div>
+    body = `<div class="cl-qrow"><p class="cl-q">${sug || cs ? 'Or, what is it?' : 'What is it?'}</p><span class="hint cl-keys">1–9 choose</span></div>
       ${GROUPS.map(([label, hint, keys]) => `<div class="cl-glabel">${label}<span>${hint}</span></div><div class="cl-grid">${keys.map(choice).join('')}</div>`).join('')}`;
   }
   // The suggestion is one press: the button files it (⏎ does too) with the project and tags it names.
   const sugBtn = sug ? `<button type="button" class="cl-sug" data-clarify="suggested" title="File it with this project and these tags (⏎)"><span class="cl-sug-ok" aria-hidden="true">✓</span>File it as suggested<span class="chip">${esc(sug.project.name)}</span>${sug.tags.map((g) => `<span class="chip">${esc(tagLabel(g))}</span>`).join('')}<kbd>⏎</kbd></button>` : '';
-  return `${head}<div class="cl-cols"><div class="cl-left">${itemCard(t)}${sugBtn}</div><div class="cl-right">${body}</div></div>
+  return `${head}${draftLine(clarifyQueue().filter((x) => !s.skipped.has(x.id)))}<div class="cl-cols"><div class="cl-left">${itemCard(t)}${cs ? claudeBar(cs) : sugBtn}</div><div class="cl-right">${body}</div></div>
     <div class="cl-bar"><button class="btn small" data-clarify="undo" ${s.history.length ? '' : 'disabled'}>↶ Undo</button><span class="hint cl-keys">1–9 choose · ⏎ save · Esc back</span><button class="btn small" data-clarify="skip">Skip →</button></div>`;
 }
 
@@ -303,6 +419,14 @@ export async function clarifyAction(action) {
       toast(`Filed in ${sug.project.name}`);
       return;
     }
+    case 'submit-suggestion': { const cs = pendingSuggestion(t); if (!cs) break; await applySuggestion(t, cs); return; }
+    case 'dismiss-suggestion': {
+      const cs = pendingSuggestion(t); if (!cs) break;
+      const [row] = await run(sb.from('tasks').update({ suggestion: { ...cs, resolved_at: new Date().toISOString(), dismissed: true } }).eq('id', t.id).select()); syncRow('tasks', t, row);
+      toast('Suggestion dismissed', [{ label: 'Undo', run: async () => { const [r] = await run(sb.from('tasks').update({ suggestion: cs }).eq('id', t.id).select()); syncRow('tasks', t, r); app.render(); } }]);
+      break;
+    }
+    case 'draft-prompt': copyDraftPrompt(); return;
     case 'project': s.mode = 'project'; break;
     case 'reference': s.mode = 'reference'; break;
     case 'now': s.mode = 'now'; s.timerStart = Date.now(); stopTimer(); break;

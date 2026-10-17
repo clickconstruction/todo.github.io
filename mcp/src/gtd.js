@@ -1,12 +1,53 @@
 // GTD practices for agents: Clarify one Inbox item, People (Waiting For + Agendas), Delegate (drafts a
 // message for the user to send; nothing is sent from here), the Tickler, and Reference. Same rules as
 // the app (js/gtd.js). People and reference items are archived, never deleted.
+import { SUGGESTION_DECISIONS, pendingSuggestion, suggestionLine } from '../../js/inbox-suggestion.js';
 const ENERGY = ['low', 'medium', 'high'];
 const DECISIONS = ['next_action', 'done', 'delegate', 'project', 'someday', 'tickler', 'trash', 'reference', 'slipbox', 'reading'];
 
 export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
   const today = (api) => localDate(new Date().toISOString(), api.tz);
   const plusDays = (api, n) => localDate(new Date(Date.now() + n * 86400000).toISOString(), api.tz);
+  // Inbox suggestions (js/inbox-suggestion.js): one from the arguments clarify_item takes, names resolved to ids.
+  // Nothing is created: an unknown project, tag or person is an error, so the user never gets a surprise.
+  const ymd = (v, what) => { const s = String(v || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error(`${what} must be YYYY-MM-DD`); return s; };
+  const findTag = (look, ref) => { const n = String(ref).trim().toLowerCase(); const hit = look.tags.filter((g) => g.id === ref || look.tagLabel(g).toLowerCase() === n || g.name.toLowerCase() === n); return hit.find((g) => g.status !== 'dropped') || hit[0] || null; };
+  async function toSuggestion(api, it, look) {
+    if (!it.id) throw new Error('suggest: each item needs id');
+    if (!SUGGESTION_DECISIONS.includes(it.decision)) throw new Error(`suggest: decision must be one of ${SUGGESTION_DECISIONS.join(', ')}`);
+    const s = { id: it.id, decision: it.decision };
+    if (it.note) s.note = String(it.note).trim().slice(0, 300);
+    switch (it.decision) {
+      case 'next_action': {
+        if (!it.project && !(it.tags || []).length) throw new Error('A next action needs a project or at least one tag');
+        if (it.project) { s.project_id = await api.resolveLiveProject(it.project); s.project_name = (look.projects.find((p) => p.id === s.project_id) || {}).name; }
+        if ((it.tags || []).length) {
+          s.tag_ids = []; s.tag_labels = [];
+          for (const ref of it.tags) { const g = findTag(look, ref); if (!g) throw new Error(`No tag named "${ref}". Use list_tags, or create_tag first; a suggestion never creates one.`); s.tag_ids.push(g.id); s.tag_labels.push(look.tagLabel(g)); }
+        }
+        if (it.planned) s.planned = ymd(it.planned, 'planned');
+        if (typeof it.flagged === 'boolean') s.flagged = it.flagged;
+        if (it.energy) { if (!ENERGY.includes(it.energy)) throw new Error(`energy must be one of ${ENERGY.join(', ')}`); s.energy = it.energy; }
+        break;
+      }
+      case 'delegate': {
+        if (!it.person) throw new Error('delegate needs person');
+        const p = await api.resolvePerson(it.person);
+        if (!p) throw new Error(`No person named "${it.person}". Use list_people, or save_person first.`);
+        s.person_id = p.id; s.person_name = p.name;
+        if (it.follow_up !== undefined && it.follow_up !== null) s.follow_up = typeof it.follow_up === 'number' ? plusDays(api, it.follow_up) : ymd(it.follow_up, 'follow_up');
+        break;
+      }
+      case 'tickler': if (!it.date) throw new Error('tickler needs date (YYYY-MM-DD)'); s.date = ymd(it.date, 'date'); break;
+      case 'project': if (it.name) s.name = String(it.name).trim(); if (it.first_action) s.first_action = String(it.first_action).trim(); break;
+      case 'reference': if (it.topic) s.topic = String(it.topic).trim(); break;
+      case 'someday': if (it.category) s.category = String(it.category).trim(); break;
+      case 'slipbox': if (it.title) s.title = String(it.title).trim(); if (it.source) s.source = String(it.source).trim(); break;
+      case 'reading': if (it.type) s.type = it.type; break;
+      default: break;
+    }
+    return s;
+  }
   const personOut = (p, extra = {}) => ({ id: p.id, name: p.name, email: p.email || undefined, phone: p.phone || undefined, notes: p.notes || undefined, tag_id: p.tag_id || null, archived: !!p.archived_at || undefined, ...extra });
   const refOut = (r, projects, reveal) => ({
     id: r.id, title: r.title, topic: r.topic || undefined, notes: r.body || undefined,
@@ -61,12 +102,15 @@ export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
   return [
     {
       name: 'clarify_item',
-      description: 'Clarify (process) one Inbox item with a GTD decision: next_action (give project and/or tags, optional planned/energy/flagged), done (took under 2 minutes), delegate (person, follow_up), project (becomes a project; first_action optional), someday (parks it under an on-hold Someday tag), tickler (date: back in the Inbox that day), trash (dropped, not deleted), reference (filed in Reference under topic), slipbox (an idea to think with, not an action: a fleeting note in the slipbox, with source), reading (something to read/watch/listen to: onto the reading list, up next). Go one item at a time with the user (list_inbox), asking what it is.',
+      description: 'Clarify (process) one Inbox item with a GTD decision: next_action (give project and/or tags, optional planned/energy/flagged), done (took under 2 minutes), delegate (person, follow_up), project (becomes a project; first_action optional), someday (parks it under an on-hold Someday tag), tickler (date: back in the Inbox that day), trash (dropped, not deleted), reference (filed in Reference under topic), slipbox (an idea to think with, not an action: a fleeting note in the slipbox, with source), reading (something to read/watch/listen to: onto the reading list, up next). Go one item at a time with the user (list_inbox), asking what it is. Mode "suggest" writes the decision as Claude\'s suggestion on the item instead of doing it (several at once in items): the user sees it in Process Inbox and presses Submit; decision "suggested" presses Submit for them when they say so. A suggestion only names projects, tags and people that exist.',
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string' },
-          decision: { type: 'string', enum: DECISIONS },
+          decision: { type: 'string', enum: [...DECISIONS, 'suggested'], description: 'The clarify decision; "suggested" presses Submit on the item\'s pending suggestion (when the user says submit)' },
+          mode: { type: 'string', enum: ['do', 'suggest'], description: '"suggest": write the decision as a suggestion on the item instead of doing it; the user presses Submit in Process Inbox. Default "do".' },
+          note: { type: 'string', description: 'suggest: one line saying why (shown with the suggestion in the app)' },
+          items: { type: 'array', items: { type: 'object' }, description: 'suggest: several items at once, each {id, decision, ...the same fields, note}; one call for the whole Inbox. The top-level id and decision may then be left out.' },
           source: { type: 'string', description: 'slipbox: where the idea came from' },
           type: { type: 'string', enum: ['book', 'article', 'video', 'podcast', 'other'], description: 'reading: what kind' },
           project: { type: 'string', description: 'next_action: project name or id' },
@@ -82,9 +126,32 @@ export function gtdTools({ OPEN, zonedToIso, localDate, inList, tool }) {
           topic: { type: 'string', description: 'reference: topic to file under' },
           category: { type: 'string', description: 'someday: optional category, e.g. Travel (becomes the tag Someday : Travel)' },
         },
-        required: ['id', 'decision'],
+        required: [],
       },
       async run(api, a) {
+        if (a.mode === 'suggest') { // Claude's draft, waiting for the user's Submit (js/inbox-suggestion.js; migration 20261115000001)
+          const items = Array.isArray(a.items) && a.items.length ? a.items : [a];
+          const look = await api.lookups();
+          const list = [];
+          for (const it of items) list.push(await toSuggestion(api, it, look));
+          const res = await api.q('rpc/inbox_suggest', { method: 'POST', body: { p_items: list, owner: api.userId } });
+          const ok = new Set(res.suggested || []);
+          return { suggested: ok.size, skipped: res.skipped || [], items: list.filter((s) => ok.has(s.id)).map((s) => ({ id: s.id, says: suggestionLine(s), note: s.note })),
+            next: 'The user presses Submit on each in Process Inbox (items with a suggestion come first). When they say "submit", clarify_item decision "suggested" presses it for them.' };
+        }
+        if (!a.id || !a.decision) throw new Error('id and decision are required');
+        if (a.decision === 'suggested') { // press Submit for the user: the pending suggestion goes through the decision it names
+          const t0 = await api.task(a.id);
+          const s = pendingSuggestion(t0);
+          if (!s) throw new Error('No pending suggestion on that item (list_inbox shows them).');
+          if (!t0.in_inbox) throw new Error('That item has left the Inbox already.');
+          const look = await api.lookups();
+          const labels = (s.tag_ids || []).map((id) => { const g = look.tags.find((x) => x.id === id); return g ? look.tagLabel(g) : null; }).filter(Boolean);
+          const out = await tool('clarify_item').run(api, { id: t0.id, decision: s.decision, project: s.project_id || undefined, tags: labels.length ? labels : undefined, planned: s.planned, flagged: s.flagged, energy: s.energy,
+            person: s.person_id, follow_up: s.follow_up, name: s.name, first_action: s.first_action, date: s.date, topic: s.topic, category: s.category, title: s.title, source: s.source, type: s.type });
+          await api.q(`tasks?${api.u}&id=eq.${t0.id}`, { method: 'PATCH', body: { suggestion: { ...s, applied_at: new Date().toISOString() } } }); // after: a refused decision leaves it pending
+          return { applied: s.decision, says: suggestionLine(s), ...out };
+        }
         const t = await api.task(a.id);
         if (t.completed_at || t.dropped_at) throw new Error('That item is already closed');
         const now = new Date().toISOString();

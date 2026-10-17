@@ -937,6 +937,13 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .cl-sug .chip { background: rgba(255,255,255,.18); color: #fff; font-size: 13px; font-weight: 600; }
 .cl-sug kbd { margin-left: auto; font: 600 12px/18px -apple-system, system-ui, sans-serif; border: 1px solid rgba(255,255,255,.5); border-radius: 5px; padding: 0 6px; }
 .cl-sug-ok { font-size: 16px; }
+/* Claude's suggestion on the item: who, the note, the one-press Submit, Dismiss. The count line sits under the progress. */
+.cl-claude { display: flex; flex-direction: column; gap: 8px; }
+.cl-claude-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; font-size: 13px; color: var(--muted); }
+.cl-claude-note { color: var(--text); }
+.cl-claude-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+.cl-draft { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: -6px 0 12px; font-size: 13px; color: var(--muted); }
+.cl-draft .link-btn { font-size: 13px; padding: 0; }
 .cl-qrow { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 2px 0 2px; }
 .cl-qrow .cl-keys { flex: none; text-align: right; }
 .cl-q { margin: 0; color: var(--text); font-size: 15px; font-weight: 600; }

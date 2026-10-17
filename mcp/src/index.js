@@ -7,6 +7,7 @@
 // below is explicitly scoped to the token owner's user_id.
 
 import PostalMime from 'postal-mime';
+import { pendingSuggestion, suggestionLine } from '../../js/inbox-suggestion.js';
 import { handleGeo, makePlaceResolver, loadPlaceData, decodeSnapshot } from './geo.js';
 import { sendDueReminders, sendReviewReminders, sendDailyReminders } from './reminders.js';
 import { deliver, sendQueuedTests } from './deliver.js';
@@ -40,7 +41,7 @@ const SERVER_INFO = { name: 'todotooling', version: '0.1.0' };
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = `Todo Tooling is the user's GTD system. Capture anything new with capture (it lands in the Inbox).
 What do I gain?: every action can carry the user's gain (why it's worth doing; a project's gain is its purpose). When capturing, ask what they gain if it isn't obvious and pass it as gain; capture then says which project it fits. Never present your own wording as theirs: drafts go in with gain_suggested (or gains action suggest) and show as "Claude suggested" until kept. Use gains to explain priorities, and gains missing / report to help them drop ideas with no clear payoff.
-Clarify inbox items one at a time with clarify_item (next_action, done, delegate, project, someday, tickler, trash, reference), or with update_task: an item leaves the Inbox once it has a project, a tag or a person (waiting_on / agenda_for).
+Clarify inbox items one at a time with clarify_item (next_action, done, delegate, project, someday, tickler, trash, reference), or with update_task: an item leaves the Inbox once it has a project, a tag or a person (waiting_on / agenda_for). Inbox suggestions: when the user asks you to draft, prepare or go through their Inbox with them, call list_inbox and put a suggestion on each item (clarify_item mode "suggest", all at once in items, a short note each, only projects, tags and people that exist); they press Submit in Process Inbox, where your suggestion shows beside their own choices. Decide for them (mode do, or decision "suggested" to press Submit) only when they say so.
 Delegation: delegate (or update_task waiting_on + follow_up) makes an item wait on a person; it is then not a next action. You never send anything: delegate and draft_nudge return a drafted message and mailto/sms link for the user to send. list_waiting shows follow-ups due; add_agenda_item/list_agenda keep what to discuss with someone. People: list_people, save_person.
 Tickler: tickle puts an item (or a new reminder) out of sight until a day, then it is back in the Inbox. Reference: search_reference / save_reference hold non-actionable information (codes, warranties); reveal hidden values only when the user asks. Energy (low/medium/high) is set with update_task and filtered with list_tasks max_energy.
 Use planned for when the user intends to work on something and due only for hard deadlines; flagged means "important now". Dates are YYYY-MM-DD in the user's timezone; a plain date lands at the user's default time (Settings → Dates).
@@ -1105,7 +1106,19 @@ const TOOLS = [
     async run(api, { limit = 100 }) {
       const now = new Date().toISOString();
       const rows = await api.q(`tasks?${api.u}&${OPEN}&in_inbox=is.true&parent_id=is.null&or=(tickler.is.false,defer_at.is.null,defer_at.lte.${now})&order=created_at.asc&limit=${Math.min(+limit || 100, 500)}&select=*`);
-      return { count: rows.length, items: await api.shape(rows) };
+      const items = await api.shape(rows);
+      // Claude's pending suggestion on each item, in words (js/inbox-suggestion.js), and which items still have none.
+      const look = rows.some(pendingSuggestion) ? await api.lookups() : null;
+      let suggested = 0;
+      items.forEach((it, i) => {
+        const s = pendingSuggestion(rows[i]);
+        if (!s) return;
+        suggested += 1;
+        const tagOf = (id) => { const g = look.tags.find((x) => x.id === id); return g ? look.tagLabel(g) : null; };
+        it.suggestion = { decision: s.decision, says: suggestionLine(s, { project: (look.projects.find((p) => p.id === s.project_id) || {}).name || s.project_name, tags: s.tag_ids ? s.tag_ids.map(tagOf).filter(Boolean) : s.tag_labels, person: (look.people.find((p) => p.id === s.person_id) || {}).name || s.person_name }), note: s.note || undefined, at: s.at };
+      });
+      return { count: rows.length, suggested, missing: rows.filter((t) => !pendingSuggestion(t)).map((t) => t.id), items,
+        how: 'suggestion = Claude\'s draft of the clarify decision, waiting for the user\'s Submit in Process Inbox. Draft the missing ones with clarify_item mode "suggest" (all at once in items); press Submit for them only when they say so (clarify_item decision "suggested").' };
     },
   },
   {
