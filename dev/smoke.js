@@ -16,6 +16,12 @@ const answer = async (value) => {
   else { $('#sheet2 [name=answer]').value = value; $('#sheet2 form').requestSubmit(); }
   await wait(80);
 };
+// A whole press: pointerdown, then pointerup on what is under the finger when it lifts (the pressed row may be
+// gone by then). A pointerdown alone leaves the press held for good, and Full Review's redraw() waits for it.
+const tap = (el) => {
+  el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+  (el.isConnected ? el : document.body).dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+};
 
 // Reset mock data and reload it through the app's own modules (same instances the page uses).
 async function reload() {
@@ -85,7 +91,7 @@ async function projectNamesakes(check) {
   type('movies'); await wait(30);
   const row = $('.ss-pop .ss-new');
   check('typing its name: the row offers to reopen it, and says it was completed', !!row && /reopen “movies”/i.test(row.textContent) && /completed/i.test(row.textContent), row && row.textContent);
-  row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+  tap(row);
   await until(() => t.projects.find((p) => p.id === 'pnMov').status === 'active');
   await wait(80);
   check('picked: the project is reopened (no second one made), selected, and the toast says so', t.projects.filter((p) => p.name.toLowerCase() === 'movies').length === 1 && sel.value === 'pnMov' && /reopened/i.test(text('#toast')), text('#toast'));
@@ -154,6 +160,7 @@ async function lastAdded(check) {
   $('#view li.row[data-task="laD"] .row-title').click(); await wait(120);
   check('a row from the server opens like any other', $('#sheet').open && ($('#sheet [name=title]') || {}).value === 'Done the day it came');
   if ($('#sheet').open) $('#sheet').close();
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); // focus stays in the closed editor's title until the next frame (none while the Browser pane is hidden), and the next suite's keys read as typing
   check('the sidebar lists it under Lists with a quiet count of what came in today', !!$('.nav-group[data-group="lists"] [data-nav="added"]') && $('#badge-added').textContent === '2 today', $('#badge-added').textContent);
 }
 
@@ -691,7 +698,7 @@ async function captureDetails(check) {
   await type('Order fittings @Laptop by tomorrow #');
   check('“#” opens the project search', !!$('.ss-pop .ss-q') && !!$('#quick [data-qe-drop="tag"]') && has('#quick .qe-chips', 'laptop', 'due tomorrow'));
   const opt = $$('.ss-pop .ss-opt').find((li) => /driveway trailer/i.test(li.textContent));
-  opt.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); await wait(100);
+  tap(opt); await wait(100);
   check('picked: the project chip, and the # is gone', !$('.ss-pop') && has('#quick .qe-chips', 'driveway trailer') && !title().value.includes('#'));
   $('#quick').requestSubmit(); await wait(400);
   const made3 = t.tasks.find((x) => x.title === 'Order fittings');
@@ -2330,7 +2337,7 @@ async function newProjectFromPicker(check) {
   type('Gun bench'); await wait(30);
   const row = $('.ss-pop .ss-new');
   check('no match: the list ends with "+ New project" instead of "No matches"', !!row && /new project “gun bench”/i.test(row.textContent) && !$('.ss-pop .ss-empty') && row.classList.contains('ss-active'));
-  row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+  tap(row);
   await until(() => t.projects.some((p) => p.name === 'Gun bench'));
   await wait(80);
   const made = t.projects.find((p) => p.name === 'Gun bench');

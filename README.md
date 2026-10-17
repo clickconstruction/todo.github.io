@@ -89,7 +89,7 @@ Open `http://localhost:8765/?mock` to use the in-memory mock (`dev/mock-supabase
 const { run } = await import('/dev/smoke.js'); await run()
 ```
 
-The full run takes two to three minutes. Pass `{ only: ['suiteName'] }` to run one suite.
+The full run takes about six minutes. Pass `{ only: ['suiteName'] }` to run one suite.
 
 **MCP tests**
 
