@@ -3028,6 +3028,13 @@ async function mindSweep(check) {
   check('Edit the prompts lists the hidden one by name', has('.sweep-edit', '1 built-in prompt hidden', 'meaning to start'), text('.sweep-edit'));
   $('.sweep-edit [data-sweep="unhide"][data-id="t2"]').click(); await wait(250);
   check('show hidden prompts again', (T().user_settings[0].trigger_hidden || []).length === 0);
+  // The box reads the Inbox box's marks: #project files the thought there, @tag tags it, and the list says where it went.
+  app.sweep.i = 0; (await import('/js/router.js')).render(); await wait(80);
+  const proj = T().projects.find((p) => p.status === 'active' && /^[A-Za-z ]+$/.test(p.name));
+  inp().focus(); inp().value = `Order the gate hinges #${proj.name} @Laptop`; inp().closest('form').requestSubmit(); await wait(300);
+  const hinge = T().tasks.find((x) => x.title === 'Order the gate hinges');
+  check('#project and @tag in the sweep box: filed in that project with the tag, not in the Inbox, and the list says where', !!hinge && !hinge.in_inbox && hinge.project_id === proj.id && T().task_tags.some((l) => l.task_id === hinge.id && l.tag_id === 'g1') && has('.sweep-caps', 'order the gate hinges', proj.name.toLowerCase(), '@laptop'), `${hinge && hinge.project_id} · ${text('.sweep-caps')}`);
+  check('the hint under the box says what the line can carry', has('.sweep-hint', '#project', '@tag', 'why it matters'), text('.sweep-hint'));
 }
 
 // Someday/Maybe: categories, activate, revisit, drop, on-hold projects.

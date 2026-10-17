@@ -1,5 +1,6 @@
 // Mind sweep: one trigger at a time ("Home repairs", "Money owed"…); type what comes to mind and
-// press Enter to capture it to the Inbox. Hidden and custom prompts are saved to the account. Whatever hides a
+// press Enter to capture it to the Inbox (or, with #project or @tag on the line, straight to where it belongs:
+// the box reads the Inbox box's marks, js/capture-line.js, and the list under the prompt says where each went). Hidden and custom prompts are saved to the account. Whatever hides a
 // prompt sits beside a way to see the hidden ones and bring any of them back (beside Hide, and under Edit the prompts).
 // A draw never throws away what is in the box: sweepHtml reads the live box before the draw replaces it and
 // focusInput puts its text, caret and focus back after (see remember below).
@@ -10,13 +11,19 @@
 // open across the redraw after a capture (app.sweep.route, routeOpen).
 import { app, esc, toast } from '../state.js';
 import { sweepPrompts, TRIGGERS } from '../weekly.js';
-import { capture } from '../data.js';
-import { splitGain } from '../gain.js';
+import { captureLine, readLine } from '../capture-line.js';
 import { saveSettings } from '../prefs.js';
 
 const state = () => (app.sweep ||= { i: 0, captured: {} });
 const prompts = () => sweepPrompts(app.settings || {});
 const total = () => Object.values(state().captured).reduce((n, l) => n + l.length, 0);
+// What each prompt captured: {title, where (a project's name when #project filed it there, else ''), tags (labels)}.
+function sweptLine() {
+  const n = total();
+  if (!n) return 'Nothing new. Your head is clear.';
+  const filed = Object.values(state().captured).flat().filter((c) => c.where).length;
+  return filed ? `${n} captured: ${n - filed} to your Inbox, ${filed} filed in ${filed === 1 ? 'a project' : 'projects'}.` : `${n} captured to your Inbox.`;
+}
 // The built-in prompts hidden, in their usual order.
 const hiddenPrompts = () => { const h = new Set((app.settings || {}).trigger_hidden || []); return TRIGGERS.filter((t) => h.has(t.id)); };
 // Each hidden prompt with Show again; Show all again when there are several.
@@ -88,9 +95,9 @@ export function sweepHtml({ embedded = false } = {}) {
     <div class="cl-progress"><i style="width:${Math.round((s.i / list.length) * 100)}%"></i></div>
     ${s.route ? routeHtml(list, s.i) : ''}
     <div class="cl-item sweep-card"><b>${esc(p.text)}</b>${p.hint ? `<span class="cl-meta">${esc(p.hint)}…</span>` : ''}</div>
-    ${mine.length ? `<ul class="sweep-caps">${mine.map((t) => `<li>📥 ${esc(t)}</li>`).join('')}</ul>` : ''}
+    ${mine.length ? `<ul class="sweep-caps">${mine.map((c) => `<li>${c.where ? '📁' : '📥'} ${esc(c.title)}${c.where ? ` <span class="hint">· ${esc(c.where)}</span>` : ''}${c.tags && c.tags.length ? ` <span class="hint">${c.tags.map((x) => `@${esc(x)}`).join(' ')}</span>` : ''}</li>`).join('')}</ul>` : ''}
     <form class="capture" data-sweep-capture><input type="text" name="title" id="sweep-input" value="${esc(box ? box.value : '')}" placeholder="${mine.length ? 'Anything else?' : 'What comes to mind?'} ⏎ to capture" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
-    <p class="hint">Add why it’s worth doing after an arrow: <span class="gain-text">Get a trailer quote → two crews on Fridays</span></p>
+    <p class="hint sweep-hint">#project · @tag · “due fri” · → why it matters</p>
     <div class="sweep-foot"><button class="btn small" data-sweep="prev" ${s.i ? '' : 'disabled'}>‹</button>
       <button class="btn small" data-sweep="hide" data-id="${p.id}">Hide this prompt</button>
       ${nHidden ? `<button class="btn small" data-sweep="hidden-toggle" aria-expanded="${s.showHidden ? 'true' : 'false'}">${s.showHidden ? 'Close hidden prompts' : `View hidden prompts (${nHidden})`}</button>` : ''}
@@ -105,7 +112,7 @@ function endHtml(embedded) {
   const hidden = (s.trigger_hidden || []).length;
   const custom = s.trigger_custom || [];
   return `<div class="cl-done sweep-done"><div class="cl-big">🧹</div><h2>Swept</h2>
-    <p>${total() ? `${total()} captured to your Inbox.` : 'Nothing new. Your head is clear.'}</p>
+    <p>${sweptLine()}</p>
     <p><button class="btn" data-sweep="again">Go through again</button> ${!embedded && total() ? '<a class="btn primary" href="#clarify">Clarify them now</a>' : ''}</p></div>
     <details class="sweep-edit"><summary>Edit the prompts</summary>
       <form class="capture" data-sweep-add><select name="group" aria-label="Group"><option>Work</option><option>Personal</option></select><input type="text" name="text" placeholder="Your own prompt, e.g. Rental properties" maxlength="120" autocomplete="off"><button class="btn">Add</button></form>
@@ -179,9 +186,10 @@ export function sweepSubmit(e) {
   cap.elements.title.value = '';
   const s = state();
   const p = prompts()[s.i];
-  const { title: t, gain } = splitGain(title); // "Idea → gain" keeps both
-  (s.captured[p.id] ||= []).push(t);
-  capture(t, gain ? { gain } : {}).then(focusInput);
+  const a = readLine(title); // the Inbox box's marks: #project files it there, @tag tags it, due/plan date it, → carries why
+  if (!a.title) return true;
+  (s.captured[p.id] ||= []).push({ title: a.title, where: a.project ? a.project.name : '', tags: a.tags.map((x) => x.label) });
+  captureLine(title).then(focusInput);
   return true;
 }
 
