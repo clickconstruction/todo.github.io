@@ -2101,6 +2101,10 @@ assert(dl.devices.some((d) => d.device === 'iPhone' && d.service === 'push.examp
   assert(await refuse({ action: 'sidebar', hide: ['forecast'] }, /can’t be hidden/) && await refuse({ action: 'sidebar', hide: ['nope'] }, /no sidebar view/) && await refuse({ action: 'sidebar', order: { do: ['projects'] } }, /not in do/) && srow.sidebar.hidden.join() === 'slipbox', 'settings sidebar: Forecast can\'t be hidden, unknown or misplaced views are refused');
   assert((await tool('settings', { action: 'sidebar', reset: true })).sidebar.hidden.length === 0 && Object.keys(srow.sidebar).length === 0, 'settings sidebar: reset');
   const mine = await tool('settings', { action: 'sweep_prompt', add: { group: 'Work', prompt: 'Trucks due for service' } });
+  const hid = await tool('settings', { action: 'sweep_prompt', hide: 'calls to make or return' });
+  assert(hid.mind_sweep.hidden.some((h) => h.prompt === 'Calls to make or return'), 'settings: which prompts are hidden, by name');
+  const shown = await tool('settings', { action: 'sweep_prompt', show: 'Calls to make or return' });
+  assert(!shown.mind_sweep.hidden.some((h) => h.prompt === 'Calls to make or return') && await refuse({ action: 'sweep_prompt', show: 'Calls to make or return' }, /isn't a hidden prompt/), 'settings sweep_prompt show: one hidden prompt back; one that isn\'t hidden is refused');
   await tool('settings', { action: 'sweep_prompt', hide: 'calls to make or return' });
   const sweep = await tool('mind_sweep_prompts', {});
   assert(mine.mind_sweep.yours[0].prompt === 'Trucks due for service' && sweep.prompts.some((p) => p.prompt === 'Trucks due for service' && p.yours) && !sweep.prompts.some((p) => p.prompt === 'Calls to make or return'), 'settings sweep_prompt: their own prompt added and a built-in hidden, as the mind sweep then shows');

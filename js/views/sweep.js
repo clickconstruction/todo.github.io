@@ -1,5 +1,6 @@
 // Mind sweep: one trigger at a time ("Home repairs", "Money owed"…); type what comes to mind and
-// press Enter to capture it to the Inbox. Hidden and custom prompts are saved to the account.
+// press Enter to capture it to the Inbox. Hidden and custom prompts are saved to the account. Whatever hides a
+// prompt sits beside a way to see the hidden ones and bring any of them back (beside Hide, and under Edit the prompts).
 import { app, esc, toast } from '../state.js';
 import { sweepPrompts, TRIGGERS } from '../weekly.js';
 import { capture } from '../data.js';
@@ -9,6 +10,22 @@ import { saveSettings } from '../prefs.js';
 const state = () => (app.sweep ||= { i: 0, captured: {} });
 const prompts = () => sweepPrompts(app.settings || {});
 const total = () => Object.values(state().captured).reduce((n, l) => n + l.length, 0);
+// The built-in prompts hidden, in their usual order.
+const hiddenPrompts = () => { const h = new Set((app.settings || {}).trigger_hidden || []); return TRIGGERS.filter((t) => h.has(t.id)); };
+// Each hidden prompt with Show again; Show all again when there are several.
+function hiddenListHtml() {
+  const list = hiddenPrompts();
+  return `<ul class="list sweep-hidden-list">${list.map((t) => `<li class="row"><div class="row-main"><div class="row-title">${esc(t.text)}</div><div class="row-meta">${esc(t.group)} · hidden</div></div><button class="btn small" data-sweep="unhide" data-id="${esc(t.id)}">Show again</button></li>`).join('')}</ul>
+    ${list.length > 1 ? '<p><button class="link-btn" data-sweep="restore">Show all again</button></p>' : ''}`;
+}
+// Bringing prompts back puts them in their places: stay on the prompt you were on.
+async function keepPlace(fn) {
+  const s = state();
+  const was = (prompts()[s.i] || {}).id;
+  await fn();
+  const j = was ? prompts().findIndex((p) => p.id === was) : -1;
+  if (j >= 0) s.i = j;
+}
 
 export function sweepHtml({ embedded = false } = {}) {
   const s = state();
@@ -17,6 +34,7 @@ export function sweepHtml({ embedded = false } = {}) {
   const p = list[s.i];
   const inGroup = list.filter((x) => x.group === p.group);
   const mine = s.captured[p.id] || [];
+  const nHidden = hiddenPrompts().length;
   return `<div class="sweep" data-sweep-box>
     <div class="sweep-top"><span class="hint">${s.i + 1} of ${list.length} · ${esc(p.group)}${inGroup[0] === p && p.group === 'Personal' ? ' (work is done)' : ''}</span>${total() ? `<span class="hint">${total()} captured</span>` : ''}</div>
     <div class="cl-progress"><i style="width:${Math.round((s.i / list.length) * 100)}%"></i></div>
@@ -26,7 +44,9 @@ export function sweepHtml({ embedded = false } = {}) {
     <p class="hint">Add why it’s worth doing after an arrow: <span class="gain-text">Get a trailer quote → two crews on Fridays</span></p>
     <div class="sweep-foot"><button class="btn small" data-sweep="prev" ${s.i ? '' : 'disabled'}>‹</button>
       <button class="btn small" data-sweep="hide" data-id="${p.id}">Hide this prompt</button>
+      ${nHidden ? `<button class="btn small" data-sweep="hidden-toggle" aria-expanded="${s.showHidden ? 'true' : 'false'}">${s.showHidden ? 'Close hidden prompts' : `View hidden prompts (${nHidden})`}</button>` : ''}
       <button class="btn primary" data-sweep="next">${s.i === list.length - 1 ? 'Finish' : 'Next prompt'} →</button></div>
+    ${nHidden && s.showHidden ? `<div class="sweep-hidden"><p class="hint">${nHidden} built-in prompt${nHidden === 1 ? '' : 's'} hidden. Show one again and it’s back in its place in the sweep.</p>${hiddenListHtml()}</div>` : ''}
     <p class="hint sweep-keys">⏎ captures · → next prompt (when the box is empty) · ← back</p>
   </div>`;
 }
@@ -41,7 +61,7 @@ function endHtml(embedded) {
     <details class="sweep-edit"><summary>Edit the prompts</summary>
       <form class="capture" data-sweep-add><select name="group" aria-label="Group"><option>Work</option><option>Personal</option></select><input type="text" name="text" placeholder="Your own prompt, e.g. Rental properties" maxlength="120" autocomplete="off"><button class="btn">Add</button></form>
       ${custom.length ? `<ul class="list">${custom.map((c) => `<li class="row"><div class="row-main"><div class="row-title">${esc(c.text)}</div><div class="row-meta">${esc(c.group)} · yours</div></div><button class="btn small" data-sweep="remove" data-id="${esc(c.id)}">Remove</button></li>`).join('')}</ul>` : ''}
-      ${hidden ? `<p class="hint">${hidden} built-in prompt${hidden === 1 ? '' : 's'} hidden. <button class="link-btn" data-sweep="restore">Show them again</button></p>` : `<p class="hint">${TRIGGERS.length} built-in prompts. Hide any that don’t apply as you go.</p>`}
+      ${hidden ? `<p class="hint">${hidden} built-in prompt${hidden === 1 ? '' : 's'} hidden:</p>${hiddenListHtml()}` : `<p class="hint">${TRIGGERS.length} built-in prompts. Hide any that don’t apply as you go.</p>`}
     </details>`;
 }
 
@@ -59,7 +79,14 @@ export async function sweepAction(el) {
     const id = el.dataset.id;
     await saveSettings({ trigger_hidden: [...new Set([...(set.trigger_hidden || []), id])] }, { quiet: true });
     toast('Prompt hidden', [{ label: 'Undo', run: async () => { await saveSettings({ trigger_hidden: (app.settings.trigger_hidden || []).filter((x) => x !== id) }, { quiet: true }); app.render(); } }]);
-  } else if (a === 'restore') await saveSettings({ trigger_hidden: [] });
+  } else if (a === 'hidden-toggle') s.showHidden = !s.showHidden;
+  else if (a === 'unhide') {
+    const id = el.dataset.id;
+    const t = TRIGGERS.find((x) => x.id === id);
+    await keepPlace(() => saveSettings({ trigger_hidden: (set.trigger_hidden || []).filter((x) => x !== id) }, { quiet: true }));
+    if (!hiddenPrompts().length) s.showHidden = false;
+    toast(`Back in the sweep: ${t ? t.text : 'the prompt'}`);
+  } else if (a === 'restore') { await keepPlace(() => saveSettings({ trigger_hidden: [] })); s.showHidden = false; }
   else if (a === 'remove') await saveSettings({ trigger_custom: (set.trigger_custom || []).filter((c) => c.id !== el.dataset.id) });
   app.render();
   focusInput();

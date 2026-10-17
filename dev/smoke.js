@@ -2969,6 +2969,14 @@ async function mindSweep(check) {
   check('→ on an empty box goes to the next prompt', has(undefined, '2 of 56', 'meaning to start'));
   $('[data-sweep="hide"]').click(); await wait(250);
   check('Hide this prompt: saved, and the list is one shorter', (T().user_settings[0].trigger_hidden || []).includes('t2') && has(undefined, '2 of 55'));
+  check('beside it: View hidden prompts, with the count', has('.sweep-foot', 'view hidden prompts (1)'), text('.sweep-foot'));
+  $('[data-sweep="hide"]').click(); await wait(250); // hide a second (t3): now on t4, 2 of 54
+  $('[data-sweep="hidden-toggle"]').click(); await wait(100);
+  check('View hidden prompts lists them, each with Show again, and Show all again', has('.sweep-hidden', '2 built-in prompts hidden', 'meaning to start', 'commitments to your boss') && $$('.sweep-hidden [data-sweep="unhide"]').length === 2 && !!$('.sweep-hidden [data-sweep="restore"]'), text('.sweep-hidden'));
+  $('.sweep-hidden [data-sweep="unhide"][data-id="t3"]').click(); await wait(250);
+  check('Show again: back in its place, and you stay on the prompt you were on', !(T().user_settings[0].trigger_hidden || []).includes('t3') && has('.sweep-card', 'commitments to your crew') && has(undefined, '3 of 55') && has('.sweep-hidden', '1 built-in prompt hidden'), text('.sweep-top') + ' | ' + text('.sweep-card'));
+  $('[data-sweep="hidden-toggle"]').click(); await wait(100);
+  check('Close hides the list again', !$('.sweep-hidden') && has('.sweep-foot', 'view hidden prompts (1)'));
   const { app } = await import('/js/state.js');
   app.sweep.i = 54; (await import('/js/router.js')).render(); await wait(80);
   $('[data-sweep="next"]').click(); await wait(150);
@@ -2981,7 +2989,8 @@ async function mindSweep(check) {
   check('custom prompts join their group; hidden ones stay out', ps.length === 56 && !ps.some((p) => p.id === 't2') && ps.findIndex((p) => p.text === 'Rental properties') < ps.findIndex((p) => p.group === 'Personal'));
   app.sweep.i = 999; (await import('/js/router.js')).render(); await wait(80);
   $('.sweep-edit').open = true;
-  $('[data-sweep="restore"]').click(); await wait(250);
+  check('Edit the prompts lists the hidden one by name', has('.sweep-edit', '1 built-in prompt hidden', 'meaning to start'), text('.sweep-edit'));
+  $('.sweep-edit [data-sweep="unhide"][data-id="t2"]').click(); await wait(250);
   check('show hidden prompts again', (T().user_settings[0].trigger_hidden || []).length === 0);
 }
 

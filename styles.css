@@ -1054,6 +1054,10 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 @media (pointer: coarse) { .sweep-keys { display: none; } }
 .sweep-edit { margin-top: 12px; }
 .sweep-edit summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+/* The hidden prompts, beside Hide this prompt: each with Show again. */
+.sweep-hidden { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.sweep-hidden > .hint { margin: 0 0 6px; }
+.sweep-hidden-list { margin: 0; }
 .sweep-edit .capture select { width: auto; flex: none; }
 .sd-old { background: color-mix(in srgb, var(--flag) 18%, transparent); color: var(--flag); }
 .sd-row { flex-wrap: wrap; }
