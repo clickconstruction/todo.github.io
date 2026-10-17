@@ -3,6 +3,11 @@
 // prompt sits beside a way to see the hidden ones and bring any of them back (beside Hide, and under Edit the prompts).
 // A draw never throws away what is in the box: sweepHtml reads the live box before the draw replaces it and
 // focusInput puts its text, caret and focus back after (see remember below).
+// The route: the group label in "6 of 56 · Work" is a button (its title says the same in short for a hover) that
+// unfolds an outline under the progress bar: both groups with their counts, the one you are in with the prompt you
+// are on marked and the passed ones muted, the other folded to a line that opens the same way. A prompt there is a
+// tap that jumps to it (the box's text comes along through state().box); the outline closes on a jump and stays
+// open across the redraw after a capture (app.sweep.route, routeOpen).
 import { app, esc, toast } from '../state.js';
 import { sweepPrompts, TRIGGERS } from '../weekly.js';
 import { capture } from '../data.js';
@@ -29,6 +34,46 @@ async function keepPlace(fn) {
   if (j >= 0) s.i = j;
 }
 
+// The groups in the order the list has them (Work, then Personal), hidden prompts out and the user's own in:
+// { name, from (index of its first prompt in the list), prompts }.
+function groupsOf(list) {
+  const out = [];
+  list.forEach((p, i) => {
+    let g = out[out.length - 1];
+    if (!g || g.name !== p.group) { g = { name: p.group, from: i, prompts: [] }; out.push(g); }
+    g.prompts.push(p);
+  });
+  return out;
+}
+const countOf = (g) => `${g.prompts.length} prompt${g.prompts.length === 1 ? '' : 's'}`;
+// What a hover on the group label says, in short: where you are in the group, what is left and what comes after.
+function routeLine(list, i) {
+  const gs = groupsOf(list);
+  const k = gs.findIndex((g) => g.name === list[i].group);
+  const g = gs[k];
+  const at = i - g.from + 1;
+  const left = g.prompts.length - at;
+  const name = (x) => `${x.name} (${x.prompts.length})`;
+  const after = gs.slice(k + 1).map(name).join(', ');
+  const before = gs.slice(0, k).map(name).join(', ');
+  return [`${g.name}: prompt ${at} of ${g.prompts.length}`, left ? `${left} to go` : 'the last one', after ? `then ${after}` : '', before ? `${before} done` : '', 'Tap for the whole route'].filter(Boolean).join(' · ');
+}
+// The whole route under the progress bar. Every prompt is a tap that jumps there; captured counts show as a small number.
+function routeHtml(list, i) {
+  const s = state();
+  const gs = groupsOf(list);
+  const here = list[i].group;
+  const hereAt = gs.findIndex((g) => g.name === here);
+  const row = (p, j) => { const n = (s.captured[p.id] || []).length; return `<li class="${j === i ? 'here' : j < i ? 'passed' : ''}"><button type="button" data-sweep="jump" data-i="${j}"${j === i ? ' aria-current="step"' : ''}><span class="sweep-route-i">${j + 1}</span><span class="sweep-route-t">${esc(p.text)}</span>${n ? `<span class="sweep-route-n" title="${n} captured here">${n}</span>` : ''}</button></li>`; };
+  return `<div class="sweep-route" id="sweep-route"><ol class="sweep-route-groups">${gs.map((g, k) => {
+    const open = g.name === here || !!(s.routeOpen || {})[g.name];
+    const head = g.name === here
+      ? `<div class="sweep-route-head"><b>${esc(g.name)}</b> <span class="hint">· ${countOf(g)}, you are on ${i - g.from + 1}</span></div>`
+      : `<button type="button" class="sweep-route-head" data-sweep="route-group" data-group="${esc(g.name)}" aria-expanded="${open ? 'true' : 'false'}"><b>${esc(g.name)}</b> <span class="hint">· ${countOf(g)}, ${k > hereAt ? 'after' : 'before'} ${esc(here)}</span></button>`;
+    return `<li class="sweep-route-group${g.name === here ? ' here' : ''}">${head}${open ? `<ol class="sweep-route-list">${g.prompts.map((p, j) => row(p, g.from + j)).join('')}</ol>` : ''}</li>`;
+  }).join('')}</ol></div>`;
+}
+
 export function sweepHtml({ embedded = false } = {}) {
   const s = state();
   const list = prompts();
@@ -39,8 +84,9 @@ export function sweepHtml({ embedded = false } = {}) {
   const mine = s.captured[p.id] || [];
   const nHidden = hiddenPrompts().length;
   return `<div class="sweep" data-sweep-box>
-    <div class="sweep-top"><span class="hint">${s.i + 1} of ${list.length} · ${esc(p.group)}${inGroup[0] === p && p.group === 'Personal' ? ' (work is done)' : ''}</span>${total() ? `<span class="hint">${total()} captured</span>` : ''}</div>
+    <div class="sweep-top"><span class="hint">${s.i + 1} of ${list.length} · <button type="button" class="sweep-group" data-sweep="route" aria-expanded="${s.route ? 'true' : 'false'}"${s.route ? ' aria-controls="sweep-route"' : ''} title="${esc(routeLine(list, s.i))}">${esc(p.group)} ${s.route ? '▴' : '▾'}</button>${inGroup[0] === p && p.group === 'Personal' ? ' (work is done)' : ''}</span>${total() ? `<span class="hint">${total()} captured</span>` : ''}</div>
     <div class="cl-progress"><i style="width:${Math.round((s.i / list.length) * 100)}%"></i></div>
+    ${s.route ? routeHtml(list, s.i) : ''}
     <div class="cl-item sweep-card"><b>${esc(p.text)}</b>${p.hint ? `<span class="cl-meta">${esc(p.hint)}…</span>` : ''}</div>
     ${mine.length ? `<ul class="sweep-caps">${mine.map((t) => `<li>📥 ${esc(t)}</li>`).join('')}</ul>` : ''}
     <form class="capture" data-sweep-capture><input type="text" name="title" id="sweep-input" value="${esc(box ? box.value : '')}" placeholder="${mine.length ? 'Anything else?' : 'What comes to mind?'} ⏎ to capture" autocomplete="off" enterkeyhint="done"><button class="btn primary">Add</button></form>
@@ -101,6 +147,9 @@ export async function sweepAction(el) {
     await saveSettings({ trigger_hidden: [...new Set([...(set.trigger_hidden || []), id])] }, { quiet: true });
     toast('Prompt hidden', [{ label: 'Undo', run: async () => { await saveSettings({ trigger_hidden: (app.settings.trigger_hidden || []).filter((x) => x !== id) }, { quiet: true }); app.render(); } }]);
   } else if (a === 'hidden-toggle') s.showHidden = !s.showHidden;
+  else if (a === 'route') s.route = !s.route;
+  else if (a === 'route-group') { const g = el.dataset.group; (s.routeOpen ||= {})[g] = !s.routeOpen[g]; }
+  else if (a === 'jump') { s.i = Math.max(0, Math.min(prompts().length - 1, Number(el.dataset.i) || 0)); s.route = false; }
   else if (a === 'unhide') {
     const id = el.dataset.id;
     const t = TRIGGERS.find((x) => x.id === id);
