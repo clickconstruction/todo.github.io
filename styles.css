@@ -1058,6 +1058,25 @@ label.flag-toggle input { width: 22px; height: 22px; flex: none; }
 .sweep-hidden { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .sweep-hidden > .hint { margin: 0 0 6px; }
 .sweep-hidden-list { margin: 0; }
+/* The route: the group label is a button; the outline under the progress bar lists both groups and every prompt is a jump. */
+.sweep-top { align-items: center; }
+.sweep-group { background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; }
+.sweep-group:hover, .sweep-group[aria-expanded="true"] { color: var(--text); border-color: var(--accent); }
+.sweep-route { margin: -4px 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.sweep-route ol { list-style: none; margin: 0; padding: 0; }
+.sweep-route-group + .sweep-route-group { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.sweep-route-head { display: block; width: 100%; padding: 2px 0; font: inherit; font-size: 14px; font-weight: 600; text-align: left; }
+button.sweep-route-head { background: none; border: 0; color: var(--accent); cursor: pointer; }
+button.sweep-route-head b { color: var(--accent); }
+.sweep-route-head .hint { font-size: 13px; }
+.sweep-route ol.sweep-route-list { display: grid; gap: 1px; margin-top: 4px; }
+.sweep-route-list button { display: flex; width: 100%; gap: 8px; align-items: baseline; text-align: left; background: none; border: 0; padding: 6px 8px; border-radius: 8px; font: inherit; font-size: 14px; color: var(--text); cursor: pointer; min-height: 32px; }
+.sweep-route-list button:hover { background: var(--surface-2); }
+.sweep-route-list .passed button { color: var(--muted); }
+.sweep-route-list .here button { background: var(--accent-soft); font-weight: 600; }
+.sweep-route-i { flex: none; width: 2.2ch; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sweep-route-t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.sweep-route-n { flex: none; font-size: 12px; color: var(--muted); background: var(--surface-2); border-radius: 999px; padding: 0 7px; }
 .sweep-edit .capture select { width: auto; flex: none; }
 .sd-old { background: color-mix(in srgb, var(--flag) 18%, transparent); color: var(--flag); }
 .sd-row { flex-wrap: wrap; }

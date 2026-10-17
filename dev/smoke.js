@@ -2978,6 +2978,27 @@ async function mindSweep(check) {
   inp().value = 'Call the inspector'; inp().setSelectionRange(4, 4); // in the box before the save came back
   await wait(250);
   check('what you type while a capture saves survives the redraw, with the caret and focus', inp().value === 'Call the inspector' && document.activeElement === inp() && inp().selectionStart === 4 && $$('.sweep-caps li').length === 3, `${inp().value} · caret ${inp().selectionStart} · ${$$('.sweep-caps li').length} listed`);
+  // The route: the group label is a button (its title says where you are in short) that unfolds both groups under the
+  // progress bar; a prompt there is a jump, and the box's text comes along.
+  check('the group label is a button whose title says where you are in short', !!$('[data-sweep="route"]') && /^Work: prompt 1 of 30 · 29 to go · then Personal \(26\)/.test($('[data-sweep="route"]').title), $('[data-sweep="route"]').title);
+  $('[data-sweep="route"]').click(); await wait(100);
+  check('tap: the outline lists Work unfolded with its 30 prompts and Personal folded to a line', !!$('.sweep-route') && $$('.sweep-route-list li').length === 30 && has('.sweep-route', 'work · 30 prompts, you are on 1', 'personal · 26 prompts, after work') && $('[data-sweep="route-group"][data-group="Personal"]').getAttribute('aria-expanded') === 'false', text('.sweep-route'));
+  check('the prompt you are on is marked, with its captured count', has('.sweep-route .here', 'projects started but not finished') && text('.sweep-route .here .sweep-route-n') === '3' && !$('.sweep-route .passed'), text('.sweep-route .here'));
+  check('the box kept its text and focus under the open outline', inp().value === 'Call the inspector' && document.activeElement === inp(), inp().value);
+  $('[data-sweep="route-group"][data-group="Personal"]').click(); await wait(100);
+  check('Personal opens the same way: its 26 prompts after Work’s 30', $$('.sweep-route-list li').length === 56 && has('.sweep-route', 'home repairs and projects'), text('.sweep-route'));
+  $('.sweep-route [data-sweep="jump"][data-i="37"]').click(); await wait(100);
+  check('a tap on a prompt jumps there and closes the outline; the box’s text came along', has('.sweep-top', '38 of 56', 'personal') && has('.sweep-card', 'home repairs and projects') && !$('.sweep-route') && inp().value === 'Call the inspector', `${text('.sweep-top')} | ${inp().value}`);
+  $('[data-sweep="route"]').click(); await wait(100);
+  inp().value = 'Replace the furnace filter'; inp().closest('form').requestSubmit(); await wait(250);
+  check('the outline stays open across the redraw after a capture, with the count on the prompt and the passed ones muted', !!$('.sweep-route') && $$('.sweep-route-list li').length === 26 && text('.sweep-route .here .sweep-route-n') === '1' && $$('.sweep-route .passed').length === 7 && has('.sweep-route', 'work · 30 prompts, before personal'), text('.sweep-route'));
+  $('.sweep-route [data-sweep="jump"][data-i="30"]').click(); await wait(100);
+  check('the first Personal prompt still says work is done beside the label', has('.sweep-top', '31 of 56', 'personal', '(work is done)') && !$('.sweep-route'), text('.sweep-top'));
+  $('[data-sweep="route"]').click(); await wait(100);
+  $('[data-sweep="route-group"][data-group="Work"]').click(); await wait(100);
+  check('Work unfolds from Personal, every prompt of it passed', $$('.sweep-route-list li').length === 56 && $$('.sweep-route .passed').length === 30, `${$$('.sweep-route-list li').length} rows, ${$$('.sweep-route .passed').length} passed`);
+  $('.sweep-route [data-sweep="jump"][data-i="0"]').click(); await wait(100);
+  check('back to the first prompt, its captures still listed', has('.sweep-top', '1 of 56', 'work') && !$('.sweep-route') && $$('.sweep-caps li').length === 3, text('.sweep-top'));
   inp().value = '';
   inp().focus();
   inp().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await wait(150);
@@ -2995,7 +3016,7 @@ async function mindSweep(check) {
   const { app } = await import('/js/state.js');
   app.sweep.i = 54; (await import('/js/router.js')).render(); await wait(80);
   $('[data-sweep="next"]').click(); await wait(150);
-  check('end: swept, with a link to clarify', has(undefined, 'swept', '3 captured') && !!$('a[href="#clarify"]'));
+  check('end: swept, with a link to clarify', has(undefined, 'swept', '4 captured') && !!$('a[href="#clarify"]'));
   $('.sweep-edit').open = true;
   const f = $('[data-sweep-add]'); f.elements.group.value = 'Work'; f.elements.text.value = 'Rental properties'; f.requestSubmit(); await wait(300);
   check('add your own prompt', (T().user_settings[0].trigger_custom || []).some((c) => c.text === 'Rental properties' && c.group === 'Work'));
