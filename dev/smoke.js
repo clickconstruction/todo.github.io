@@ -1842,7 +1842,9 @@ async function updates(check) {
   await go('#inbox');
   check('at rest on a list: safe', U.busyReason() === '', U.busyReason());
   const cap = $('[data-capture] input'); cap.focus();
-  check('typing: not safe', U.busyReason() === 'typing'); cap.blur();
+  check('an empty box with focus: safe (nothing to lose; pages that focus their box would never update)', U.busyReason() === '', U.busyReason());
+  cap.value = 'Fix the gate';
+  check('typing: not safe', U.busyReason() === 'typing'); cap.value = ''; cap.blur();
   inflight.n += 1; check('a save in flight: not safe', U.busyReason() === 'saving'); inflight.n -= 1;
   const { openQuickEntry } = await import('/js/editors/task.js'); openQuickEntry(); await wait(50); document.activeElement.blur();
   check('a sheet open: not safe (but a forced update may go)', U.busyReason() === 'sheet' && U.busyReason({ forced: true }) === '');
@@ -1869,13 +1871,20 @@ async function updates(check) {
   (await import('/js/inspector.js')).clearSelection();
   // A tap on Update ready while typing: it waits and says why.
   U.__resetUpdates(); U.onWaiting(fake); await wait(30);
-  $('[data-capture] input').focus();
+  $('[data-capture] input').focus(); $('[data-capture] input').value = 'Fix the gate';
   $('#nav-update').click(); await wait(30);
   check('Update ready while typing: waits, and says so', reloads === 1 && has('#toast', 'as soon as this is saved'));
-  $('[data-capture] input').blur();
+  $('[data-capture] input').value = ''; $('[data-capture] input').blur();
+  // Refresh or Check for updates asked a minute ago and the download outlasted the check: the worker switches when it lands, click or no click.
+  U.__resetUpdates(); U.updateState().askedAt = Date.now(); U.updateState().lastInput = Date.now();
+  U.onWaiting(fake); await wait(80);
+  check('a worker that lands within a minute of Refresh switches at once, even right after a click', reloads === 2, String(reloads));
+  U.__resetUpdates(); U.updateState().lastInput = Date.now();
+  U.onWaiting(fake); await wait(80);
+  check('…but one nobody asked for waits while you are mid-click', reloads === 2 && !$('#nav-update').hidden, String(reloads));
   openQuickEntry(); await wait(50); document.activeElement.blur();
   $('#nav-update').click(); await wait(30);
-  check('Update ready with a sheet open (not typing): your tap wins', reloads === 2);
+  check('Update ready with a sheet open (not typing): your tap wins', reloads === 3);
   $('#sheet').close();
   // A required update (below the minimum) goes even with a sheet open, never mid-typing.
   U.__resetUpdates();
@@ -1883,7 +1892,7 @@ async function updates(check) {
   Object.defineProperty(navigator.serviceWorker, 'controller', { configurable: true, get: () => ({ postMessage: (m, ports) => { if (ports && ports[0]) ports[0].postMessage({ version: 'v54', min: 'v1' }); } }) });
   openQuickEntry(); await wait(50); document.activeElement.blur();
   U.onWaiting(strict); await wait(80);
-  check('a required update: heads-up, then it goes even with a sheet open', U.updateState().force && has('#toast', 'important update') && reloads === 3);
+  check('a required update: heads-up, then it goes even with a sheet open', U.updateState().force && has('#toast', 'important update') && reloads === 4);
   delete navigator.serviceWorker.controller;
   $('#sheet').close();
   // Phones: the More sheet offers it.
@@ -1894,10 +1903,10 @@ async function updates(check) {
   // A switch that never came back (the tab was asleep when the worker took over): a tap tries again instead of nothing.
   U.__resetUpdates(); U.onWaiting(fake); await wait(30);
   $('#nav-update').click(); await wait(30);
-  check('a tap asks the worker to take over', reloads === 4 && U.updateState().applying, `${reloads} ${U.updateState().applying}`);
+  check('a tap asks the worker to take over', reloads === 5 && U.updateState().applying, `${reloads} ${U.updateState().applying}`);
   U.updateState().applyAt = Date.now() - 4000; // …and nothing happened for a while
   $('#nav-update').click(); await wait(30);
-  check('a tap after a switch that never came back tries again', reloads === 5, String(reloads));
+  check('a tap after a switch that never came back tries again', reloads === 6, String(reloads));
   // The worker that was waiting was replaced by the next release: the one waiting now is asked instead.
   U.__resetUpdates(); posted.length = 0;
   const reply = (ports, v) => { if (ports && ports[0]) ports[0].postMessage({ version: v, min: 'v1' }); };
@@ -1905,7 +1914,7 @@ async function updates(check) {
   const now = { postMessage: (m, ports) => { posted.push(`new:${m.type}`); if (m.type === 'INFO') reply(ports, 'v100'); } };
   U.updateState().reg = { waiting: now, update: async () => {} };
   U.onWaiting(gone); await wait(30);
-  check('a superseded worker is skipped: the one waiting now is asked', U.tryApply('navigate') && posted.includes('new:SKIP_WAITING') && !posted.includes('old:SKIP_WAITING') && reloads === 6, `${posted} ${reloads}`);
+  check('a superseded worker is skipped: the one waiting now is asked', U.tryApply('navigate') && posted.includes('new:SKIP_WAITING') && !posted.includes('old:SKIP_WAITING') && reloads === 7, `${posted} ${reloads}`);
   U.updateState().reg = null;
   U.__resetUpdates(); window.__reload = undefined; try { sessionStorage.removeItem('todo.resume'); } catch { /* ignore */ }
 }
@@ -3035,6 +3044,7 @@ async function mindSweep(check) {
   const hinge = T().tasks.find((x) => x.title === 'Order the gate hinges');
   check('#project and @tag in the sweep box: filed in that project with the tag, not in the Inbox, and the list says where', !!hinge && !hinge.in_inbox && hinge.project_id === proj.id && T().task_tags.some((l) => l.task_id === hinge.id && l.tag_id === 'g1') && has('.sweep-caps', 'order the gate hinges', proj.name.toLowerCase(), '@laptop'), `${hinge && hinge.project_id} · ${text('.sweep-caps')}`);
   check('the hint under the box says what the line can carry', has('.sweep-hint', '#project', '@tag', 'why it matters'), text('.sweep-hint'));
+  check('the box tells password managers it is not a sign-in field (the Inbox box too)', inp().hasAttribute('data-bwignore') && inp().hasAttribute('data-1p-ignore') && inp().getAttribute('data-lpignore') === 'true' && (await (async () => { await go('#inbox'); const i = $('[data-capture] input'); return i && i.hasAttribute('data-bwignore'); })()));
 }
 
 // Someday/Maybe: categories, activate, revisit, drop, on-hold projects.

@@ -14,22 +14,27 @@ import { app, $, toast, inflight } from './state.js';
 const CHECK_EVERY = 30 * 60000; // quietly ask for a new version
 const NAV_CHECK_GAP = 5 * 60000; // on screen changes, at most this often
 const IDLE = 60000; // a minute with nothing happening
+const ASKED_FOR = 60000; // after Refresh or Check for updates, a worker that lands within this long is switched to at once
 const RESUME_KEY = 'todo.resume';
 const num = (v) => Number(String(v || '').replace(/^v/, '')) || 0;
 
 // page: the version this page runs (the worker that served it, asked at load), which a newer worker taking
 // over later doesn't change; ctl: a stand-in worker for tests.
-const U = { reg: null, waiting: null, force: false, applying: false, applyAt: 0, watch: null, lastCheck: 0, lastInput: Date.now(), controllerChanged: false, hadController: false, page: null, ctl: null };
+const U = { reg: null, waiting: null, force: false, applying: false, applyAt: 0, watch: null, lastCheck: 0, askedAt: 0, lastInput: Date.now(), controllerChanged: false, hadController: false, page: null, ctl: null };
 export const updateState = () => U;
 
 // ---------- is it safe right now? ----------
+// Typing = a field with focus and something in it. An empty box with focus loses nothing to a reload, and pages
+// that focus their box after every draw (the mind sweep, Process Inbox) would otherwise never take an update,
+// not even from Refresh, which redraws the page before it looks (v166).
 const typing = () => {
   const el = document.activeElement;
   if (!el || el === document.body) return false;
   if (!el.getClientRects().length) return false; // focus left behind in a closed sheet
-  if (el.isContentEditable) return true;
+  if (el.isContentEditable) return !!el.textContent.trim();
   if (!/INPUT|TEXTAREA|SELECT/.test(el.tagName)) return false;
-  return !['checkbox', 'radio', 'button', 'submit'].includes(el.type);
+  if (['checkbox', 'radio', 'button', 'submit'].includes(el.type)) return false;
+  return el.tagName === 'SELECT' || el.value !== '';
 };
 const sheetOpen = () => ['#sheet', '#sheet2'].some((s) => { const d = $(s); return d && d.open; });
 const panelDirty = () => { const st = $('#inspector .save-state'); return !!st && /Editing|Saving/.test(st.textContent); };
@@ -137,7 +142,10 @@ export function onWaiting(worker) {
       U.force = true;
       toast('An important update is ready: switching in a moment');
     }
-    if (U.force || Date.now() - U.lastInput > 15000) tryApply('ready'); // not while you're mid-click
+    // The user asked (Refresh, Check for updates) within the last minute: the download outlasted the check, and the
+    // switch they asked for follows now. Otherwise not while they're mid-click.
+    const asked = Date.now() - U.askedAt < ASKED_FOR;
+    if (U.force || asked || Date.now() - U.lastInput > 15000) tryApply(U.force ? 'forced' : asked ? 'manual' : 'ready');
   });
 }
 
@@ -148,7 +156,7 @@ function check() {
 }
 
 // Settings → App → Check for updates: ask right now and, if a new version is there, switch right away.
-// → { version, result: 'updated' | 'waiting' | 'up_to_date' | 'unavailable' }
+// → { version, result: 'updated' | 'waiting' | 'installing' | 'up_to_date' | 'unavailable' }
 export async function checkNow() {
   const cur = await ask(controller());
   const version = U.page || app.appVersion || (cur && cur.version) || null; // what this page runs, not the worker
@@ -156,11 +164,13 @@ export async function checkNow() {
   const apply = () => ({ version, result: tryApply('manual') ? 'updated' : 'waiting' });
   if (U.waiting || U.controllerChanged) return apply();
   if (!U.reg) return { version, result: 'unavailable' };
-  U.lastCheck = Date.now();
+  U.lastCheck = Date.now(); U.askedAt = Date.now();
   try { await U.reg.update(); } catch { return { version, result: 'unavailable' }; }
-  // A new worker installs in the background; give it a few seconds to reach "waiting".
+  // A new worker installs in the background; give it a few seconds to reach "waiting". A slow download that
+  // outlasts the wait still switches when it lands (onWaiting, within ASKED_FOR): 'installing' says so.
   const found = await new Promise((res) => { const t0 = Date.now(); const tick = () => { if (U.waiting) return res(true); if (Date.now() - t0 > 8000) return res(false); setTimeout(tick, 150); }; tick(); });
-  return found ? apply() : { version, result: 'up_to_date' };
+  if (found) return apply();
+  return { version, result: U.reg.installing ? 'installing' : 'up_to_date' };
 }
 
 // The version in the sidebar footer: what the worker says it is; with no worker (localhost, a first
@@ -221,6 +231,6 @@ export function initUpdates({ importBusy } = {}) {
 // Tests only: start over (dev/smoke.js).
 export function __resetUpdates() {
   clearTimeout(U.watch);
-  Object.assign(U, { waiting: null, force: false, applying: false, applyAt: 0, watch: null, controllerChanged: false, reason: null, lastInput: Date.now(), ctl: null });
+  Object.assign(U, { waiting: null, force: false, applying: false, applyAt: 0, watch: null, askedAt: 0, controllerChanged: false, reason: null, lastInput: Date.now(), ctl: null });
   hideReady();
 }

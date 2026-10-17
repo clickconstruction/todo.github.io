@@ -276,7 +276,7 @@ export function renderTaskInspector(container, task) {
 export function openQuickEntry(opts = {}) {
   const sheet = openSheet(`<form method="dialog" id="quick">
     <h2>${esc(opts.heading || 'Capture to Inbox')}</h2>
-    <div class="qe-title"><input type="text" name="title" placeholder="What's on your mind?" autocomplete="off" enterkeyhint="next">
+    <div class="qe-title"><input type="text" name="title" placeholder="What's on your mind?" autocomplete="off" enterkeyhint="next" data-bwignore data-1p-ignore data-lpignore="true">
       <select name="qe_project" class="qe-select" data-create="project" aria-hidden="true" tabindex="-1"><option value=""></option>${db.projects.filter((p) => p.status === 'active' || p.status === 'on_hold').sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
     <div class="qe-chips" data-qe-chips></div>
     <label class="gain-quick"><span class="gain-label"><span aria-hidden="true">✦</span> What do I gain?</span>

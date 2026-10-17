@@ -57,6 +57,8 @@ const AFTER = { horizons: (sub, id) => sub === 'tree' && id !== 'review' && draw
 // Detail views highlight their parent tab.
 const TAB_FOR = { project: 'projects', tag: 'tags', places: 'nearby', alerts: 'nearby', import: 'settings', template: 'projects', clarify: 'inbox', person: 'waiting', review: 'weekly', sweep: 'inbox', area: 'horizons', goal: 'horizons', plan: 'projects', checklist: 'checklists', settle: 'settings' };
 
+export const noFill = (i) => { i.setAttribute('data-bwignore', ''); i.setAttribute('data-1p-ignore', ''); i.setAttribute('data-lpignore', 'true'); };
+
 export function render() {
   if (location.hash === '#today') { history.replaceState(null, '', '#forecast'); } // old links
   // #task/<id> (from a notification): show the action in its list and open it.
@@ -75,6 +77,9 @@ export function render() {
   const banner = focused ? `<div class="focus-banner" role="status"><span>🎯 Focused on <b>${esc(focusLabel())}</b></span>
     <span><button class="link-btn" data-act="focus">Change</button><button class="link-btn" data-act="unfocus">Unfocus</button></span></div>` : '';
   $('#view').innerHTML = banner + html;
+  // No capture box is a sign-in field: password managers take a lone text box in a form for a username (one offered
+  // the saved login in the mind sweep), and each reads its own attribute to leave a field alone.
+  $('#view').querySelectorAll('form.capture input[type="text"]').forEach(noFill);
   document.body.classList.toggle('fr-mode', view === 'full'); // Full Review: one card, nothing else
   document.body.classList.toggle('sheets-view', view === 'sheets'); // printing: the sheets and nothing else
   document.body.classList.toggle('wide-view', view === 'horizons' && args[0] === 'tree' && args[1] !== 'review'); // the tech tree runs wide

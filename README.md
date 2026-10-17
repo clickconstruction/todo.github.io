@@ -109,7 +109,7 @@ python3 dev/sbq.py supabase/tests/dailies.sql
 
 ## Deploying
 
-- **The app** deploys when you push to `main` (GitHub Pages). Bump `VERSION` in `sw.js` whenever a shell file changes, or phones keep the old cached copy. The version a device runs shows at the foot of the sidebar, next to **Refresh**, which reads everything again and switches to a new version at once if one is ready. A switch that stalls (the tab was asleep, or two releases came minutes apart) sorts itself out within a few seconds, and a tap on **Update ready · Reload** or **Refresh** always tries again.
+- **The app** deploys when you push to `main` (GitHub Pages). Bump `VERSION` in `sw.js` whenever a shell file changes, or phones keep the old cached copy. The version a device runs shows at the foot of the sidebar, next to **Refresh**, which reads everything again, asks for a new version and switches to it as soon as it is in (a page whose box has focus but nothing typed no longer holds it back; a download that outlasts the check switches when it lands). A switch that stalls (the tab was asleep, or two releases came minutes apart) sorts itself out within a few seconds, and a tap on **Update ready · Reload** or **Refresh** always tries again.
 - **The MCP server:**
 
   ```bash

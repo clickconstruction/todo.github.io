@@ -115,7 +115,7 @@ const ACTIONS = {
       await keepSession(sb); await flushOutbox(); await loadAll(); render();
       const r = await checkNow();
       if (r.version) { app.appVersion = r.version; showVersion(); }
-      toast(r.result === 'updated' ? 'Refreshed · updating…' : r.result === 'waiting' ? 'Refreshed · an update is ready and switches in a moment' : `Refreshed${r.version ? ` · ${r.version}` : ''}`);
+      toast(r.result === 'updated' ? 'Refreshed · updating…' : r.result === 'waiting' ? 'Refreshed · an update is ready and switches in a moment' : r.result === 'installing' ? 'Refreshed · an update is downloading and switches when it’s in' : `Refreshed${r.version ? ` · ${r.version}` : ''}`);
     } finally { const b2 = $('[data-act="refresh"]'); if (b2) b2.classList.remove('busy'); }
   },
   'check-updates': async () => {
@@ -123,7 +123,7 @@ const ACTIONS = {
     const r = await checkNow();
     app.updateChecking = false;
     if (r.version) app.appVersion = r.version;
-    app.updateNote = { updated: 'Updating…', waiting: 'Update ready: it switches as soon as this is saved', up_to_date: `You’re on the latest version${r.version ? ` (${r.version})` : ''}`, unavailable: 'Updates aren’t available here (no service worker)' }[r.result];
+    app.updateNote = { updated: 'Updating…', waiting: 'Update ready: it switches as soon as this is saved', installing: 'An update is downloading: it switches when it’s in', up_to_date: `You’re on the latest version${r.version ? ` (${r.version})` : ''}`, unavailable: 'Updates aren’t available here (no service worker)' }[r.result];
     render();
   },
   'new-token': createToken,
