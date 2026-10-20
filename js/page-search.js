@@ -11,7 +11,7 @@ import { app, $, esc } from './state.js';
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 import { searchResultsHtml, searchCount, searchServer } from './views/search.js';
 
-const ROWS = 'li.row, .group-row, .dv-row, .six-row, .six-now, .persp-row, .tl-row, .rd-row, .cal-row';
+const ROWS = 'li.row, .group-row, .dv-row, .six-row, .six-now, .persp-row, .tl-row, .rd-row, .cal-row, li.cal-event';
 const ROWS_SHOWN = ROWS.split(', ').map((s) => `${s}:not(.ps-hide)`).join(', ');
 const HEADS = '.section-title, .po-group';
 const KEEP = '.focus-banner, .view-head, .ps-line, .ps-empty, #ps-results';

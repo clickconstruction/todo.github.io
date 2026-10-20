@@ -3650,6 +3650,15 @@ async function pageSearch(check) {
   await go('#inbox'); const t13 = T().tasks.find((t) => t.id === 't13');
   await type('telescope'); const { render } = await import('/js/router.js'); render(); await wait(40);
   check('a redraw under it keeps what was typed and the filter', input().value === 'telescope' && shown().length === 1 && has('.ps-line', 'this page · 1'));
+  // Event rows are page rows too: the Events page thins in place instead of jumping to Everything (v167).
+  const soon = (h) => new Date(Date.now() + h * 3600000).toISOString();
+  T().events.push(
+    { id: 'evPS1', user_id: 'u1', title: '✈ Wings Over Houston Airshow', location: 'Ellington Airport', notes: '', all_day: false, starts_at: soon(24), ends_at: soon(25), archived_at: null, created_at: now, updated_at: now },
+    { id: 'evPS2', user_id: 'u1', title: 'Dentist appointment', location: '', notes: '', all_day: false, starts_at: soon(48), ends_at: soon(49), archived_at: null, created_at: now, updated_at: now },
+  );
+  await loadAll(); await go('#events');
+  await type('✈');
+  check('event rows filter in place on the Events page', $$('#view li.cal-event:not(.ps-hide)').length === 1 && has('#view li.cal-event:not(.ps-hide)', 'wings over houston') && $$('#view li.cal-event.ps-hide').length === 1 && has('.ps-line', 'this page · 1') && !$('#ps-results'), text('.ps-line'));
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   app.pageSearch = null; await go('#inbox');
   void t13;
