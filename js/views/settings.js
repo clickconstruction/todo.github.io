@@ -51,7 +51,8 @@ export function viewSettings() {
   const kept = savedTokens();
   const rows = (apiTokens || []).filter((t) => !['capture', 'feed'].includes(t.scope)).map((t) => {
     const agent = !t.scope || t.scope === 'full'; // a location key is copied from Nearby → Alerts
-    return `<li class="row" style="cursor:default">
+    const hint = !agent ? 'Location keys are set up from Nearby → Alerts' : kept[t.id] ? 'Copy the token again' : 'Copy the setup command (without the token: this browser doesn’t have it)';
+    return `<li class="row" data-token-row="${t.id}" title="${hint}">
       <div class="row-main"><div class="row-title">${esc(t.name)} <span class="chip">…${esc(t.token_hint)}</span>${t.scope === 'geo' ? ' <span class="chip">📍 Location alerts only</span>' : ''}</div>
       <div class="row-meta"><span>Created ${esc(fmtDate(t.created_at))}</span><span>${t.last_used_at ? `Last used ${esc(fmtDate(t.last_used_at))}` : 'Never used'}</span>${agent && !kept[t.id] ? '<span>Not saved in this browser</span>' : ''}</div></div>
       ${agent && kept[t.id] ? `<button class="btn small" data-copy-token="${t.id}">Copy again</button>` : ''}<button class="btn small danger" data-revoke="${t.id}">Revoke</button></li>`;
@@ -107,9 +108,32 @@ export async function createToken() {
   showTokenSheet('Token created', kept ? 'Copy it now. It stays in this browser, so Settings can show it again here if a connection drops; nowhere else has it.' : 'Copy it now. It won’t be shown again: this browser can’t keep it (private mode).', token);
 }
 
+const setupCommand = (token) => `claude mcp add --transport http --scope user todotooling ${MCP_URL} --header "Authorization: Bearer ${token}"`;
+
+// A click on a token's row: the token again when this browser holds it (behind the warning); otherwise the
+// setup command with <token> left to fill in, since no other browser has the token, and a toast that says so.
+export async function tokenRow(id) {
+  const t = (apiTokens || []).find((x) => x.id === id);
+  if (!t) return;
+  if (t.scope === 'geo') { toast('Location keys are set up from Nearby → Alerts.'); return; }
+  if (savedTokens()[id]) { copyTokenAgain(id); return; }
+  const cmd = setupCommand('<token>');
+  const why = `…${t.token_hint} isn’t saved in this browser. Put the token in place of <token>, or make a new one.`;
+  try { await navigator.clipboard.writeText(cmd); } catch {
+    // No clipboard (not allowed, or no gesture): the command in a sheet to copy by hand.
+    const sheet = openSheet(`<form method="dialog"><h2>Setup command</h2>
+      <p class="view-sub" style="margin:0">Without the token: ${esc(why)}</p>
+      <label>Claude Code command<textarea readonly rows="4" onclick="this.select()">${esc(cmd)}</textarea></label>
+      <div class="actions"><div class="right"><button class="btn primary">Done</button></div></div></form>`);
+    sheet.showModal();
+    return;
+  }
+  toast(`Setup command copied, without the token: ${why}`, { label: 'Create token', run: createToken });
+}
+
 // The token and the command that connects Claude Code with it: at creation, and again from "Copy again".
 function showTokenSheet(title, intro, token) {
-  const cmd = `claude mcp add --transport http --scope user todotooling ${MCP_URL} --header "Authorization: Bearer ${token}"`;
+  const cmd = setupCommand(token);
   const sheet = openSheet(`<form method="dialog">
     <h2>${esc(title)}</h2>
     <p class="view-sub" style="margin:0">${esc(intro)}</p>

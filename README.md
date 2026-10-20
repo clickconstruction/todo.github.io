@@ -51,7 +51,7 @@ A GTD (Getting Things Done) to-do app at **[todotooling.com](https://todotooling
    `--scope user` makes Todo Tooling available in every folder on that account.
 3. Start a Claude Code chat and ask it what's in your Inbox.
 
-Make one token per computer, so you can revoke each on its own. The token stays in the browser you made it in, so Settings can show it again there (**Copy again**, behind a warning) when a connection drops and the same computer needs the same token; any other browser or device never has it, so there make a new one and revoke the old one.
+Make one token per computer, so you can revoke each on its own. The token stays in the browser you made it in, so Settings can show it again there (**Copy again**, behind a warning) when a connection drops and the same computer needs the same token; any other browser or device never has it, so there make a new one and revoke the old one. A click on a token's row copies its setup command: with the token when this browser holds it (behind the same warning), otherwise with `<token>` left to fill in, and a toast says which.
 
 To pick up a Full Review on another computer, open the review in the app, copy the prompt it offers, and paste it into a new chat there.
 

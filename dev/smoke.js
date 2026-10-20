@@ -2660,6 +2660,9 @@ async function captureAnywhere(check) {
   check('the token is kept in this browser, hashed on the server', made && kept[made.id] && kept[made.id].startsWith('tt_') && $('#sheet textarea').value === kept[made.id] && !JSON.stringify(made).includes(kept[made.id]) && has('#sheet', 'show it again here'));
   $('#sheet').close(); await wait(300);
   check('its row offers Copy again', !!$(`[data-copy-token="${made.id}"]`) && !has(undefined, 'not saved in this browser'));
+  $(`[data-token-row="${made.id}"] .row-title`).click(); await wait(80);
+  check('a click on the row is Copy again too', $('#sheet').open && has('#sheet', 'copy this token again'));
+  $('#sheet').close(); await wait(300);
   $(`[data-copy-token="${made.id}"]`).click(); await wait(80);
   check('Copy again warns first and names the token, without showing it', $('#sheet').open && has('#sheet', 'copy this token again', 'revoke it and create a new token', 'grace-macbookpro') && !$('#sheet textarea'));
   $('#sheet [data-show]').click(); await wait(80);
@@ -2667,6 +2670,16 @@ async function captureAnywhere(check) {
   $('#sheet').close(); await wait(300);
   localStorage.removeItem('todo.tokens'); (await import('/js/state.js')).app.render(); await wait(80);
   check('a token this browser doesn’t hold says so, with no Copy again', !$(`[data-copy-token="${made.id}"]`) && has(undefined, 'grace-macbookpro', 'not saved in this browser'));
+  let clipped = ''; const hadClip = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (x) => { clipped = x; } } });
+  $(`[data-token-row="${made.id}"] .row-title`).click(); await wait(150);
+  check('a click on that row copies the setup command with <token> to fill in, and the toast says so', clipped.startsWith('claude mcp add') && clipped.includes('Bearer <token>') && !clipped.includes('tt_') && has('#toast', 'without the token', 'saved in this browser') && !!$('#toast button') && /create token/i.test($('#toast button').textContent), clipped + ' | ' + text('#toast'));
+  // No clipboard (refused, or no gesture): the command comes up in a sheet to copy by hand.
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('NotAllowedError'); } } });
+  $(`[data-token-row="${made.id}"] .row-title`).click(); await wait(150);
+  check('without a clipboard, the command is shown in a sheet instead', $('#sheet').open && has('#sheet', 'setup command', 'without the token', 'saved in this browser') && $('#sheet textarea').value.includes('Bearer <token>'));
+  $('#sheet').close(); await wait(300);
+  if (hadClip) Object.defineProperty(navigator, 'clipboard', hadClip); else delete navigator.clipboard;
   localStorage.setItem('todo.tokens', JSON.stringify(kept));
   $(`[data-revoke="${made.id}"]`).click();
   for (let i = 0; i < 20 && T().api_tokens.some((t) => t.id === made.id); i++) await wait(100);
