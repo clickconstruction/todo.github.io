@@ -39,7 +39,7 @@ async function reload() {
   (await import('/js/alerts.js')).resetAlertState();
   window.__geo = { state: 'prompt', position: { lat: 29.7610, lng: -95.3705, accuracy: 20 } }; // ~400 ft from mock Home Depot
   try { localStorage.removeItem('todo.nav.collapsed'); } catch { /* ignore */ }
-  try { ['todo.here', 'todo.nearby.within', 'todo.geo.alerts', 'todo.geo.key', 'todo.geo.done', 'todo.alerts.nudge', 'todo.alerts.seen'].forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ }
+  try { ['todo.here', 'todo.nearby.within', 'todo.geo.alerts', 'todo.geo.key', 'todo.geo.done', 'todo.alerts.nudge', 'todo.alerts.seen', 'todo.tokens'].forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ }
   const { setFilter } = await import('/js/filter.js');
   setFilter({ show: 'remaining', fits: 0, energy: '' });
   const [{ loadAll }, { render }] = await Promise.all([import('/js/data.js'), import('/js/router.js')]);
@@ -2654,7 +2654,24 @@ async function captureAnywhere(check) {
   $('[data-act="new-token"]').click(); await answer('  grace-macbookpro ');
   for (let i = 0; i < 20 && !$('#sheet').open; i++) await wait(100);
   check('a named token is saved (trimmed) and shown once with its command', T().api_tokens.some((t) => t.name === 'grace-macbookpro' && !t.scope) && has('#sheet', 'token created', 'claude code command') && $$('#sheet textarea')[1].value.startsWith('claude mcp add'));
+  // Copy again: the plaintext stays in this browser only, and comes back behind a warning.
+  const made = T().api_tokens.find((t) => t.name === 'grace-macbookpro');
+  const kept = JSON.parse(localStorage.getItem('todo.tokens') || '{}');
+  check('the token is kept in this browser, hashed on the server', made && kept[made.id] && kept[made.id].startsWith('tt_') && $('#sheet textarea').value === kept[made.id] && !JSON.stringify(made).includes(kept[made.id]) && has('#sheet', 'show it again here'));
   $('#sheet').close(); await wait(300);
+  check('its row offers Copy again', !!$(`[data-copy-token="${made.id}"]`) && !has(undefined, 'not saved in this browser'));
+  $(`[data-copy-token="${made.id}"]`).click(); await wait(80);
+  check('Copy again warns first and names the token, without showing it', $('#sheet').open && has('#sheet', 'copy this token again', 'revoke it and create a new token', 'grace-macbookpro') && !$('#sheet textarea'));
+  $('#sheet [data-show]').click(); await wait(80);
+  check('then shows the same token and its command', $('#sheet').open && has('#sheet', 'token, again') && $('#sheet textarea').value === kept[made.id] && $$('#sheet textarea')[1].value.includes(kept[made.id]) && $$('#sheet [data-copy-value]').length === 2);
+  $('#sheet').close(); await wait(300);
+  localStorage.removeItem('todo.tokens'); (await import('/js/state.js')).app.render(); await wait(80);
+  check('a token this browser doesn’t hold says so, with no Copy again', !$(`[data-copy-token="${made.id}"]`) && has(undefined, 'grace-macbookpro', 'not saved in this browser'));
+  localStorage.setItem('todo.tokens', JSON.stringify(kept));
+  $(`[data-revoke="${made.id}"]`).click();
+  for (let i = 0; i < 20 && T().api_tokens.some((t) => t.id === made.id); i++) await wait(100);
+  await wait(150);
+  check('Revoke removes the token and the copy this browser kept', !T().api_tokens.some((t) => t.id === made.id) && !JSON.parse(localStorage.getItem('todo.tokens') || '{}')[made.id] && !has(undefined, 'grace-macbookpro'));
   $('[data-act="new-capture-key"]').click(); await wait(80);
   check('a capture key is named in the app’s own sheet, with this device filled in', $('#sheet2').open && has('#sheet2', 'which device is this key for') && ['iPhone', 'iPad'].includes($('#sheet2 [name=answer]').value));
   await answer('iPhone');

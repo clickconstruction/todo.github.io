@@ -50,7 +50,7 @@ import { matrixAction, matrixChange } from './views/matrix.js';
 import { keepSession, signedIn, markSignedOutOnPurpose, lastEmail, signInNotice } from './session.js';
 import { importBusy } from './views/import.js';
 import { newFeedLink } from './views/settings.js';
-import { createToken, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
+import { createToken, copyTokenAgain, revokeToken, removeSender, addSender, resetSettings, pushTestNow, pushTestLater, removeDevice } from './views/settings.js';
 import { requestLocation, startWatching, onLocation } from './geo.js';
 import { enableAlerts } from './alerts.js';
 import { subscribePush, testAlert, copyGeoUrl, resetAlerts, turnOnAlerts, replaceGeoKey, openAutomationGuide, hideNudge, primeAlerts, isIOS, isStandalone } from './views/alerts.js';
@@ -247,6 +247,7 @@ const CLICKS = [
   ['[data-edit-project]', (el) => (isWide() ? select('project', el.dataset.editProject) : openProjectEditor(byId(db.projects, el.dataset.editProject)))],
   ['[data-remove-device]', (el) => removeDevice(el.dataset.removeDevice)],
   ['[data-remove-sender]', (el) => removeSender(el.dataset.removeSender)],
+  ['[data-copy-token]', (el) => copyTokenAgain(el.dataset.copyToken)],
   ['[data-revoke]', (el) => revokeToken(el.dataset.revoke)],
   ['[data-done-task]', (el) => inspectOrEdit(el.dataset.doneTask)],
   ['[data-task]', (el) => inspectOrEdit(el.dataset.task)],

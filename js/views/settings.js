@@ -12,6 +12,16 @@ import { openFolderUrl } from '../folders.js';
 
 const MCP_URL = 'https://mcp.todotooling.com/mcp';
 const CAPTURE_EMAIL = 'inbox@todotooling.com';
+// The server holds only a hash of each agent token. The plaintext is kept in this browser (like the location
+// key, todo.geo.key), so the row's "Copy again" can show it here, behind a warning, when a connection drops
+// and the same computer needs the same token; no other browser or device has it. Revoking drops the copy,
+// and loading the list drops copies of tokens that are gone.
+const TOKEN_STORE = 'todo.tokens';
+const savedTokens = () => { try { return JSON.parse(localStorage.getItem(TOKEN_STORE) || '{}') || {}; } catch { return {}; } };
+const saveTokens = (m) => { try { localStorage.setItem(TOKEN_STORE, JSON.stringify(m)); return true; } catch { return false; } };
+const rememberToken = (id, token) => saveTokens({ ...savedTokens(), [id]: token });
+const forgetToken = (id) => { const m = savedTokens(); if (id in m) { delete m[id]; saveTokens(m); } };
+const forgetGone = (ids) => { const m = savedTokens(); const gone = Object.keys(m).filter((id) => !ids.includes(id)); if (gone.length) { gone.forEach((id) => delete m[id]); saveTokens(m); } };
 let apiTokens = null;
 let emailSenders = [];
 let devices = [];
@@ -32,15 +42,20 @@ async function loadSettings() {
       run(sb.from('push_log').select('*').order('created_at', { ascending: false }).limit(25)),
     ]);
   } finally { loading = false; }
+  forgetGone((apiTokens || []).map((t) => t.id));
   app.render();
 }
 
 export function viewSettings() {
   if (apiTokens === null) loadSettings();
-  const rows = (apiTokens || []).filter((t) => !['capture', 'feed'].includes(t.scope)).map((t) => `<li class="row" style="cursor:default">
+  const kept = savedTokens();
+  const rows = (apiTokens || []).filter((t) => !['capture', 'feed'].includes(t.scope)).map((t) => {
+    const agent = !t.scope || t.scope === 'full'; // a location key is copied from Nearby → Alerts
+    return `<li class="row" style="cursor:default">
       <div class="row-main"><div class="row-title">${esc(t.name)} <span class="chip">…${esc(t.token_hint)}</span>${t.scope === 'geo' ? ' <span class="chip">📍 Location alerts only</span>' : ''}</div>
-      <div class="row-meta"><span>Created ${esc(fmtDate(t.created_at))}</span><span>${t.last_used_at ? `Last used ${esc(fmtDate(t.last_used_at))}` : 'Never used'}</span></div></div>
-      <button class="btn small danger" data-revoke="${t.id}">Revoke</button></li>`).join('');
+      <div class="row-meta"><span>Created ${esc(fmtDate(t.created_at))}</span><span>${t.last_used_at ? `Last used ${esc(fmtDate(t.last_used_at))}` : 'Never used'}</span>${agent && !kept[t.id] ? '<span>Not saved in this browser</span>' : ''}</div></div>
+      ${agent && kept[t.id] ? `<button class="btn small" data-copy-token="${t.id}">Copy again</button>` : ''}<button class="btn small danger" data-revoke="${t.id}">Revoke</button></li>`;
+  }).join('');
   return `<div class="view-head"><h1>Settings</h1></div>
     <p class="view-sub">Signed in as ${esc(app.user.email)}</p>
     <nav class="set-index" aria-label="Settings sections">${[['Sidebar', 'Sidebar'], ['Agents', 'Agent access'], ['Notifications', 'Notifications'], ['Email', 'Email capture'], ['Dates', 'Dates'], ['Reviews', 'Weekly and daily'], ['Calendars', 'Calendars'], ['Keyboard', 'Keyboard'], ['Folders', 'Folders on your Mac'], ['Import', 'Import'], ['App', 'App'], ['Account', 'Account']]
@@ -49,7 +64,7 @@ export function viewSettings() {
     <p class="view-sub" style="margin-bottom:8px">Hide views you don’t use, order each group, and pin perspectives to Do.</p>
     <button class="btn" data-act="customize-sidebar">Customize sidebar</button>
     <h2 class="section-title">Agent access (MCP)</h2>
-    <p class="view-sub">Tokens let AI agents like Claude read and update your todos through <code>${MCP_URL}</code>. Agent tokens have full access to your account; location keys (from Nearby → Alerts) can only trigger alerts. Revoke any you no longer use.</p>
+    <p class="view-sub">Tokens let AI agents like Claude read and update your todos through <code>${MCP_URL}</code>. Agent tokens have full access to your account; location keys (from Nearby → Alerts) can only trigger alerts. Revoke any you no longer use. A token stays in the browser it was made in, so if a connection drops you can copy it again here; anywhere else, make a new one.</p>
     <button class="btn primary" data-act="new-token">Create token</button>
     ${apiTokens === null ? '<p class="empty">Loading…</p>' : rows ? `<ul class="list" style="margin-top:12px">${rows}</ul>` : '<p class="empty">No tokens yet.</p>'}
     ${notificationsSection()}
@@ -86,18 +101,39 @@ export async function createToken() {
   const token = 'tt_' + btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
   const token_hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  await run(sb.from('api_tokens').insert({ name: name.trim(), token_hash, token_hint: token.slice(-4) }));
+  const [row] = await run(sb.from('api_tokens').insert({ name: name.trim(), token_hash, token_hint: token.slice(-4) }).select());
+  const kept = !!(row && row.id) && rememberToken(row.id, token);
   await loadSettings();
+  showTokenSheet('Token created', kept ? 'Copy it now. It stays in this browser, so Settings can show it again here if a connection drops; nowhere else has it.' : 'Copy it now. It won’t be shown again: this browser can’t keep it (private mode).', token);
+}
+
+// The token and the command that connects Claude Code with it: at creation, and again from "Copy again".
+function showTokenSheet(title, intro, token) {
   const cmd = `claude mcp add --transport http --scope user todotooling ${MCP_URL} --header "Authorization: Bearer ${token}"`;
   const sheet = openSheet(`<form method="dialog">
-    <h2>Token created</h2>
-    <p class="view-sub" style="margin:0">Copy it now. It won't be shown again.</p>
+    <h2>${esc(title)}</h2>
+    <p class="view-sub" style="margin:0">${esc(intro)}</p>
     <label>Token<textarea readonly rows="2" onclick="this.select()">${esc(token)}</textarea></label>
     <label>Claude Code command<textarea readonly rows="4" onclick="this.select()">${esc(cmd)}</textarea></label>
     <p class="hint" style="margin:0">Paste this in Terminal on the computer you'll use Claude on. It connects Todo Tooling in every folder there.</p>
-    <div class="actions"><div class="right"><button type="button" class="btn" data-copy>Copy command</button><button class="btn primary">Done</button></div></div>
+    <div class="actions"><div class="right"><button type="button" class="btn" data-copy-value="${esc(token)}">Copy token</button><button type="button" class="btn" data-copy-value="${esc(cmd)}">Copy command</button><button class="btn primary">Done</button></div></div>
   </form>`);
-  $('[data-copy]', sheet).onclick = async () => { await navigator.clipboard.writeText(cmd); toast('Copied'); };
+  sheet.querySelectorAll('[data-copy-value]').forEach((b) => { b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copyValue); toast('Copied'); } catch { toast('Couldn’t copy'); } }; });
+  if (!sheet.open) sheet.showModal();
+}
+
+// "Copy again": the token this browser kept, behind a warning. Only the browser that made a token has it.
+export async function copyTokenAgain(id) {
+  const t = (apiTokens || []).find((x) => x.id === id);
+  const token = savedTokens()[id];
+  if (!t || !token) { toast('This token isn’t saved in this browser. Revoke it and create a new one.'); app.render(); return; }
+  const sheet = openSheet(`<form method="dialog">
+    <h2>Copy this token again?</h2>
+    <p class="persp-warning">Usually, don’t. This token has full access to your account, and whatever you paste it into keeps it. Copy it again only to reconnect the computer it was made for, say when Claude’s connection to Todo Tooling drops. If it may have leaked, or you’re setting up another computer, revoke it and create a new token instead.</p>
+    <p class="view-sub" style="margin:0">${esc(t.name)} <span class="chip">…${esc(t.token_hint)}</span> · ${t.last_used_at ? `last used ${esc(fmtDate(t.last_used_at))}` : 'never used'}</p>
+    <div class="actions"><div class="right"><button class="btn">Cancel</button><button type="button" class="btn primary" data-show>Show the token</button></div></div>
+  </form>`);
+  $('[data-show]', sheet).onclick = () => showTokenSheet('Token, again', `${t.name}: the same token as before. Paste it where the connection dropped.`, token);
   sheet.showModal();
 }
 
@@ -107,6 +143,7 @@ export const captureGuide = () => openCaptureGuide(null);
 export async function revokeToken(id) {
   if (!confirm('Revoke this token? Agents using it will lose access immediately.')) return;
   await run(sb.from('api_tokens').delete().eq('id', id));
+  forgetToken(id);
   await loadSettings();
 }
 
